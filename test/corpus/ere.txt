@@ -760,3 +760,78 @@ BEGIN { print /\#[\#][[.#.]][[=#=]]/ }
                                                   (collating_element))))))))))))))))))))))))
     (terminator
       (newline))))
+
+==================
+range expressions end at a hyphen anywhere in the list
+==================
+
+BEGIN { print /[%--@][a---][^--@]/ }
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (ere
+                            (extended_reg_exp
+                              (ere_branch
+                                (ere_branch
+                                  (ere_branch
+                                    (ere_expression
+                                      (one_char_or_coll_elem_ere
+                                        (bracket_expression
+                                          (matching_list
+                                            (bracket_list
+                                              (follow_list
+                                                (follow_list
+                                                  (expression_term
+                                                    (range_expression
+                                                      (start_range
+                                                        (end_range
+                                                          (collating_element))))))
+                                                (expression_term
+                                                  (single_expression
+                                                    (end_range
+                                                      (collating_element)))))))))))
+                                  (ere_expression
+                                    (one_char_or_coll_elem_ere
+                                      (bracket_expression
+                                        (matching_list
+                                          (bracket_list
+                                            (follow_list
+                                              (expression_term
+                                                (range_expression
+                                                  (start_range
+                                                    (end_range
+                                                      (collating_element))))))))))))
+                                (ere_expression
+                                  (one_char_or_coll_elem_ere
+                                    (bracket_expression
+                                      (nonmatching_list
+                                        (bracket_list
+                                          (follow_list
+                                            (expression_term
+                                              (range_expression
+                                                (start_range
+                                                  (end_range
+                                                    (collating_element)))
+                                                (end_range
+                                                  (collating_element))))))))))))))))))))))))
+    (terminator
+      (newline))))

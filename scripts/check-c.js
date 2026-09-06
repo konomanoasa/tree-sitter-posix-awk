@@ -13,11 +13,10 @@ const cFiles = [
   path.join(repositoryDirectory, "test", "scanner.test.c"),
 ];
 
-function run(command, args, options = {}) {
+function run(command, args) {
   const result = childProcess.spawnSync(command, args, {
     cwd: repositoryDirectory,
-    encoding: "utf8",
-    stdio: options.stdio ?? "pipe",
+    stdio: "inherit",
   });
   throwIfFailed(result, command);
 }
@@ -39,15 +38,13 @@ function llvmTool(name, environmentName) {
 }
 
 if (process.argv.length === 3 && process.argv[2] === "--write") {
-  run(llvmTool("clang-format", "CLANG_FORMAT"), ["-i", ...cFiles], {
-    stdio: "inherit",
-  });
+  run(llvmTool("clang-format", "CLANG_FORMAT"), ["-i", ...cFiles]);
 } else if (process.argv.length === 2) {
-  run(
-    llvmTool("clang-format", "CLANG_FORMAT"),
-    ["--dry-run", "--Werror", ...cFiles],
-    { stdio: "inherit" },
-  );
+  run(llvmTool("clang-format", "CLANG_FORMAT"), [
+    "--dry-run",
+    "--Werror",
+    ...cFiles,
+  ]);
 
   const testDirectory = fs.mkdtempSync(
     path.join(os.tmpdir(), "tree-sitter-posix-awk-c."),
@@ -73,36 +70,28 @@ if (process.argv.length === 3 && process.argv[2] === "--write") {
 
     const clangd = llvmTool("clangd", "CLANGD");
     for (const cFile of cFiles) {
-      run(
-        clangd,
-        [
-          `--compile-commands-dir=${testDirectory}`,
-          `--check=${cFile}`,
-          "--tweaks=",
-        ],
-        { stdio: "inherit" },
-      );
+      run(clangd, [
+        `--compile-commands-dir=${testDirectory}`,
+        `--check=${cFile}`,
+        "--tweaks=",
+      ]);
     }
 
     for (const standard of ["c99", "c17"]) {
       const testBinary = path.join(testDirectory, `scanner-${standard}`);
-      run(
-        clang,
-        [
-          `-std=${standard}`,
-          "-Wall",
-          "-Wextra",
-          "-Werror",
-          "-pedantic",
-          "-I",
-          scannerInclude,
-          path.join(repositoryDirectory, "test", "scanner.test.c"),
-          "-o",
-          testBinary,
-        ],
-        { stdio: "inherit" },
-      );
-      run(testBinary, [], { stdio: "inherit" });
+      run(clang, [
+        `-std=${standard}`,
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-pedantic",
+        "-I",
+        scannerInclude,
+        path.join(repositoryDirectory, "test", "scanner.test.c"),
+        "-o",
+        testBinary,
+      ]);
+      run(testBinary, []);
     }
   } finally {
     fs.rmSync(testDirectory, { force: true, recursive: true });

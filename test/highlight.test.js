@@ -125,12 +125,26 @@ const finalCaptureCases = [
     label: "conditional question mark",
     row: 3,
   },
+  { column: 3, expected: "operator", label: "range separator", row: 4 },
+  {
+    column: 4,
+    expected: "string regexp",
+    label: "range-ending hyphen inside the list",
+    row: 4,
+  },
+  {
+    column: 5,
+    expected: "character special",
+    label: "element after a range-ending hyphen",
+    row: 4,
+  },
 ];
 const finalCaptureSource = [
   "function spaced (first) { return first }",
   String.raw`BEGIN { print /a)b}c\/d/ }`,
   "/[x[=a=]]/ { print }",
   "END { print first ? 1 : 2 }",
+  "/[%--@]/ { print }",
   "",
 ].join("\n");
 

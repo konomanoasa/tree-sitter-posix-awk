@@ -129,8 +129,14 @@ const ereBracketListAlternatives = ($, followList) => [
   seq(followList, ereClosingHyphen($)),
 ];
 
+// XBD 9.5.2: range_expression : start_range end_range | start_range '-'.
+// The ending hyphen is a literal wherever it stands, not only before the
+// closing bracket ("[%--@]" ranges from '%' to '-' and then lists '@').
 const ereRangeExpressionWith = ($, startRange) =>
-  choice(seq(startRange, $.end_range), seq(startRange, ereClosingHyphen($)));
+  seq(
+    startRange,
+    choice($.end_range, ereClosingHyphen($), $._ere_bracket_hyphen),
+  );
 
 // Bracket expressions whose first element is a literal "]" or "-" repeat the
 // follow_list hierarchy with that element in the first position.
@@ -167,8 +173,13 @@ const ereCompoundOpening = ($, punctuation) =>
 const ereCompoundClosing = (guard, punctuation) =>
   seq(guard, token.immediate(punctuation), token.immediate("]"));
 
+// A raw newline or EOF ends a static ERE, or its compound bracket form,
+// lexically; the scanner's zero-width lexical end stands in for the absent
+// closing, so the ERE never owns the source that follows the newline.
+const ereLexicalEnd = ($) => $._ere_lexical_end;
+
 const ereRequiredPayload = ($, payload, closing) =>
-  choice($._ere_lexical_end, seq(payload, choice(closing, $._ere_lexical_end)));
+  choice(ereLexicalEnd($), seq(payload, choice(closing, ereLexicalEnd($))));
 
 const ereCompound = ($, opening, payload, closing) =>
   seq(opening, ereRequiredPayload($, payload, closing));
@@ -210,6 +221,22 @@ const controlStatements = ($, body) => [
 const actionBoundaryControlBody = ($) =>
   alias($.action_body_boundary_control, $.unterminated_statement);
 
+// Structural Recovery (CST.md) fixes the boundary of an item around a
+// required member that is absent. Tree-sitter's cost-based recovery would
+// take the next item's action for that member, so a zero-width scanner
+// token stands in for it instead. The token has no node: the member is
+// simply absent from the CST, and the item ends where POSIX ends it.
+//
+// The scanner emits the absent statement only when the closing brace (or
+// EOF) follows the construct that still requires it: the body of a control
+// header, or the `while` tail of a do statement.
+const missingStatement = ($) => $._statement_recovery;
+
+// The scanner emits the absent action when what follows a special pattern
+// or a function header (past blanks, continuations, and the header's own
+// newlines) cannot open an action.
+const missingAction = ($) => $._action_recovery;
+
 const statementTerminatedBy = ($, target, terminator) =>
   seq(
     field("statement", $.terminatable_statement),
@@ -218,12 +245,20 @@ const statementTerminatedBy = ($, target, terminator) =>
     newlineLayout($),
   );
 
+const parenthesized = ($, member) =>
+  seq(
+    "(",
+    continuedExpressionMember($, member),
+    $._continued_close_parenthesis,
+  );
+
 const parenthesizedPrintStatement = ($, keyword) =>
   seq(
     keyword,
-    continuedExpressionMember($, "("),
-    continuedExpressionMember($, field("arguments", $.multiple_expr_list)),
-    $._continued_close_parenthesis,
+    continuedExpressionMember(
+      $,
+      parenthesized($, field("arguments", $.multiple_expr_list)),
+    ),
   );
 
 const callArguments = ($) =>
@@ -241,14 +276,19 @@ const callArguments = ($) =>
     ),
   );
 
-const subscriptedName = ($, subscripts) =>
+const subscript = ($, subscripts) =>
   seq(
-    $.name,
     continuedMember($, "open_bracket", "["),
     continuedExpressionMember($, subscripts),
     $._continued_close_bracket,
   );
 
+const subscriptedName = ($, subscripts) =>
+  seq($.name, subscript($, subscripts));
+
+// Another item follows an item without a terminator: the scanner's
+// zero-width boundary stands in for the absent terminator (see
+// missingStatement), so both items keep their own CST.
 const itemEnd = ($, boundary) =>
   choice(
     seq(
@@ -402,7 +442,11 @@ const tieredExpressionRules = (context) => {
   rules[conditionalConsequence] = ($) =>
     continuedExpression($, "consequence", expression($));
   rules[conditionalAlternative] = ($) =>
-    continuedExpression($, "alternative", expression($));
+    continuedExpression(
+      $,
+      "alternative",
+      aliasedAnyTier($, context, "conditional"),
+    );
   rules[conditionalTail] = ($) =>
     seq(
       $._continued_conditional_question,
@@ -422,6 +466,25 @@ const tieredExpressionRules = (context) => {
       );
   };
 
+  // POSIX fixes the right operand of `in` to a NAME, so a membership
+  // expression is complete before any operator that follows it and can be
+  // the left operand of every higher-precedence binary operator without
+  // parentheses ("a in b ~ c" is "(a in b) ~ c"). The adjacent chain never
+  // holds one: after a complete operand, the concatenation binds first and
+  // becomes the left operand of `in` ("a b in c" is "(a b) in c").
+  const membershipInLeft = ($, classification, tail) =>
+    classification === "adjacent"
+      ? []
+      : [
+          seq(
+            field(
+              "left",
+              aliasedClassTier($, context, classification, "membership_in"),
+            ),
+            tail,
+          ),
+        ];
+
   const addLeftAssociativeTier = (tier, nextTier, operator, precedence) => {
     addAnyTier(nextTier);
     const tail = `_${context.prefix}_${tier}_tail`;
@@ -437,6 +500,9 @@ const tieredExpressionRules = (context) => {
               field("left", aliasedClassTier($, context, classification, tier)),
               $[tail],
             ),
+          ),
+          ...membershipInLeft($, classification, $[tail]).map((rule) =>
+            prec.left(precedence, rule),
           ),
         );
     }
@@ -459,6 +525,9 @@ const tieredExpressionRules = (context) => {
               ),
               $[tail],
             ),
+          ),
+          ...membershipInLeft($, classification, $[tail]).map((rule) =>
+            prec(precedence, rule),
           ),
         );
     }
@@ -490,6 +559,10 @@ const tieredExpressionRules = (context) => {
       ),
     );
 
+  // The alternative is itself a conditional (right associative), so a lower
+  // precedence assignment never nests inside it: "a ? b : c = d" is invalid,
+  // as it is after every other operator.
+  addAnyTier("conditional");
   for (const classification of BINARY_CLASSIFICATIONS) {
     addOperand(classification, "logical_or");
     rules[classTierName(context, classification, "conditional")] = ($) =>
@@ -554,9 +627,9 @@ const tieredExpressionRules = (context) => {
       continuedExpression($, "right", $.name),
     );
   for (const classification of BINARY_CLASSIFICATIONS) {
-    rules[classTierName(context, classification, "membership")] = ($) => {
+    addOperand(classification, "membership_in");
+    rules[classTierName(context, classification, "membership_in")] = ($) => {
       const members = [
-        classTier($, context, classification, "match"),
         prec.left(
           PRECEDENCE.membership,
           seq(
@@ -571,9 +644,7 @@ const tieredExpressionRules = (context) => {
       if (classification === "non_unary") {
         members.push(
           seq(
-            "(",
-            continuedExpressionMember($, field("left", $.multiple_expr_list)),
-            $._continued_close_parenthesis,
+            parenthesized($, field("left", $.multiple_expr_list)),
             $._continued_membership_operator,
             continuedExpression($, "right", $.name),
           ),
@@ -581,6 +652,11 @@ const tieredExpressionRules = (context) => {
       }
       return choice(...members);
     };
+    rules[classTierName(context, classification, "membership")] = ($) =>
+      choice(
+        classTier($, context, classification, "match"),
+        classTier($, context, classification, "membership_in"),
+      );
   }
 
   const comparisonTier = context.comparison ? "comparison" : "concatenation";
@@ -601,6 +677,12 @@ const tieredExpressionRules = (context) => {
   }
 
   addOperand("adjacent", "additive");
+  const concatenationTail = `_${context.prefix}_concatenation_tail`;
+  rules[concatenationTail] = ($) =>
+    continuedExpressionMember(
+      $,
+      field("right", aliasedClassTier($, context, "adjacent", "additive")),
+    );
   for (const classification of BINARY_CLASSIFICATIONS) {
     rules[classTierName(context, classification, "concatenation")] = ($) =>
       choice(
@@ -612,14 +694,11 @@ const tieredExpressionRules = (context) => {
               "left",
               aliasedClassTier($, context, classification, "concatenation"),
             ),
-            continuedExpressionMember(
-              $,
-              field(
-                "right",
-                aliasedClassTier($, context, "adjacent", "additive"),
-              ),
-            ),
+            $[concatenationTail],
           ),
+        ),
+        ...membershipInLeft($, classification, $[concatenationTail]).map(
+          (rule) => prec.left(PRECEDENCE.concatenation, rule),
         ),
       );
   }
@@ -638,19 +717,13 @@ const tieredExpressionRules = (context) => {
     PRECEDENCE.multiplicative,
   );
 
-  const unaryAlternatives = ($) => {
-    const alternatives = [];
-    if (context.input) {
-      alternatives.push(classTier($, context, "unary", "exponentiation"));
-    }
-    alternatives.push(
+  rules[unary("unary")] = ($) =>
+    choice(
+      classTier($, context, "unary", "exponentiation"),
       ...["+", "-"].map((operator) =>
         seq(field("operator", operator), requiredTier($, "operand", "unary")),
       ),
     );
-    return alternatives;
-  };
-  rules[unary("unary")] = ($) => choice(...unaryAlternatives($));
   rules[not] = ($) =>
     seq(field("operator", "!"), requiredTier($, "operand", "unary"));
   for (const classification of ["non_unary", "adjacent"]) {
@@ -661,24 +734,35 @@ const tieredExpressionRules = (context) => {
       );
   }
 
-  const exponentiationClassifications = context.input
-    ? CLASSIFICATIONS
-    : ["non_unary", "adjacent"];
+  // The unary update tier holds only the unary input function, which print
+  // expressions lack, so their unary exponentiation tier keeps just the
+  // membership operand.
   const exponentiationTail = `_${context.prefix}_exponentiation_tail`;
   rules[exponentiationTail] = ($) =>
     seq(
       $._continued_exponentiation_operator,
       requiredTier($, "right", "unary"),
     );
-  for (const classification of exponentiationClassifications) {
-    addOperand(classification, "update");
+  for (const classification of CLASSIFICATIONS) {
+    const hasUpdateTier = classification !== "unary" || context.input;
+    if (hasUpdateTier) {
+      addOperand(classification, "update");
+    }
     rules[classTierName(context, classification, "exponentiation")] = ($) =>
       choice(
-        classTier($, context, classification, "update"),
-        seq(
-          field("left", aliasedClassTier($, context, classification, "update")),
-          $[exponentiationTail],
-        ),
+        ...(hasUpdateTier
+          ? [
+              classTier($, context, classification, "update"),
+              seq(
+                field(
+                  "left",
+                  aliasedClassTier($, context, classification, "update"),
+                ),
+                $[exponentiationTail],
+              ),
+            ]
+          : []),
+        ...membershipInLeft($, classification, $[exponentiationTail]),
       );
   }
   if (context.input) {
@@ -783,6 +867,8 @@ module.exports = grammar({
     ...CONTINUATION_TARGETS.map((target) => $[`_lc_before_${target}`]),
     $._closed_item_boundary,
     $._normal_pattern_item_boundary,
+    $._statement_recovery,
+    $._action_recovery,
     $._ere_compound_open_guard,
     $._ere_dot_close_guard,
     $._ere_equal_close_guard,
@@ -919,7 +1005,12 @@ module.exports = grammar({
       ),
 
     _closed_item: ($) =>
-      choice($._action_item, $._pattern_action_item, $._function_item),
+      choice(
+        $._action_item,
+        $._pattern_action_item,
+        $._special_pattern_item,
+        $._function_item,
+      ),
 
     _action_item: ($) => field("action", $.action),
 
@@ -929,9 +1020,20 @@ module.exports = grammar({
         continuedMember($, "action", field("action", $.action)),
       ),
 
+    // A special pattern requires an action, while a normal pattern alone is
+    // an item, so only the special pattern's `pattern` stands without one.
+    _special_pattern_item: ($) =>
+      seq(
+        field("pattern", alias($._special_pattern, $.pattern)),
+        missingAction($),
+      ),
+
+    _special_pattern: ($) => $.special_pattern,
+
     _normal_pattern_item: ($) => field("pattern", $.normal_pattern),
 
-    _function_item: ($) => seq($._function_header, functionBody($)),
+    _function_item: ($) =>
+      seq($._function_header, choice(functionBody($), missingAction($))),
 
     _function_header_prefix: ($) =>
       seq(
@@ -962,21 +1064,10 @@ module.exports = grammar({
         seq(
           field("left", $.expr),
           continuedMember($, "comma", field("separator", ",")),
-          choice(
-            requiredAfterOptionalNewline(
-              $,
-              $._expression_target_guard,
-              continuedExpression($, "right", $.expr),
-            ),
-            // Reachable only during recovery: when the right arm is
-            // missing, the action guard keeps an action on the next line
-            // inside this item.
-            seq(
-              newlineContinuations($),
-              $._action_target_guard,
-              $.newline_opt,
-              continuedExpression($, "right", $.expr),
-            ),
+          requiredAfterOptionalNewline(
+            $,
+            $._expression_target_guard,
+            continuedExpression($, "right", $.expr),
           ),
         ),
       ),
@@ -995,9 +1086,9 @@ module.exports = grammar({
 
     action_body_boundary_control: ($) =>
       choice(
-        $._if_header,
-        $._while_header,
-        $._for_header,
+        seq($._if_header, missingStatement($)),
+        seq($._while_header, missingStatement($)),
+        seq($._for_header, missingStatement($)),
         ...controlStatements($, actionBoundaryControlBody($)),
       ),
 
@@ -1028,11 +1119,7 @@ module.exports = grammar({
       statementListWithTail($, $.unterminated_statement),
 
     _parenthesized_condition: ($) =>
-      seq(
-        "(",
-        continuedExpression($, "condition", $.expr),
-        $._continued_close_parenthesis,
-      ),
+      parenthesized($, field("condition", $.expr)),
 
     _if_header: ($) => conditionalHeader($, $.if_keyword),
 
@@ -1099,8 +1186,17 @@ module.exports = grammar({
         seq($.return_keyword, optional(continuedExpressionMember($, $.expr))),
         seq(
           $._do_header,
-          continuedStatement($, field("body", $.terminated_statement)),
-          continuedDoTail($),
+          continuedStatement(
+            $,
+            field(
+              "body",
+              choice(
+                $.terminated_statement,
+                alias($.action_body_boundary_control, $.terminated_statement),
+              ),
+            ),
+          ),
+          choice(continuedDoTail($), missingStatement($)),
         ),
       ),
 
@@ -1109,13 +1205,7 @@ module.exports = grammar({
         seq(
           $.delete_keyword,
           continuedExpressionMember($, field("array", $.name)),
-          optional(
-            seq(
-              continuedMember($, "open_bracket", "["),
-              continuedExpressionMember($, field("subscripts", $.expr_list)),
-              $._continued_close_bracket,
-            ),
-          ),
+          optional(subscript($, field("subscripts", $.expr_list))),
         ),
         $.expr,
         $.print_statement,
@@ -1241,12 +1331,7 @@ module.exports = grammar({
         ),
       ),
 
-    _parenthesized_expression: ($) =>
-      seq(
-        "(",
-        continuedExpressionMember($, $.expr),
-        $._continued_close_parenthesis,
-      ),
+    _parenthesized_expression: ($) => parenthesized($, $.expr),
 
     _user_function_call: ($) => seq($.func_name, callArguments($)),
 
@@ -1373,7 +1458,7 @@ module.exports = grammar({
           ),
           seq(
             optional(field("expression", $.extended_reg_exp)),
-            $._ere_lexical_end,
+            ereLexicalEnd($),
           ),
         ),
       ),

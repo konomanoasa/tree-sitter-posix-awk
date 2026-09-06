@@ -1,7 +1,7 @@
+#include "tree_sitter/alloc.h"
 #include "tree_sitter/parser.h"
 
 #include <stddef.h>
-#include <stdlib.h>
 #include <string.h>
 
 #define ARRAY_LENGTH(array) (sizeof(array) / sizeof((array)[0]))
@@ -87,6 +87,8 @@ enum TokenType {
   LC_MARKER_LAST = LC_BEFORE_EOF,
   CLOSED_ITEM_BOUNDARY,
   NORMAL_PATTERN_ITEM_BOUNDARY,
+  STATEMENT_RECOVERY,
+  ACTION_RECOVERY,
   ERE_COMPOUND_OPEN_GUARD,
   ERE_DOT_CLOSE_GUARD,
   ERE_EQUAL_CLOSE_GUARD,
@@ -154,11 +156,50 @@ typedef enum {
   WORD_ROLE_RESERVED_ITEM_START = 1U << 2,
 } WordRole;
 
+// The zero-width tokens a lookahead can follow, most specific first: the
+// recovery for an absent statement, then the line-continuation markers.
+enum { MAX_MARKERS_PER_TARGET = 4 };
+
+typedef struct {
+  size_t count;
+  enum TokenType items[MAX_MARKERS_PER_TARGET];
+} MarkerList;
+
+#define MARKERS(...) \
+  { \
+    ARRAY_LENGTH(((const enum TokenType[]){__VA_ARGS__})), { \
+      __VA_ARGS__ \
+    } \
+  }
+
+// A value can start a simple statement, an expression operand, a statement,
+// or an item. Where more than one of these markers is valid in a parse state,
+// the grammar accepts the value in the more specific role as well: after a
+// top-level pattern, a value continues the pattern as a concatenation while
+// only a reserved word starts the next item.
+#define VALUE_MARKERS \
+  MARKERS( \
+    LC_BEFORE_SIMPLE_STATEMENT, \
+    LC_BEFORE_EXPRESSION, \
+    LC_BEFORE_STATEMENT, \
+    LC_BEFORE_ITEM \
+  )
+
 typedef struct {
   WordKind kind;
   enum TokenType token;
   unsigned roles;
+  MarkerList markers;
 } WordToken;
+
+// A punctuation or operator spelling and the markers it can follow. A
+// two-character spelling is matched before the one-character spelling that
+// starts it.
+typedef struct {
+  int32_t first;
+  int32_t second;
+  MarkerList markers;
+} BoundaryTarget;
 
 typedef struct {
   int32_t first;
@@ -230,49 +271,118 @@ static const WordEntry WORDS[] = {
 static const WordToken WORD_TOKENS[] = {
   {WORD_KIND_BEGIN,
     BEGIN_WORD,
-    WORD_ROLE_ITEM_START | WORD_ROLE_RESERVED_ITEM_START},
+    WORD_ROLE_ITEM_START | WORD_ROLE_RESERVED_ITEM_START,
+    MARKERS(LC_BEFORE_ITEM)},
   {WORD_KIND_END,
     END_WORD,
-    WORD_ROLE_ITEM_START | WORD_ROLE_RESERVED_ITEM_START},
+    WORD_ROLE_ITEM_START | WORD_ROLE_RESERVED_ITEM_START,
+    MARKERS(LC_BEFORE_ITEM)},
   {WORD_KIND_FUNCTION,
     FUNCTION_WORD,
-    WORD_ROLE_ITEM_START | WORD_ROLE_RESERVED_ITEM_START},
-  {WORD_KIND_PRINT, PRINT_WORD, 0},
-  {WORD_KIND_BREAK, BREAK_WORD, 0},
-  {WORD_KIND_CONTINUE, CONTINUE_WORD, 0},
-  {WORD_KIND_DELETE, DELETE_WORD, 0},
-  {WORD_KIND_DO, DO_WORD, 0},
-  {WORD_KIND_ELSE, ELSE_WORD, 0},
-  {WORD_KIND_EXIT, EXIT_WORD, 0},
-  {WORD_KIND_FOR, FOR_WORD, 0},
-  {WORD_KIND_IF, IF_WORD, 0},
-  {WORD_KIND_NEXT, NEXT_WORD, 0},
-  {WORD_KIND_NEXTFILE, NEXTFILE_WORD, 0},
-  {WORD_KIND_PRINTF, PRINTF_WORD, 0},
-  {WORD_KIND_RETURN, RETURN_WORD, 0},
-  {WORD_KIND_WHILE, WHILE_WORD, 0},
+    WORD_ROLE_ITEM_START | WORD_ROLE_RESERVED_ITEM_START,
+    MARKERS(LC_BEFORE_ITEM)},
+  {WORD_KIND_PRINT,
+    PRINT_WORD,
+    0,
+    MARKERS(LC_BEFORE_SIMPLE_STATEMENT, LC_BEFORE_STATEMENT)},
+  {WORD_KIND_BREAK, BREAK_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_CONTINUE, CONTINUE_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_DELETE,
+    DELETE_WORD,
+    0,
+    MARKERS(LC_BEFORE_SIMPLE_STATEMENT, LC_BEFORE_STATEMENT)},
+  {WORD_KIND_DO, DO_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_ELSE, ELSE_WORD, 0, MARKERS(LC_BEFORE_ELSE)},
+  {WORD_KIND_EXIT, EXIT_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_FOR, FOR_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_IF, IF_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_NEXT, NEXT_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_NEXTFILE, NEXTFILE_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_PRINTF,
+    PRINTF_WORD,
+    0,
+    MARKERS(LC_BEFORE_SIMPLE_STATEMENT, LC_BEFORE_STATEMENT)},
+  {WORD_KIND_RETURN, RETURN_WORD, 0, MARKERS(LC_BEFORE_STATEMENT)},
+  {WORD_KIND_WHILE,
+    WHILE_WORD,
+    0,
+    MARKERS(LC_BEFORE_DO_TAIL, LC_BEFORE_STATEMENT)},
   {WORD_KIND_NAME,
     NAME_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
   {WORD_KIND_FOR_IN_VARIABLE,
     FOR_IN_VARIABLE_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
   {WORD_KIND_GETLINE,
     GETLINE_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
   {WORD_KIND_GETLINE_TARGET,
     GETLINE_TARGET_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
-  {WORD_KIND_IN, IN_WORD, 0},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
+  {WORD_KIND_IN, IN_WORD, 0, MARKERS(LC_BEFORE_MEMBERSHIP_OPERATOR)},
   {WORD_KIND_BUILTIN_FUNC_NAME,
     BUILTIN_FUNC_NAME_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
   {WORD_KIND_BUILTIN_CALL,
     BUILTIN_CALL_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
   {WORD_KIND_FUNC_NAME,
     FUNC_NAME_WORD,
-    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START},
+    WORD_ROLE_EXPRESSION_START | WORD_ROLE_ITEM_START,
+    VALUE_MARKERS},
+};
+
+static const MarkerList VALUE_MARKER_LIST = VALUE_MARKERS;
+
+static const MarkerList EOF_MARKERS =
+  MARKERS(STATEMENT_RECOVERY, LC_BEFORE_EOF);
+
+static const BoundaryTarget BOUNDARY_TARGETS[] = {
+  {',', 0, MARKERS(LC_BEFORE_COMMA)},
+  {'[', 0, MARKERS(LC_BEFORE_OPEN_BRACKET)},
+  {'{', 0, MARKERS(LC_BEFORE_ACTION, LC_BEFORE_STATEMENT, LC_BEFORE_ITEM)},
+  {')', 0, MARKERS(LC_BEFORE_CLOSE_PARENTHESIS)},
+  {']', 0, MARKERS(LC_BEFORE_CLOSE_BRACKET)},
+  {';', 0, MARKERS(LC_BEFORE_SEMICOLON, LC_BEFORE_STATEMENT)},
+  {'}', 0, MARKERS(STATEMENT_RECOVERY, LC_BEFORE_CLOSE_BRACE)},
+  {'\n', 0, MARKERS(LC_BEFORE_NEWLINE)},
+  {'/', '=', MARKERS(LC_BEFORE_OPERATOR)},
+  {'/', 0, MARKERS(LC_BEFORE_MULTIPLICATIVE_OPERATOR)},
+  {'+', '=', MARKERS(LC_BEFORE_OPERATOR)},
+  {'+', '+', MARKERS(LC_BEFORE_OPERATOR)},
+  {'+', 0, MARKERS(LC_BEFORE_ADDITIVE_OPERATOR)},
+  {'-', '=', MARKERS(LC_BEFORE_OPERATOR)},
+  {'-', '-', MARKERS(LC_BEFORE_OPERATOR)},
+  {'-', 0, MARKERS(LC_BEFORE_ADDITIVE_OPERATOR)},
+  {'*', '=', MARKERS(LC_BEFORE_OPERATOR)},
+  {'*', 0, MARKERS(LC_BEFORE_MULTIPLICATIVE_OPERATOR)},
+  {'%', '=', MARKERS(LC_BEFORE_OPERATOR)},
+  {'%', 0, MARKERS(LC_BEFORE_MULTIPLICATIVE_OPERATOR)},
+  {'^', '=', MARKERS(LC_BEFORE_OPERATOR)},
+  {'^', 0, MARKERS(LC_BEFORE_EXPONENTIATION_OPERATOR)},
+  {'!', '=', MARKERS(LC_BEFORE_COMPARISON_OPERATOR)},
+  {'!', '~', MARKERS(LC_BEFORE_MATCH_OPERATOR)},
+  {'=', '=', MARKERS(LC_BEFORE_COMPARISON_OPERATOR)},
+  {'=', 0, MARKERS(LC_BEFORE_OPERATOR)},
+  {'<', '=', MARKERS(LC_BEFORE_COMPARISON_OPERATOR)},
+  {'<', 0, MARKERS(LC_BEFORE_LESS_THAN)},
+  {'>', '>', MARKERS(LC_BEFORE_OUTPUT_REDIRECTION)},
+  {'>', '=', MARKERS(LC_BEFORE_COMPARISON_OPERATOR)},
+  {'>',
+    0,
+    MARKERS(LC_BEFORE_OUTPUT_REDIRECTION, LC_BEFORE_COMPARISON_OPERATOR)},
+  {'~', 0, MARKERS(LC_BEFORE_MATCH_OPERATOR)},
+  {'|', '|', MARKERS(LC_BEFORE_LOGICAL_OR_OPERATOR)},
+  {'|', 0, MARKERS(LC_BEFORE_OUTPUT_REDIRECTION, LC_BEFORE_INPUT_PIPE)},
+  {'&', '&', MARKERS(LC_BEFORE_LOGICAL_AND_OPERATOR)},
+  {'?', 0, MARKERS(LC_BEFORE_CONDITIONAL_QUESTION)},
+  {':', 0, MARKERS(LC_BEFORE_CONDITIONAL_COLON)},
 };
 
 static const CompositeOperator COMPOSITE_OPERATORS[] = {
@@ -399,6 +509,22 @@ static bool advance_boundary_gap_remainder(TSLexer *lexer) {
   }
 }
 
+static bool emit(TSLexer *lexer, enum TokenType token) {
+  lexer->result_symbol = token;
+  return true;
+}
+
+// Emits the token that moves the scanner into an ERE lexical mode.
+static bool emit_ere_mode(
+  ScannerState *state,
+  TSLexer *lexer,
+  EreMode mode,
+  enum TokenType token
+) {
+  state->ere_mode = mode;
+  return emit(lexer, token);
+}
+
 static WordKind classify_word(const char *word, size_t length) {
   if (length > MAX_RESERVED_WORD_LENGTH) {
     return WORD_KIND_NAME;
@@ -522,8 +648,7 @@ emit_word_kind(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
   if (token == NULL || !valid_symbols[token->token]) {
     return false;
   }
-  lexer->result_symbol = token->token;
-  return true;
+  return emit(lexer, token->token);
 }
 
 static bool word_kind_is_valid(const bool *valid_symbols, WordKind kind) {
@@ -659,8 +784,7 @@ emit_number_kind(TSLexer *lexer, const bool *valid_symbols, NumberKind kind) {
   if (kind == NUMBER_KIND_NONE || !valid_symbols[number_kind_token(kind)]) {
     return false;
   }
-  lexer->result_symbol = number_kind_token(kind);
-  return true;
+  return emit(lexer, number_kind_token(kind));
 }
 
 static bool
@@ -691,15 +815,6 @@ find_composite_operator(int32_t first, int32_t second) {
   return NULL;
 }
 
-static bool is_composite_operator_start(int32_t first) {
-  for (size_t i = 0; i < ARRAY_LENGTH(COMPOSITE_OPERATORS); i++) {
-    if (COMPOSITE_OPERATORS[i].first == first) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool
 scan_composite_operator_start(TSLexer *lexer, const bool *valid_symbols) {
   const int32_t first = lexer->lookahead;
@@ -712,8 +827,7 @@ scan_composite_operator_start(TSLexer *lexer, const bool *valid_symbols) {
 
   lexer->advance(lexer, false);
   lexer->mark_end(lexer);
-  lexer->result_symbol = composite->token;
-  return true;
+  return emit(lexer, composite->token);
 }
 
 static bool
@@ -737,20 +851,17 @@ static bool scan_greater_start(
     }
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
-    lexer->result_symbol = GE_OPERATOR;
-    return true;
+    return emit(lexer, GE_OPERATOR);
   }
   if (lexer->lookahead == '>' && valid_symbols[APPEND_OPERATOR]) {
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
-    lexer->result_symbol = APPEND_OPERATOR;
-    return true;
+    return emit(lexer, APPEND_OPERATOR);
   }
   if (!allow_zero_width_guard || !valid_symbols[OUTPUT_GREATER_GUARD]) {
     return false;
   }
-  lexer->result_symbol = OUTPUT_GREATER_GUARD;
-  return true;
+  return emit(lexer, OUTPUT_GREATER_GUARD);
 }
 
 static bool scan_slash_start(
@@ -765,26 +876,20 @@ static bool scan_slash_start(
     if (valid_symbols[DIV_ASSIGN_OPERATOR]) {
       lexer->advance(lexer, false);
       lexer->mark_end(lexer);
-      lexer->result_symbol = DIV_ASSIGN_OPERATOR;
-      return true;
+      return emit(lexer, DIV_ASSIGN_OPERATOR);
     }
     if (valid_symbols[DIVISION_SLASH]) {
       return false;
     }
   }
   if (prefer_ere && valid_symbols[ERE_OPENING_SLASH]) {
-    lexer->result_symbol = ERE_OPENING_SLASH;
-    state->ere_mode = ERE_MODE_BODY;
-    return true;
+    return emit_ere_mode(state, lexer, ERE_MODE_BODY, ERE_OPENING_SLASH);
   }
   if (valid_symbols[DIVISION_SLASH]) {
-    lexer->result_symbol = DIVISION_SLASH;
-    return true;
+    return emit(lexer, DIVISION_SLASH);
   }
   if (valid_symbols[ERE_OPENING_SLASH]) {
-    lexer->result_symbol = ERE_OPENING_SLASH;
-    state->ere_mode = ERE_MODE_BODY;
-    return true;
+    return emit_ere_mode(state, lexer, ERE_MODE_BODY, ERE_OPENING_SLASH);
   }
   return false;
 }
@@ -800,14 +905,21 @@ static bool emit_word_item_boundary(
     valid_symbols[CLOSED_ITEM_BOUNDARY] &&
     word_has_role(kind, WORD_ROLE_ITEM_START)
   ) {
-    lexer->result_symbol = CLOSED_ITEM_BOUNDARY;
-    return true;
+    return emit(lexer, CLOSED_ITEM_BOUNDARY);
   }
   if (reserved_item_start && valid_symbols[NORMAL_PATTERN_ITEM_BOUNDARY]) {
-    lexer->result_symbol = NORMAL_PATTERN_ITEM_BOUNDARY;
-    return true;
+    return emit(lexer, NORMAL_PATTERN_ITEM_BOUNDARY);
   }
   return false;
+}
+
+// The zero-width recovery for an action that never follows; the source that
+// stands in its place starts the next item or ends this one.
+static bool emit_action_recovery(TSLexer *lexer, const bool *valid_symbols) {
+  if (!valid_symbols[ACTION_RECOVERY]) {
+    return false;
+  }
+  return emit(lexer, ACTION_RECOVERY);
 }
 
 static bool
@@ -818,8 +930,7 @@ scan_required_target_guard(TSLexer *lexer, const bool *valid_symbols) {
   }
 
   if (valid_symbols[ACTION_TARGET_GUARD] && lexer->lookahead == '{') {
-    lexer->result_symbol = ACTION_TARGET_GUARD;
-    return true;
+    return emit(lexer, ACTION_TARGET_GUARD);
   }
 
   if (
@@ -830,21 +941,18 @@ scan_required_target_guard(TSLexer *lexer, const bool *valid_symbols) {
   ) {
     const WordKind kind = scan_word_kind(lexer);
     if (valid_symbols[PARAMETER_TARGET_GUARD] && kind == WORD_KIND_NAME) {
-      lexer->result_symbol = PARAMETER_TARGET_GUARD;
-      return true;
+      return emit(lexer, PARAMETER_TARGET_GUARD);
     }
     if (
       valid_symbols[PRINT_EXPRESSION_TARGET_GUARD] &&
       word_starts_print_expression(kind)
     ) {
-      lexer->result_symbol = PRINT_EXPRESSION_TARGET_GUARD;
-      return true;
+      return emit(lexer, PRINT_EXPRESSION_TARGET_GUARD);
     }
     if (
       valid_symbols[EXPRESSION_TARGET_GUARD] && word_starts_expression(kind)
     ) {
-      lexer->result_symbol = EXPRESSION_TARGET_GUARD;
-      return true;
+      return emit(lexer, EXPRESSION_TARGET_GUARD);
     }
   } else if (
     valid_symbols[EXPRESSION_TARGET_GUARD] ||
@@ -854,14 +962,18 @@ scan_required_target_guard(TSLexer *lexer, const bool *valid_symbols) {
       character_starts_expression(lexer->lookahead);
     const bool starts_number = scan_number_start(lexer);
     if (starts_expression || starts_number) {
-      lexer->result_symbol = valid_symbols[PRINT_EXPRESSION_TARGET_GUARD]
-        ? PRINT_EXPRESSION_TARGET_GUARD
-        : EXPRESSION_TARGET_GUARD;
-      return true;
+      return emit(
+        lexer,
+        valid_symbols[PRINT_EXPRESSION_TARGET_GUARD]
+          ? PRINT_EXPRESSION_TARGET_GUARD
+          : EXPRESSION_TARGET_GUARD
+      );
     }
   }
 
-  return false;
+  // The newline led to no target; an action that the parser still requires
+  // is absent, and the newline ends its item.
+  return emit_action_recovery(lexer, valid_symbols);
 }
 
 static bool scan_ere_backslash_context(
@@ -878,9 +990,12 @@ static bool scan_ere_backslash_context(
     return false;
   }
   if (lexer->lookahead == '/' && valid_symbols[ERE_ESCAPED_DELIMITER_START]) {
-    lexer->result_symbol = ERE_ESCAPED_DELIMITER_START;
-    state->ere_mode = ERE_MODE_ESCAPED_DELIMITER;
-    return true;
+    return emit_ere_mode(
+      state,
+      lexer,
+      ERE_MODE_ESCAPED_DELIMITER,
+      ERE_ESCAPED_DELIMITER_START
+    );
   }
   if (
     lexer->lookahead !=
@@ -888,8 +1003,7 @@ static bool scan_ere_backslash_context(
     !lexer->eof(lexer) &&
     valid_symbols[ERE_ESCAPE_START]
   ) {
-    lexer->result_symbol = ERE_ESCAPE_START;
-    return true;
+    return emit(lexer, ERE_ESCAPE_START);
   }
   return false;
 }
@@ -925,161 +1039,61 @@ static bool scan_ere_compound_guard(TSLexer *lexer, enum TokenType guard) {
   if (!matches) {
     return false;
   }
-  lexer->result_symbol = guard;
-  return true;
-}
-
-// Keywords that start a statement without starting an expression.
-static bool word_starts_control_statement(WordKind kind) {
-  switch (kind) {
-  case WORD_KIND_BREAK:
-  case WORD_KIND_CONTINUE:
-  case WORD_KIND_DO:
-  case WORD_KIND_EXIT:
-  case WORD_KIND_FOR:
-  case WORD_KIND_IF:
-  case WORD_KIND_NEXT:
-  case WORD_KIND_NEXTFILE:
-  case WORD_KIND_RETURN:
-  case WORD_KIND_WHILE:
-    return true;
-  default:
-    return false;
-  }
+  return emit(lexer, guard);
 }
 
 static bool emit_first_valid_marker(
   TSLexer *lexer,
   const bool *valid_symbols,
-  const enum TokenType *markers,
-  size_t count
+  const MarkerList *markers
 ) {
-  for (size_t i = 0; i < count; i++) {
-    if (valid_symbols[markers[i]]) {
-      lexer->result_symbol = markers[i];
+  for (size_t i = 0; i < markers->count; i++) {
+    if (valid_symbols[markers->items[i]]) {
+      return emit(lexer, markers->items[i]);
+    }
+  }
+  return false;
+}
+
+static bool
+emit_word_marker(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
+  const WordToken *token = find_word_token(kind);
+  return token !=
+    NULL &&
+    emit_first_valid_marker(lexer, valid_symbols, &token->markers);
+}
+
+static bool has_two_character_target(int32_t first) {
+  for (size_t i = 0; i < ARRAY_LENGTH(BOUNDARY_TARGETS); i++) {
+    if (BOUNDARY_TARGETS[i].first == first && BOUNDARY_TARGETS[i].second != 0) {
       return true;
     }
   }
   return false;
 }
 
-#define EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, ...) \
-  do { \
-    static const enum TokenType markers[] = {__VA_ARGS__}; \
-    return emit_first_valid_marker( \
-      lexer, \
-      valid_symbols, \
-      markers, \
-      ARRAY_LENGTH(markers) \
-    ); \
-  } while (0)
-
-// The marker for a value that can start an expression, a statement, or an
-// item, from the most specific context to the least specific one. At most
-// one of these markers is valid in any parse state.
-static bool emit_value_marker(
-  TSLexer *lexer,
-  const bool *valid_symbols,
-  bool starts_expression
-) {
-  if (!starts_expression) {
-    return false;
+static const BoundaryTarget *
+find_boundary_target(int32_t first, int32_t second) {
+  const BoundaryTarget *single_character = NULL;
+  for (size_t i = 0; i < ARRAY_LENGTH(BOUNDARY_TARGETS); i++) {
+    if (BOUNDARY_TARGETS[i].first != first) {
+      continue;
+    }
+    if (BOUNDARY_TARGETS[i].second == second) {
+      return &BOUNDARY_TARGETS[i];
+    }
+    if (BOUNDARY_TARGETS[i].second == 0) {
+      single_character = &BOUNDARY_TARGETS[i];
+    }
   }
-  EMIT_FIRST_VALID_MARKER(
-    lexer,
-    valid_symbols,
-    LC_BEFORE_SIMPLE_STATEMENT,
-    LC_BEFORE_EXPRESSION,
-    LC_BEFORE_STATEMENT,
-    LC_BEFORE_ITEM
-  );
+  return single_character;
 }
 
 static bool
-emit_word_marker(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
-  switch (kind) {
-  case WORD_KIND_ELSE:
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_ELSE);
-  case WORD_KIND_WHILE:
-    EMIT_FIRST_VALID_MARKER(
-      lexer,
-      valid_symbols,
-      LC_BEFORE_DO_TAIL,
-      LC_BEFORE_STATEMENT
-    );
-  case WORD_KIND_IN:
-    EMIT_FIRST_VALID_MARKER(
-      lexer,
-      valid_symbols,
-      LC_BEFORE_MEMBERSHIP_OPERATOR
-    );
-  case WORD_KIND_PRINT:
-  case WORD_KIND_PRINTF:
-  case WORD_KIND_DELETE:
-    EMIT_FIRST_VALID_MARKER(
-      lexer,
-      valid_symbols,
-      LC_BEFORE_SIMPLE_STATEMENT,
-      LC_BEFORE_STATEMENT
-    );
-  default:
-    break;
-  }
-  if (word_has_role(kind, WORD_ROLE_RESERVED_ITEM_START)) {
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_ITEM);
-  }
-  if (word_starts_control_statement(kind)) {
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_STATEMENT);
-  }
-  return emit_value_marker(lexer, valid_symbols, word_starts_expression(kind));
-}
-
-// Classifies what follows a run of line continuations and emits the marker
-// that names it, so that the parser can place the continuations and the
-// marker records the lookahead that made the choice.
-static bool scan_boundary_target(TSLexer *lexer, const bool *valid_symbols) {
-  switch (lexer->lookahead) {
-  case ',':
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_COMMA);
-  case '[':
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_OPEN_BRACKET);
-  case '{':
-    EMIT_FIRST_VALID_MARKER(
-      lexer,
-      valid_symbols,
-      LC_BEFORE_ACTION,
-      LC_BEFORE_STATEMENT,
-      LC_BEFORE_ITEM
-    );
-  case ')':
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_CLOSE_PARENTHESIS);
-  case ']':
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_CLOSE_BRACKET);
-  case ';':
-    EMIT_FIRST_VALID_MARKER(
-      lexer,
-      valid_symbols,
-      LC_BEFORE_SEMICOLON,
-      LC_BEFORE_STATEMENT
-    );
-  case '}':
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_CLOSE_BRACE);
-  case '\n':
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_NEWLINE);
-  case '#':
-    advance_comment_to_boundary(lexer);
-    if (lexer->lookahead == '\n') {
-      EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_NEWLINE);
-    }
-    if (lexer->eof(lexer)) {
-      EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_EOF);
-    }
-    return false;
-  default:
-    break;
-  }
+emit_boundary_target_marker(TSLexer *lexer, const bool *valid_symbols) {
+  advance_comment_to_boundary(lexer);
   if (lexer->eof(lexer)) {
-    EMIT_FIRST_VALID_MARKER(lexer, valid_symbols, LC_BEFORE_EOF);
+    return emit_first_valid_marker(lexer, valid_symbols, &EOF_MARKERS);
   }
 
   if (is_word_start(lexer->lookahead)) {
@@ -1087,102 +1101,40 @@ static bool scan_boundary_target(TSLexer *lexer, const bool *valid_symbols) {
   }
 
   if (is_ascii_digit(lexer->lookahead) || lexer->lookahead == '.') {
-    return emit_value_marker(
-      lexer,
-      valid_symbols,
-      scan_number_kind(lexer, false) != NUMBER_KIND_NONE
-    );
+    return scan_number_kind(lexer, false) !=
+      NUMBER_KIND_NONE &&
+      emit_first_valid_marker(lexer, valid_symbols, &VALUE_MARKER_LIST);
   }
 
   const int32_t first = lexer->lookahead;
   int32_t second = 0;
-  if (is_composite_operator_start(first)) {
+  if (has_two_character_target(first)) {
     lexer->advance(lexer, false);
     second = lexer->lookahead;
   }
 
-  enum TokenType marker = ERROR_SENTINEL;
-  switch (first) {
-  case '/':
-    marker =
-      second == '=' ? LC_BEFORE_OPERATOR : LC_BEFORE_MULTIPLICATIVE_OPERATOR;
-    break;
-  case '+':
-    marker = second == '=' || second == '+' ? LC_BEFORE_OPERATOR
-                                            : LC_BEFORE_ADDITIVE_OPERATOR;
-    break;
-  case '-':
-    marker = second == '=' || second == '-' ? LC_BEFORE_OPERATOR
-                                            : LC_BEFORE_ADDITIVE_OPERATOR;
-    break;
-  case '*':
-  case '%':
-    marker =
-      second == '=' ? LC_BEFORE_OPERATOR : LC_BEFORE_MULTIPLICATIVE_OPERATOR;
-    break;
-  case '^':
-    marker =
-      second == '=' ? LC_BEFORE_OPERATOR : LC_BEFORE_EXPONENTIATION_OPERATOR;
-    break;
-  case '!':
-    if (second == '=') {
-      marker = LC_BEFORE_COMPARISON_OPERATOR;
-    } else if (second == '~') {
-      marker = LC_BEFORE_MATCH_OPERATOR;
-    }
-    break;
-  case '=':
-    marker = second == '=' ? LC_BEFORE_COMPARISON_OPERATOR : LC_BEFORE_OPERATOR;
-    break;
-  case '<':
-    marker =
-      second == '=' ? LC_BEFORE_COMPARISON_OPERATOR : LC_BEFORE_LESS_THAN;
-    break;
-  case '>':
-    if (second == '>') {
-      marker = LC_BEFORE_OUTPUT_REDIRECTION;
-    } else if (second == '=') {
-      marker = LC_BEFORE_COMPARISON_OPERATOR;
-    } else {
-      marker = valid_symbols[LC_BEFORE_OUTPUT_REDIRECTION]
-        ? LC_BEFORE_OUTPUT_REDIRECTION
-        : LC_BEFORE_COMPARISON_OPERATOR;
-    }
-    break;
-  case '~':
-    marker = LC_BEFORE_MATCH_OPERATOR;
-    break;
-  case '|':
-    marker = second == '|' ? LC_BEFORE_LOGICAL_OR_OPERATOR
-      : valid_symbols[LC_BEFORE_OUTPUT_REDIRECTION]
-      ? LC_BEFORE_OUTPUT_REDIRECTION
-      : LC_BEFORE_INPUT_PIPE;
-    break;
-  case '&':
-    if (second == '&') {
-      marker = LC_BEFORE_LOGICAL_AND_OPERATOR;
-    }
-    break;
-  case '?':
-    marker = LC_BEFORE_CONDITIONAL_QUESTION;
-    break;
-  case ':':
-    marker = LC_BEFORE_CONDITIONAL_COLON;
-    break;
-  default:
-    break;
-  }
-
-  if (marker != ERROR_SENTINEL && valid_symbols[marker]) {
-    lexer->result_symbol = marker;
+  const BoundaryTarget *target = find_boundary_target(first, second);
+  if (
+    target !=
+    NULL &&
+    emit_first_valid_marker(lexer, valid_symbols, &target->markers)
+  ) {
     return true;
   }
 
-  return emit_value_marker(
-    lexer,
-    valid_symbols,
-    character_starts_expression(first)
-  );
+  // A sign, a negation, or a slash that cannot continue the preceding
+  // expression starts a new value instead.
+  return character_starts_expression(first) &&
+    emit_first_valid_marker(lexer, valid_symbols, &VALUE_MARKER_LIST);
+}
+
+// Classifies what follows a run of line continuations and emits the marker
+// that names it, so that the parser can place the continuations and the
+// marker records the lookahead that made the choice. Where no marker can
+// place them, the continuations follow an absent action instead.
+static bool scan_boundary_target(TSLexer *lexer, const bool *valid_symbols) {
+  return emit_boundary_target_marker(lexer, valid_symbols) ||
+    emit_action_recovery(lexer, valid_symbols);
 }
 
 static bool has_line_continuation_marker(const bool *valid_symbols) {
@@ -1208,11 +1160,11 @@ scan_line_continuation_marker(TSLexer *lexer, const bool *valid_symbols) {
 }
 
 void *tree_sitter_posix_awk_external_scanner_create(void) {
-  return calloc(1, sizeof(ScannerState));
+  return ts_calloc(1, sizeof(ScannerState));
 }
 
 void tree_sitter_posix_awk_external_scanner_destroy(void *payload) {
-  free(payload);
+  ts_free(payload);
 }
 
 unsigned
@@ -1249,18 +1201,19 @@ static bool scan_ere_context(
 
   const bool at_ere_end = lexer->lookahead == '\n' || lexer->eof(lexer);
   if (at_ere_end && valid_symbols[ERE_LEXICAL_END]) {
-    lexer->result_symbol = ERE_LEXICAL_END;
-    state->ere_mode = ERE_MODE_OUTSIDE;
-    return true;
+    return emit_ere_mode(state, lexer, ERE_MODE_OUTSIDE, ERE_LEXICAL_END);
   }
 
   if (state->ere_mode == ERE_MODE_ESCAPED_DELIMITER) {
     if (lexer->lookahead == '/' && valid_symbols[ERE_ESCAPED_DELIMITER_END]) {
       lexer->advance(lexer, false);
       lexer->mark_end(lexer);
-      lexer->result_symbol = ERE_ESCAPED_DELIMITER_END;
-      state->ere_mode = ERE_MODE_BODY;
-      return true;
+      return emit_ere_mode(
+        state,
+        lexer,
+        ERE_MODE_BODY,
+        ERE_ESCAPED_DELIMITER_END
+      );
     }
     return scan_ere_backslash_context(state, lexer, valid_symbols);
   }
@@ -1279,9 +1232,7 @@ static bool scan_ere_context(
   if (lexer->lookahead == '/' && valid_symbols[ERE_CLOSING]) {
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
-    lexer->result_symbol = ERE_CLOSING;
-    state->ere_mode = ERE_MODE_OUTSIDE;
-    return true;
+    return emit_ere_mode(state, lexer, ERE_MODE_OUTSIDE, ERE_CLOSING);
   }
 
   if (lexer->lookahead == '-' && valid_symbols[ERE_CLOSING_HYPHEN]) {
@@ -1290,8 +1241,7 @@ static bool scan_ere_context(
       return false;
     }
     lexer->mark_end(lexer);
-    lexer->result_symbol = ERE_CLOSING_HYPHEN;
-    return true;
+    return emit(lexer, ERE_CLOSING_HYPHEN);
   }
 
   return scan_ere_backslash_context(state, lexer, valid_symbols);
@@ -1349,8 +1299,7 @@ static bool scan_number_or_item_boundary(
     return false;
   }
   if (item_boundary_is_valid) {
-    lexer->result_symbol = CLOSED_ITEM_BOUNDARY;
-    return true;
+    return emit(lexer, CLOSED_ITEM_BOUNDARY);
   }
   return emit_number_kind(lexer, valid_symbols, kind);
 }
@@ -1366,8 +1315,8 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   }
 
   // Error recovery marks every token valid, so only real tokens are scanned
-  // there: the zero-width guards, markers, and boundaries would otherwise
-  // match at any position.
+  // there: the zero-width guards, markers, boundaries, and recoveries would
+  // otherwise match at any position.
   const bool recovering = valid_symbols[ERROR_SENTINEL];
   skip_ascii_blanks(lexer);
   lexer->mark_end(lexer);
@@ -1380,13 +1329,33 @@ bool tree_sitter_posix_awk_external_scanner_scan(
       valid_symbols[CLOSED_ITEM_BOUNDARY] &&
       character_starts_item(lexer->lookahead)
     ) {
-      lexer->result_symbol = CLOSED_ITEM_BOUNDARY;
-      return true;
+      return emit(lexer, CLOSED_ITEM_BOUNDARY);
     }
     if (
-      lexer->lookahead == '\\' && has_line_continuation_marker(valid_symbols)
+      valid_symbols[STATEMENT_RECOVERY] &&
+      (lexer->lookahead == '}' || lexer->eof(lexer))
+    ) {
+      return emit(lexer, STATEMENT_RECOVERY);
+    }
+    if (
+      lexer->lookahead ==
+      '\\' &&
+      (has_line_continuation_marker(valid_symbols) ||
+        valid_symbols[STATEMENT_RECOVERY] ||
+        valid_symbols[ACTION_RECOVERY])
     ) {
       return scan_line_continuation_marker(lexer, valid_symbols);
+    }
+    // A comment is layout before whatever follows it; the newline after it
+    // decides.
+    if (
+      lexer->lookahead !=
+      '{' &&
+      lexer->lookahead !=
+      '#' &&
+      emit_action_recovery(lexer, valid_symbols)
+    ) {
+      return true;
     }
   }
 

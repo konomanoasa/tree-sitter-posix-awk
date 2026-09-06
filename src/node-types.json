@@ -2053,6 +2053,10 @@
           {
             "type": "terminated_statement",
             "named": true
+          },
+          {
+            "type": "unterminated_statement",
+            "named": true
           }
         ]
       },
@@ -2073,6 +2077,10 @@
           {
             "type": "terminated_statement",
             "named": true
+          },
+          {
+            "type": "unterminated_statement",
+            "named": true
           }
         ]
       },
@@ -2092,6 +2100,10 @@
         "types": [
           {
             "type": "terminated_statement",
+            "named": true
+          },
+          {
+            "type": "unterminated_statement",
             "named": true
           }
         ]
@@ -2506,6 +2518,10 @@
           },
           {
             "type": "/",
+            "named": false
+          },
+          {
+            "type": "^",
             "named": false
           },
           {

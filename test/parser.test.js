@@ -98,48 +98,45 @@ function assertFresh(testName, source, expectedStatus = 0) {
   return native.tree;
 }
 
+// An edit is "<position> <delete count> <inserted text>" in bytes, the
+// shape `tree-sitter parse --edits` takes.
+function parseEdit(testName, edit, sourceLength) {
+  const match = edit.match(/^([0-9]+) ([0-9]+) (.*)$/s);
+  assert.notEqual(
+    match,
+    null,
+    `${testName}: invalid edit ${JSON.stringify(edit)}`,
+  );
+  const position = Number(match[1]);
+  const deleteCount = Number(match[2]);
+  assert.ok(
+    Number.isSafeInteger(position) &&
+      Number.isSafeInteger(deleteCount) &&
+      position <= sourceLength &&
+      deleteCount <= sourceLength - position,
+    `${testName}: out-of-bounds edit ${JSON.stringify(edit)} for ${sourceLength} bytes`,
+  );
+  return { deleteCount, inserted: Buffer.from(match[3]), position };
+}
+
 function applyEdits(testName, initial, edits) {
   let actual = Buffer.from(initial);
   for (const edit of edits) {
-    const firstSpace = edit.indexOf(" ");
-    const secondSpace = edit.indexOf(" ", firstSpace + 1);
-    assert.ok(
-      firstSpace >= 1 && secondSpace >= firstSpace + 2,
-      `${testName}: invalid edit ${JSON.stringify(edit)}`,
-    );
-
-    const positionText = edit.slice(0, firstSpace);
-    const deleteCountText = edit.slice(firstSpace + 1, secondSpace);
-    assert.match(
-      positionText,
-      /^[0-9]+$/,
-      `${testName}: invalid edit ${JSON.stringify(edit)}`,
-    );
-    assert.match(
-      deleteCountText,
-      /^[0-9]+$/,
-      `${testName}: invalid edit ${JSON.stringify(edit)}`,
-    );
-
-    const position = Number(positionText);
-    const deleteCount = Number(deleteCountText);
-    assert.ok(
-      Number.isSafeInteger(position) &&
-        Number.isSafeInteger(deleteCount) &&
-        position <= actual.length &&
-        deleteCount <= actual.length - position,
-      `${testName}: out-of-bounds edit ${JSON.stringify(edit)} for ${actual.length} bytes`,
+    const { deleteCount, inserted, position } = parseEdit(
+      testName,
+      edit,
+      actual.length,
     );
     actual = Buffer.concat([
       actual.subarray(0, position),
-      Buffer.from(edit.slice(secondSpace + 1)),
+      inserted,
       actual.subarray(position + deleteCount),
     ]);
   }
   return actual;
 }
 
-function captureEditParses(testName, initialSource, finalSource, edits) {
+function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
   const initialPath = writeSource(testName, "initial", initialSource);
   const finalPath = writeSource(testName, "final", finalSource);
   assert.deepEqual(
@@ -148,27 +145,21 @@ function captureEditParses(testName, initialSource, finalSource, edits) {
     `${testName}: edits do not produce the final source`,
   );
 
-  const nativeIncremental = captureParse(initialPath, edits);
-  const nativeFresh = captureParse(finalPath);
-
-  return { nativeFresh, nativeIncremental };
-}
-
-function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
-  const parses = captureEditParses(testName, initialSource, finalSource, edits);
+  const incremental = captureParse(initialPath, edits);
+  const fresh = captureParse(finalPath);
   for (const [label, result] of [
-    ["native incremental parse", parses.nativeIncremental],
-    ["native fresh parse", parses.nativeFresh],
+    ["native incremental parse", incremental],
+    ["native fresh parse", fresh],
   ]) {
     assertStatus(`${testName} ${label}`, result, 0);
     clean(result.tree);
   }
   assert.equal(
-    parses.nativeIncremental.tree,
-    parses.nativeFresh.tree,
+    incremental.tree,
+    fresh.tree,
     `${testName}: native incremental and fresh CSTs differ`,
   );
-  return parses.nativeFresh.tree;
+  return fresh.tree;
 }
 
 function contains(tree, expected) {
@@ -371,10 +362,13 @@ function editHistoryTest(name, source, edits) {
   const reverts = [];
   let current = Buffer.from(source);
   for (const edit of edits) {
-    const [position, deleteCount] = edit.split(" ").map(Number);
-    const inserted = edit.slice(edit.indexOf(" ", edit.indexOf(" ") + 1) + 1);
+    const { deleteCount, inserted, position } = parseEdit(
+      name,
+      edit,
+      current.length,
+    );
     const deleted = current.subarray(position, position + deleteCount);
-    reverts.unshift(`${position} ${Buffer.byteLength(inserted)} ${deleted}`);
+    reverts.unshift(`${position} ${inserted.length} ${deleted}`);
     current = applyEdits(name, current, [edit]);
   }
   determinismTest(name, source, source, [...edits, ...reverts]);
@@ -427,6 +421,10 @@ const physicallyClosedMalformedItems = [
   ["missing do tail", "middle { do print value; }"],
   ["missing function parameter", "function malformed(first,) {}"],
   ["missing function header", "function malformed {}"],
+  ["missing function body", "function malformed()"],
+  ["missing special pattern action", "BEGIN"],
+  ["missing do tail after a newline", "middle { do print value\n}"],
+  ["missing do tail after a bodyless control", "middle { do while (inner) }"],
   ["missing left range arm", ", right {}"],
   ["missing right range arm", "left, {}"],
 ];
@@ -637,22 +635,6 @@ const divisionAssignment = lines("BEGIN { x /= 2 }");
 const divisionExpression = lines("BEGIN { x / 2 }");
 const matchOperand = lines("BEGIN { print x ~ a }");
 
-freshTest(
-  "tracer",
-  lines("# tracer", "BEGIN {", "  x /= 2", "  print x ~ /a/", "}"),
-  (tree) => {
-    contains(tree, "div_assign");
-    contains(tree, "ere");
-    contains(tree, "ordinary_character");
-    clean(tree);
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
-      2,
-      "Expected one opening and one closing ERE slash",
-    );
-  },
-);
-
 const invalidClassificationCases = [
   {
     assertions: (tree) => {
@@ -709,6 +691,17 @@ const invalidClassificationCases = [
     name: "a non-newline backslash does not create call adjacency",
     source: lines("BEGIN {", String.raw`  f\(value)`, "  after", "}"),
   },
+  {
+    assertions: (tree) => {
+      assert.equal(
+        matchingLineCount(tree, /^[ \t0-9:-]+right: expr$/),
+        1,
+        "Expected the conditional to close before the assignment operator",
+      );
+    },
+    name: "an assignment never nests inside a conditional alternative",
+    source: lines("BEGIN { x = a ? b : c = d }"),
+  },
 ];
 
 for (const classificationCase of invalidClassificationCases) {
@@ -745,50 +738,47 @@ determinismTest(
 determinismTest("operand-to-ere", matchOperand, matchEre, ["18 1 /a/"]);
 determinismTest("ere-to-operand", matchEre, matchOperand, ["18 3 a"]);
 
-const ere = lines(
-  "BEGIN {",
-  "  print /^a.(b|c)*?d{1,2}?$/",
-  String.raw`  print /[a-c][[.ch.]][[.-.]][[=a=]][[:alpha:]][\q\/]/`,
-  String.raw`  print /\/\\\052\057\134./`,
-  "}",
+const membershipBeforeLogicalAnd = lines("BEGIN { x = a in b && c }");
+const membershipBeforeMatch = lines("BEGIN { x = a in b ~ c }");
+determinismTest(
+  "membership-logical-and-to-match",
+  membershipBeforeLogicalAnd,
+  membershipBeforeMatch,
+  ["19 2 ~"],
+  (tree) => {
+    contains(tree, '"~"');
+    excludes(tree, "operator: and");
+  },
+);
+determinismTest(
+  "membership-match-to-logical-and",
+  membershipBeforeMatch,
+  membershipBeforeLogicalAnd,
+  ["19 1 &&"],
+  (tree) => {
+    contains(tree, "operator: and");
+    excludes(tree, '"~"');
+  },
 );
 
-freshTest("ere", ere, (tree) => {
-  for (const node of [
-    "extended_reg_exp",
-    "ere_branch",
-    "ere_expression",
-    "one_char_or_coll_elem_ere",
-    "ere_dupl_symbol",
-    "repetition_modifier",
-    "bracket_expression",
-    "matching_list",
-    "bracket_list",
-    "follow_list",
-    "expression_term",
-    "single_expression",
-    "range_expression",
-    "start_range",
-    "end_range",
-    "collating_element",
-    "collating_symbol",
-    "equivalence_class",
-    "character_class",
-    "class_name",
-    "ordinary_character",
-    "quoted_character",
-    "wildcard",
-    "left_anchor",
-    "right_anchor",
-    "dup_count",
-    "meta_character",
-    "escape_sequence",
-    "escaped_delimiter",
-  ]) {
-    contains(tree, node);
-  }
-  clean(tree);
-});
+const plainMembership = lines("BEGIN { x = a in b }");
+const concatenatedMembership = lines("BEGIN { x = a in b c }");
+determinismTest(
+  "insert-membership-concatenation-operand",
+  plainMembership,
+  concatenatedMembership,
+  ["18 0  c"],
+  (tree) => {
+    assert.match(tree, /^[ \t0-9:-]+right: name `b`$/m);
+    assert.match(tree, /^[ \t0-9:-]+right: non_unary_expr$/m);
+  },
+);
+determinismTest(
+  "delete-membership-concatenation-operand",
+  concatenatedMembership,
+  plainMembership,
+  ["18 2 "],
+);
 
 const plainBracketList = lines("BEGIN { print /[+]?[a]/ }");
 const trailingHyphenBracketList = lines("BEGIN { print /[+-]?[a]/ }");
@@ -805,6 +795,40 @@ determinismTest(
     );
     contains(tree, "ere_dupl_symbol");
     excludes(tree, "range_expression");
+  },
+);
+
+const shortRangeEre = lines("BEGIN { print /[%-@]/ }");
+const hyphenEndedRangeEre = lines("BEGIN { print /[%--@]/ }");
+determinismTest(
+  "insert-range-ending-hyphen",
+  shortRangeEre,
+  hyphenEndedRangeEre,
+  ["18 0 -"],
+  (tree) => {
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+range_expression$/),
+      1,
+      "Expected one range expression ending at the inserted hyphen",
+    );
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element/),
+      2,
+      "Expected the range start and the following element only",
+    );
+  },
+);
+determinismTest(
+  "delete-range-ending-hyphen",
+  hyphenEndedRangeEre,
+  shortRangeEre,
+  ["18 1 "],
+  (tree) => {
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element/),
+      2,
+      "Expected a plain range between two collating elements",
+    );
   },
 );
 
@@ -965,6 +989,22 @@ determinismTest(
   },
 );
 
+const bodylessIf = lines("BEGIN { if (condition) }");
+const bodiedIf = lines("BEGIN { if (condition) body }");
+determinismTest("insert-if-body-before-close-brace", bodylessIf, bodiedIf, [
+  "23 0 body ",
+]);
+
+const sameLineItems = lines("BEGIN {} END {}");
+const separatedItems = lines("BEGIN {}", "END {}");
+determinismTest(
+  "insert-item-terminator-between-items",
+  sameLineItems,
+  separatedItems,
+  ["8 1 \n"],
+  (tree) => contains(tree, "terminator: terminator"),
+);
+
 const completeReservedIf = lines(
   "BEGIN { if (condition) print body }",
   "END { print target }",
@@ -991,6 +1031,27 @@ determinismTest(
   completeDoTail,
   ["22 1  while (condition) }\n"],
 );
+
+const closedDoTail = lines("BEGIN { do print body", "while (condition) }");
+const openDoTail = lines("BEGIN { do print body", "}");
+determinismTest("insert-do-tail-before-close-brace", openDoTail, closedDoTail, [
+  "22 0 while (condition) ",
+]);
+
+const specialPatternItems = lines("BEGIN {}", "END {}");
+const actionlessSpecialPattern = lines("BEGIN", "END {}");
+determinismTest(
+  "restore-special-pattern-action",
+  actionlessSpecialPattern,
+  specialPatternItems,
+  ["5 0  {}"],
+);
+
+const functionItems = lines("function f() {}", "END {}");
+const bodylessFunction = lines("function f()", "END {}");
+determinismTest("restore-function-body", bodylessFunction, functionItems, [
+  "12 0  {}",
+]);
 const closedSubscriptEof = "BEGIN { delete array[offset] }";
 const openSubscriptEof = "BEGIN { delete array[offset";
 determinismTest(
@@ -1136,20 +1197,6 @@ determinismTest(
     assert.match(tree, /^[ \t0-9:-]*non_unary_input_function$/m);
   },
 );
-
-const stringSource = lines(
-  "BEGIN {",
-  '  "value"',
-  String.raw`  print "" "a #/é value" "\"\\\a\b\f\n\r\t\v\/\.\q\x"`,
-  String.raw`  print "\1234" "abcd" "\\n"`,
-  "}",
-);
-freshTest("string", stringSource, (tree) => {
-  contains(tree, "string_content");
-  contains(tree, "escape_sequence");
-  excludes(tree, "line_continuation");
-  clean(tree);
-});
 
 const closedString = lines('BEGIN { print "abc"', "}");
 const unclosedString = lines('BEGIN { print "abc', "}");

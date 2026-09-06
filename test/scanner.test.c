@@ -490,6 +490,36 @@ static int check_normal_pattern_item_boundary(void) {
   return failed;
 }
 
+static int check_statement_recovery(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    bool expected_scanned;
+  } cases[] = {
+    {"close brace marks the absent body", "}", true},
+    {"EOF marks the absent body", "", true},
+    {"continued close brace marks the absent body", "\\\n}", true},
+    {"continued EOF marks the absent body", "\\\n", true},
+    {"a statement is not absent", "x", false},
+    {"a raw newline is layout", "\n}", false},
+  };
+
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[STATEMENT_RECOVERY] = true;
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].expected_scanned,
+      STATEMENT_RECOVERY,
+      0
+    );
+  }
+  return failed;
+}
+
 static int check_required_target_guards(void) {
   static const struct {
     const char *name;
@@ -532,6 +562,58 @@ static int check_required_target_guards(void) {
       valid_symbols,
       cases[i].expected_scanned,
       cases[i].guard,
+      0
+    );
+  }
+  return failed;
+}
+
+static int check_action_recovery(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    bool guard_valid;
+    bool expected_scanned;
+    enum TokenType expected_symbol;
+  } cases[] = {
+    {"newline without an action", "\nEND", false, true, ACTION_RECOVERY},
+    {"reserved word without an action", "END", false, true, ACTION_RECOVERY},
+    {"semicolon without an action", ";", false, true, ACTION_RECOVERY},
+    {"EOF without an action", "", false, true, ACTION_RECOVERY},
+    {"action opener is not absent", "{", false, false, ACTION_RECOVERY},
+    {"comment defers to its newline", "# c\n{", false, false, ACTION_RECOVERY},
+    {"continued action is not absent", "\\\n{", false, true, LC_BEFORE_ACTION},
+    {"continued reserved word without an action",
+      "\\\nEND",
+      false,
+      true,
+      ACTION_RECOVERY},
+    {"continued EOF without an action", "\\\n", false, true, ACTION_RECOVERY},
+    {"action after the header newline",
+      "\n\n  # c\n{",
+      true,
+      true,
+      ACTION_TARGET_GUARD},
+    {"reserved word after the header newline",
+      "\nEND",
+      true,
+      true,
+      ACTION_RECOVERY},
+    {"EOF after the header newline", "\n", true, true, ACTION_RECOVERY},
+  };
+
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[ACTION_RECOVERY] = true;
+    valid_symbols[LC_BEFORE_ACTION] = true;
+    valid_symbols[ACTION_TARGET_GUARD] = cases[i].guard_valid;
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].expected_scanned,
+      cases[i].expected_symbol,
       0
     );
   }
@@ -640,6 +722,14 @@ static int check_line_continuation_markers(void) {
       "\\\nx",
       LC_BEFORE_EXPRESSION,
       LC_BEFORE_SIMPLE_STATEMENT},
+    {"statement recovery before close brace",
+      "\\\n}",
+      LC_BEFORE_CLOSE_BRACE,
+      STATEMENT_RECOVERY},
+    {"statement recovery before EOF",
+      "\\\n",
+      LC_BEFORE_EOF,
+      STATEMENT_RECOVERY},
   };
   for (size_t i = 0; i < ARRAY_LENGTH(priorities); i++) {
     bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
@@ -973,6 +1063,18 @@ static int check_error_mode_real_tokens(void) {
       LC_BEFORE_EXPRESSION,
       0,
       ERE_MODE_OUTSIDE},
+    {"error mode suppresses statement recovery",
+      "}",
+      false,
+      STATEMENT_RECOVERY,
+      0,
+      ERE_MODE_OUTSIDE},
+    {"error mode suppresses action recovery",
+      ";",
+      false,
+      ACTION_RECOVERY,
+      0,
+      ERE_MODE_OUTSIDE},
     {"error mode emits no token for unknown punctuation",
       "@",
       false,
@@ -1113,7 +1215,9 @@ int main(void) {
   failed |= check_slash_dispatch();
   failed |= check_closed_item_boundary();
   failed |= check_normal_pattern_item_boundary();
+  failed |= check_statement_recovery();
   failed |= check_required_target_guards();
+  failed |= check_action_recovery();
   failed |= check_line_continuation_markers();
   failed |= check_linear_line_continuation_lookahead();
   failed |= check_ere_state_transitions();

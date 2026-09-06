@@ -1495,3 +1495,193 @@ BEGIN {
             (newline)))))
     (terminator
       (newline))))
+
+==================
+membership results remain left operands of higher precedence operators
+==================
+
+BEGIN {
+  a in b ~ c
+  a in b < c
+  a in b c
+  a in b + c
+  a in b * d ^ e
+  -a in b ^ c
+  (a, b) in c ~ d
+  print a in b ~ c, -a in b ^ c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (in_keyword)
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (in_keyword)
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (in_keyword)
+                      (name))
+                    (non_unary_expr
+                      (lvalue
+                        (name)))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (in_keyword)
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (in_keyword)
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (unary_expr
+                    (unary_expr
+                      (unary_expr
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))))
+                      (in_keyword)
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (multiple_expr_list
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))))
+                      (in_keyword)
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (non_unary_print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name)))
+                            (in_keyword)
+                            (name))
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name))))))
+                      (print_expr
+                        (unary_print_expr
+                          (unary_print_expr
+                            (unary_print_expr
+                              (print_expr
+                                (non_unary_print_expr
+                                  (lvalue
+                                    (name)))))
+                            (in_keyword)
+                            (name))
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))

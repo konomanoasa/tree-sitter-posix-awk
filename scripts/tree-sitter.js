@@ -84,9 +84,9 @@ function run(args, options = {}) {
   const ownsEnvironment = options.environment === undefined;
   try {
     return childProcess.spawnSync(process.execPath, [treeSitterCli, ...args], {
-      cwd: options.cwd ?? repositoryDirectory,
+      cwd: repositoryDirectory,
       encoding: options.encoding ?? "utf8",
-      env: { ...environment.environment, ...options.env },
+      env: environment.environment,
       stdio: options.stdio ?? "pipe",
     });
   } finally {

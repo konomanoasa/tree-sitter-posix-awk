@@ -61,15 +61,15 @@ static int expect_scan_result_at(
   const char *test_name,
   const char *source,
   const bool *valid_symbols,
-  EreMode initial_mode,
+  LexicalMode initial_mode,
   bool expected_scanned,
   enum TokenType expected_symbol,
   size_t expected_token_start,
   size_t expected_token_end,
-  EreMode expected_mode
+  LexicalMode expected_mode
 ) {
   MockLexer mock = make_mock_lexer(source);
-  ScannerState state = {.ere_mode = initial_mode};
+  ScannerState state = {.mode = initial_mode};
   const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
     &state,
     &mock.lexer,
@@ -78,7 +78,7 @@ static int expect_scan_result_at(
   if (
     scanned ==
     expected_scanned &&
-    state.ere_mode ==
+    state.mode ==
     expected_mode &&
     (!scanned ||
       (mock.lexer.result_symbol ==
@@ -98,7 +98,7 @@ static int expect_scan_result_at(
     mock.lexer.result_symbol,
     mock.token_start,
     mock.token_end,
-    (unsigned)state.ere_mode
+    (unsigned)state.mode
   );
   return 1;
 }
@@ -115,12 +115,12 @@ static int expect_scan_result(
     test_name,
     source,
     valid_symbols,
-    ERE_MODE_OUTSIDE,
+    LEXICAL_MODE_OUTSIDE,
     expected_scanned,
     expected_symbol,
     0,
     expected_token_end,
-    ERE_MODE_OUTSIDE
+    LEXICAL_MODE_OUTSIDE
   );
 }
 
@@ -262,12 +262,12 @@ static int check_blank_skip_token_ranges(void) {
       cases[i].name,
       cases[i].source,
       valid_symbols,
-      ERE_MODE_OUTSIDE,
+      LEXICAL_MODE_OUTSIDE,
       true,
       cases[i].token,
       cases[i].expected_token_start,
       cases[i].expected_token_end,
-      ERE_MODE_OUTSIDE
+      LEXICAL_MODE_OUTSIDE
     );
   }
   return failed;
@@ -354,12 +354,12 @@ static int check_slash_dispatch(void) {
     "division precedes ERE in normal parsing",
     "/x",
     valid_symbols,
-    ERE_MODE_OUTSIDE,
+    LEXICAL_MODE_OUTSIDE,
     true,
     DIVISION_SLASH,
     0,
     1,
-    ERE_MODE_OUTSIDE
+    LEXICAL_MODE_OUTSIDE
   );
 
   valid_symbols[DIVISION_SLASH] = false;
@@ -367,12 +367,12 @@ static int check_slash_dispatch(void) {
     "ERE opens without a division context",
     "/x",
     valid_symbols,
-    ERE_MODE_OUTSIDE,
+    LEXICAL_MODE_OUTSIDE,
     true,
     ERE_OPENING_SLASH,
     0,
     1,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   valid_symbols[DIVISION_SLASH] = true;
@@ -581,7 +581,6 @@ static int check_action_recovery(void) {
     {"semicolon without an action", ";", false, true, ACTION_RECOVERY},
     {"EOF without an action", "", false, true, ACTION_RECOVERY},
     {"action opener is not absent", "{", false, false, ACTION_RECOVERY},
-    {"comment defers to its newline", "# c\n{", false, false, ACTION_RECOVERY},
     {"continued action is not absent", "\\\n{", false, true, LC_BEFORE_ACTION},
     {"continued reserved word without an action",
       "\\\nEND",
@@ -762,7 +761,7 @@ static int check_linear_line_continuation_lookahead(void) {
   source[(continuation_count * 2U) + 1U] = '\0';
 
   MockLexer mock = make_mock_lexer(source);
-  ScannerState state = {.ere_mode = ERE_MODE_OUTSIDE};
+  ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
   valid_symbols[LC_BEFORE_EXPRESSION] = true;
   const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
@@ -802,12 +801,12 @@ static int check_ere_state_transitions(void) {
     "ERE opening enters body mode",
     "/a",
     valid_symbols,
-    ERE_MODE_OUTSIDE,
+    LEXICAL_MODE_OUTSIDE,
     true,
     ERE_OPENING_SLASH,
     0,
     1,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   valid_symbols[ERE_OPENING_SLASH] = false;
@@ -816,12 +815,12 @@ static int check_ere_state_transitions(void) {
     "ERE closing exits body mode",
     "/",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_CLOSING,
     0,
     1,
-    ERE_MODE_OUTSIDE
+    LEXICAL_MODE_OUTSIDE
   );
 
   valid_symbols[ERE_CLOSING] = false;
@@ -830,12 +829,12 @@ static int check_ere_state_transitions(void) {
     "ERE escape guard keeps body mode",
     "\\n",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_ESCAPE_START,
     0,
     0,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   valid_symbols[ERE_ESCAPE_START] = false;
@@ -844,12 +843,12 @@ static int check_ere_state_transitions(void) {
     "escaped delimiter guard enters delimiter mode",
     "\\/",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_ESCAPED_DELIMITER_START,
     0,
     0,
-    ERE_MODE_ESCAPED_DELIMITER
+    LEXICAL_MODE_ERE_ESCAPED_DELIMITER
   );
 
   valid_symbols[ERE_ESCAPED_DELIMITER_START] = false;
@@ -858,12 +857,12 @@ static int check_ere_state_transitions(void) {
     "escaped delimiter token returns to body mode",
     "/",
     valid_symbols,
-    ERE_MODE_ESCAPED_DELIMITER,
+    LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
     true,
     ERE_ESCAPED_DELIMITER_END,
     0,
     1,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   valid_symbols[ERE_ESCAPED_DELIMITER_END] = false;
@@ -872,12 +871,12 @@ static int check_ere_state_transitions(void) {
     "compound opener guard is zero width",
     "[.",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_COMPOUND_OPEN_GUARD,
     0,
     0,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   valid_symbols[ERE_COMPOUND_OPEN_GUARD] = false;
@@ -886,23 +885,23 @@ static int check_ere_state_transitions(void) {
     "hyphen before the closing bracket is one token",
     "-]",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_CLOSING_HYPHEN,
     0,
     1,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
   failed |= expect_scan_result_at(
     "range hyphen stays internal",
     "-a",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     false,
     ERE_CLOSING_HYPHEN,
     0,
     0,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   valid_symbols[ERE_CLOSING_HYPHEN] = false;
@@ -911,12 +910,12 @@ static int check_ere_state_transitions(void) {
     "compound closer guard is zero width",
     ".]",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_DOT_CLOSE_GUARD,
     0,
     0,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
 
   set_all_symbols_valid(valid_symbols);
@@ -924,45 +923,213 @@ static int check_ere_state_transitions(void) {
     "raw newline resets ERE state in error mode",
     "\nnext",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     true,
     ERE_LEXICAL_END,
     0,
     0,
-    ERE_MODE_OUTSIDE
+    LEXICAL_MODE_OUTSIDE
   );
   failed |= expect_scan_result_at(
     "EOF resets escaped-delimiter state in error mode",
     "",
     valid_symbols,
-    ERE_MODE_ESCAPED_DELIMITER,
+    LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
     true,
     ERE_LEXICAL_END,
     0,
     0,
-    ERE_MODE_OUTSIDE
+    LEXICAL_MODE_OUTSIDE
   );
   failed |= expect_scan_result_at(
     "error mode suppresses ERE compound guards",
     "[.",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     false,
     ERE_COMPOUND_OPEN_GUARD,
     0,
     0,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
   );
   failed |= expect_scan_result_at(
     "error mode suppresses escaped-delimiter guards",
     "\\/",
     valid_symbols,
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     false,
     ERE_ESCAPED_DELIMITER_START,
     0,
     0,
-    ERE_MODE_BODY
+    LEXICAL_MODE_ERE_BODY
+  );
+  return failed;
+}
+
+static int check_string_and_comment_modes(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    LexicalMode initial_mode;
+    enum TokenType valid;
+    bool expected_scanned;
+    enum TokenType expected_symbol;
+    size_t expected_token_start;
+    size_t expected_token_end;
+    LexicalMode expected_mode;
+  } cases[] = {
+    {"string opening enters string mode",
+      "\"a\"",
+      LEXICAL_MODE_OUTSIDE,
+      STRING_OPENING,
+      true,
+      STRING_OPENING,
+      0,
+      1,
+      LEXICAL_MODE_STRING},
+    {"string end before the closing quote is zero width",
+      "\"",
+      LEXICAL_MODE_STRING,
+      STRING_END,
+      true,
+      STRING_END,
+      0,
+      0,
+      LEXICAL_MODE_OUTSIDE},
+    {"raw newline ends the string",
+      "\n",
+      LEXICAL_MODE_STRING,
+      STRING_END,
+      true,
+      STRING_END,
+      0,
+      0,
+      LEXICAL_MODE_OUTSIDE},
+    {"EOF ends the string",
+      "",
+      LEXICAL_MODE_STRING,
+      STRING_END,
+      true,
+      STRING_END,
+      0,
+      0,
+      LEXICAL_MODE_OUTSIDE},
+    {"string content stays internal",
+      "a\"",
+      LEXICAL_MODE_STRING,
+      STRING_END,
+      false,
+      STRING_END,
+      0,
+      0,
+      LEXICAL_MODE_STRING},
+    {"string end waits for the escape character",
+      "\"",
+      LEXICAL_MODE_STRING,
+      COMMENT,
+      false,
+      STRING_END,
+      0,
+      0,
+      LEXICAL_MODE_STRING},
+    {"hash inside a string is content",
+      "#\"",
+      LEXICAL_MODE_STRING,
+      COMMENT,
+      false,
+      COMMENT,
+      0,
+      0,
+      LEXICAL_MODE_STRING},
+    {"hash inside an ERE is content",
+      "#/",
+      LEXICAL_MODE_ERE_BODY,
+      COMMENT,
+      false,
+      COMMENT,
+      0,
+      0,
+      LEXICAL_MODE_ERE_BODY},
+    {"comment spans to its newline",
+      "# c\nx",
+      LEXICAL_MODE_OUTSIDE,
+      COMMENT,
+      true,
+      COMMENT,
+      0,
+      3,
+      LEXICAL_MODE_OUTSIDE},
+    {"comment spans to EOF",
+      "# c",
+      LEXICAL_MODE_OUTSIDE,
+      COMMENT,
+      true,
+      COMMENT,
+      0,
+      3,
+      LEXICAL_MODE_OUTSIDE},
+    {"blanks precede a comment",
+      "  # c\n",
+      LEXICAL_MODE_OUTSIDE,
+      COMMENT,
+      true,
+      COMMENT,
+      2,
+      5,
+      LEXICAL_MODE_OUTSIDE},
+    {"a quote is not a comment",
+      "\"",
+      LEXICAL_MODE_OUTSIDE,
+      COMMENT,
+      false,
+      COMMENT,
+      0,
+      0,
+      LEXICAL_MODE_OUTSIDE},
+  };
+
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].valid] = true;
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].initial_mode,
+      cases[i].expected_scanned,
+      cases[i].expected_symbol,
+      cases[i].expected_token_start,
+      cases[i].expected_token_end,
+      cases[i].expected_mode
+    );
+  }
+
+  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+  valid_symbols[COMMENT] = true;
+  valid_symbols[STATEMENT_RECOVERY] = true;
+  valid_symbols[ACTION_RECOVERY] = true;
+  valid_symbols[CLOSED_ITEM_BOUNDARY] = true;
+  failed |= expect_scan_result(
+    "comment precedes every zero-width token",
+    "# c\n}",
+    valid_symbols,
+    true,
+    COMMENT,
+    3
+  );
+
+  set_all_symbols_valid(valid_symbols);
+  failed |= expect_scan_result_at(
+    "raw newline resets string mode in error mode",
+    "\n\"",
+    valid_symbols,
+    LEXICAL_MODE_STRING,
+    true,
+    STRING_END,
+    0,
+    0,
+    LEXICAL_MODE_OUTSIDE
   );
   return failed;
 }
@@ -974,113 +1141,130 @@ static int check_error_mode_real_tokens(void) {
     bool expected_scanned;
     enum TokenType expected_symbol;
     size_t expected_token_end;
-    EreMode expected_mode;
+    LexicalMode expected_mode;
   } cases[] = {
-    {"error mode emits keyword", "END", true, END_WORD, 3, ERE_MODE_OUTSIDE},
-    {"error mode emits name", "value", true, NAME_WORD, 5, ERE_MODE_OUTSIDE},
+    {"error mode emits keyword",
+      "END",
+      true,
+      END_WORD,
+      3,
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode emits name",
+      "value",
+      true,
+      NAME_WORD,
+      5,
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits function name",
       "follow(",
       true,
       FUNC_NAME_WORD,
       6,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits built-in",
       "length",
       true,
       BUILTIN_FUNC_NAME_WORD,
       6,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits built-in call",
       "length (",
       true,
       BUILTIN_CALL_WORD,
       6,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits getline target",
       "getline x",
       true,
       GETLINE_TARGET_WORD,
       7,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits integer",
       "42",
       true,
       NUMBER_INTEGER,
       2,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits fraction",
       ".5",
       true,
       NUMBER_FRACTION,
       2,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits exponent",
       "1.5e+2",
       true,
       NUMBER_EXPONENT,
       6,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits composite operator",
       "+=",
       true,
       ADD_ASSIGN_OPERATOR,
       2,
-      ERE_MODE_OUTSIDE},
-    {"error mode emits GE", ">=", true, GE_OPERATOR, 2, ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode emits GE", ">=", true, GE_OPERATOR, 2, LEXICAL_MODE_OUTSIDE},
     {"error mode emits append",
       ">>",
       true,
       APPEND_OPERATOR,
       2,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode preserves slash longest match",
       "/=",
       true,
       DIV_ASSIGN_OPERATOR,
       2,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode prefers ERE over division",
       "/x",
       true,
       ERE_OPENING_SLASH,
       1,
-      ERE_MODE_BODY},
+      LEXICAL_MODE_ERE_BODY},
     {"error mode suppresses greater guard",
       ">",
       false,
       OUTPUT_GREATER_GUARD,
       0,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses target guards",
       "\nname",
       false,
       EXPRESSION_TARGET_GUARD,
       0,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses line-continuation markers",
       "\\\nname",
       false,
       LC_BEFORE_EXPRESSION,
       0,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses statement recovery",
       "}",
       false,
       STATEMENT_RECOVERY,
       0,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses action recovery",
       ";",
       false,
       ACTION_RECOVERY,
       0,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits no token for unknown punctuation",
       "@",
       false,
       ERROR_SENTINEL,
       0,
-      ERE_MODE_OUTSIDE},
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode emits comment", "# c", true, COMMENT, 3, LEXICAL_MODE_OUTSIDE},
+    {"error mode emits string opening",
+      "\"a",
+      true,
+      STRING_OPENING,
+      1,
+      LEXICAL_MODE_STRING},
   };
 
   int failed = 0;
@@ -1091,7 +1275,7 @@ static int check_error_mode_real_tokens(void) {
       cases[i].name,
       cases[i].source,
       valid_symbols,
-      ERE_MODE_OUTSIDE,
+      LEXICAL_MODE_OUTSIDE,
       cases[i].expected_scanned,
       cases[i].expected_symbol,
       0,
@@ -1103,7 +1287,7 @@ static int check_error_mode_real_tokens(void) {
 }
 
 static int
-expect_mode(const char *test_name, EreMode expected, EreMode actual) {
+expect_mode(const char *test_name, LexicalMode expected, LexicalMode actual) {
   if (actual == expected) {
     return 0;
   }
@@ -1134,11 +1318,11 @@ expect_length(const char *test_name, unsigned expected, unsigned actual) {
 
 static int check_round_trip(
   const char *test_name,
-  EreMode mode,
+  LexicalMode mode,
   unsigned expected_length
 ) {
-  ScannerState source = {.ere_mode = mode};
-  ScannerState destination = {.ere_mode = ERE_MODE_ESCAPED_DELIMITER};
+  ScannerState source = {.mode = mode};
+  ScannerState destination = {.mode = LEXICAL_MODE_ERE_ESCAPED_DELIMITER};
   char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE] = {0};
   const unsigned length =
     tree_sitter_posix_awk_external_scanner_serialize(&source, buffer);
@@ -1149,37 +1333,43 @@ static int check_round_trip(
     buffer,
     length
   );
-  failed |= expect_mode(test_name, mode, destination.ere_mode);
+  failed |= expect_mode(test_name, mode, destination.mode);
   return failed;
 }
 
 static int check_serialization(void) {
   int failed = 0;
-  failed |= check_round_trip("outside mode round trip", ERE_MODE_OUTSIDE, 0);
+  failed |=
+    check_round_trip("outside mode round trip", LEXICAL_MODE_OUTSIDE, 0);
   failed |= check_round_trip(
     "ERE body mode round trip",
-    ERE_MODE_BODY,
+    LEXICAL_MODE_ERE_BODY,
     SERIALIZED_SCANNER_STATE_SIZE
   );
   failed |= check_round_trip(
     "escaped delimiter mode round trip",
-    ERE_MODE_ESCAPED_DELIMITER,
+    LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
+    SERIALIZED_SCANNER_STATE_SIZE
+  );
+  failed |= check_round_trip(
+    "string mode round trip",
+    LEXICAL_MODE_STRING,
     SERIALIZED_SCANNER_STATE_SIZE
   );
 
   char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE] = {
-    (char)ERE_MODE_BODY,
+    (char)LEXICAL_MODE_ERE_BODY,
     0,
   };
-  ScannerState destination = {.ere_mode = ERE_MODE_BODY};
+  ScannerState destination = {.mode = LEXICAL_MODE_ERE_BODY};
   tree_sitter_posix_awk_external_scanner_deserialize(&destination, buffer, 0);
   failed |= expect_mode(
     "empty serialized state resets to outside",
-    ERE_MODE_OUTSIDE,
-    destination.ere_mode
+    LEXICAL_MODE_OUTSIDE,
+    destination.mode
   );
 
-  destination.ere_mode = ERE_MODE_BODY;
+  destination.mode = LEXICAL_MODE_ERE_BODY;
   tree_sitter_posix_awk_external_scanner_deserialize(
     &destination,
     buffer,
@@ -1187,12 +1377,12 @@ static int check_serialization(void) {
   );
   failed |= expect_mode(
     "oversized serialized state resets to outside",
-    ERE_MODE_OUTSIDE,
-    destination.ere_mode
+    LEXICAL_MODE_OUTSIDE,
+    destination.mode
   );
 
-  buffer[0] = (char)(ERE_MODE_ESCAPED_DELIMITER + 1);
-  destination.ere_mode = ERE_MODE_BODY;
+  buffer[0] = (char)(LEXICAL_MODE_STRING + 1);
+  destination.mode = LEXICAL_MODE_ERE_BODY;
   tree_sitter_posix_awk_external_scanner_deserialize(
     &destination,
     buffer,
@@ -1200,8 +1390,8 @@ static int check_serialization(void) {
   );
   failed |= expect_mode(
     "invalid serialized mode resets to outside",
-    ERE_MODE_OUTSIDE,
-    destination.ere_mode
+    LEXICAL_MODE_OUTSIDE,
+    destination.mode
   );
   return failed;
 }
@@ -1221,6 +1411,7 @@ int main(void) {
   failed |= check_line_continuation_markers();
   failed |= check_linear_line_continuation_lookahead();
   failed |= check_ere_state_transitions();
+  failed |= check_string_and_comment_modes();
   failed |= check_error_mode_real_tokens();
   return failed;
 }

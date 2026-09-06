@@ -14,13 +14,13 @@ const expectedGeneratedFiles = [
 ];
 
 const budgets = {
-  STATE_COUNT: 18876,
+  STATE_COUNT: 18963,
   LARGE_STATE_COUNT: 4488,
-  SYMBOL_COUNT: 540,
-  EXTERNAL_TOKEN_COUNT: 95,
-  parser_bytes: 37734142,
-  maximum_ACTIONS_index: 8628,
-  parse_table_storage_bytes: 6157074,
+  SYMBOL_COUNT: 538,
+  EXTERNAL_TOKEN_COUNT: 98,
+  parser_bytes: 37842229,
+  maximum_ACTIONS_index: 8804,
+  parse_table_storage_bytes: 6140066,
 };
 
 function listFiles(directory, prefix = "") {

@@ -99,6 +99,9 @@ enum TokenType {
   ERE_CLOSING_HYPHEN,
   ERE_LEXICAL_END,
   ERE_CLOSING,
+  STRING_OPENING,
+  STRING_END,
+  COMMENT,
   EXPRESSION_TARGET_GUARD,
   PRINT_EXPRESSION_TARGET_GUARD,
   ACTION_TARGET_GUARD,
@@ -214,14 +217,19 @@ typedef enum {
   NUMBER_KIND_EXPONENT,
 } NumberKind;
 
+// The scanner owns the lexical modes of a static ERE and a string: the
+// opening token of each enters its mode, and the token that ends it returns
+// to OUTSIDE. A comment is lexed only in OUTSIDE, so a `#` inside an ERE or a
+// string never opens one.
 typedef enum {
-  ERE_MODE_OUTSIDE,
-  ERE_MODE_BODY,
-  ERE_MODE_ESCAPED_DELIMITER,
-} EreMode;
+  LEXICAL_MODE_OUTSIDE,
+  LEXICAL_MODE_ERE_BODY,
+  LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
+  LEXICAL_MODE_STRING,
+} LexicalMode;
 
 typedef struct {
-  EreMode ere_mode;
+  LexicalMode mode;
 } ScannerState;
 
 static const WordEntry WORDS[] = {
@@ -460,9 +468,18 @@ static bool advance_line_continuations(TSLexer *lexer) {
   return found;
 }
 
+// Blanks before a token are skipped so that the token starts after them;
+// blanks inside a lookahead are consumed so that the token end marked before
+// the lookahead stays where it is.
 static void skip_ascii_blanks(TSLexer *lexer) {
   while (is_ascii_blank(lexer->lookahead)) {
     lexer->advance(lexer, true);
+  }
+}
+
+static void advance_ascii_blanks(TSLexer *lexer) {
+  while (is_ascii_blank(lexer->lookahead)) {
+    lexer->advance(lexer, false);
   }
 }
 
@@ -477,7 +494,7 @@ static void advance_comment_to_boundary(TSLexer *lexer) {
 
 static bool advance_layout_gap(TSLexer *lexer) {
   for (;;) {
-    skip_ascii_blanks(lexer);
+    advance_ascii_blanks(lexer);
     advance_comment_to_boundary(lexer);
     if (lexer->lookahead == '\n') {
       lexer->advance(lexer, false);
@@ -496,10 +513,7 @@ static bool advance_layout_gap(TSLexer *lexer) {
 // token itself never moves.
 static bool advance_boundary_gap_remainder(TSLexer *lexer) {
   for (;;) {
-    while (is_ascii_blank(lexer->lookahead)) {
-      lexer->advance(lexer, false);
-    }
-
+    advance_ascii_blanks(lexer);
     if (lexer->lookahead != '\\') {
       return true;
     }
@@ -514,14 +528,14 @@ static bool emit(TSLexer *lexer, enum TokenType token) {
   return true;
 }
 
-// Emits the token that moves the scanner into an ERE lexical mode.
-static bool emit_ere_mode(
+// Emits the token that moves the scanner into a lexical mode.
+static bool emit_mode(
   ScannerState *state,
   TSLexer *lexer,
-  EreMode mode,
+  LexicalMode mode,
   enum TokenType token
 ) {
-  state->ere_mode = mode;
+  state->mode = mode;
   return emit(lexer, token);
 }
 
@@ -883,13 +897,13 @@ static bool scan_slash_start(
     }
   }
   if (prefer_ere && valid_symbols[ERE_OPENING_SLASH]) {
-    return emit_ere_mode(state, lexer, ERE_MODE_BODY, ERE_OPENING_SLASH);
+    return emit_mode(state, lexer, LEXICAL_MODE_ERE_BODY, ERE_OPENING_SLASH);
   }
   if (valid_symbols[DIVISION_SLASH]) {
     return emit(lexer, DIVISION_SLASH);
   }
   if (valid_symbols[ERE_OPENING_SLASH]) {
-    return emit_ere_mode(state, lexer, ERE_MODE_BODY, ERE_OPENING_SLASH);
+    return emit_mode(state, lexer, LEXICAL_MODE_ERE_BODY, ERE_OPENING_SLASH);
   }
   return false;
 }
@@ -990,10 +1004,10 @@ static bool scan_ere_backslash_context(
     return false;
   }
   if (lexer->lookahead == '/' && valid_symbols[ERE_ESCAPED_DELIMITER_START]) {
-    return emit_ere_mode(
+    return emit_mode(
       state,
       lexer,
-      ERE_MODE_ESCAPED_DELIMITER,
+      LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
       ERE_ESCAPED_DELIMITER_START
     );
   }
@@ -1170,10 +1184,10 @@ void tree_sitter_posix_awk_external_scanner_destroy(void *payload) {
 unsigned
 tree_sitter_posix_awk_external_scanner_serialize(void *payload, char *buffer) {
   const ScannerState *state = payload;
-  if (state->ere_mode == ERE_MODE_OUTSIDE) {
+  if (state->mode == LEXICAL_MODE_OUTSIDE) {
     return 0;
   }
-  buffer[0] = (char)state->ere_mode;
+  buffer[0] = (char)state->mode;
   return SERIALIZED_SCANNER_STATE_SIZE;
 }
 
@@ -1183,11 +1197,11 @@ void tree_sitter_posix_awk_external_scanner_deserialize(
   unsigned length
 ) {
   ScannerState *state = payload;
-  state->ere_mode = ERE_MODE_OUTSIDE;
+  state->mode = LEXICAL_MODE_OUTSIDE;
   if (length == SERIALIZED_SCANNER_STATE_SIZE) {
     const unsigned char mode = (unsigned char)buffer[0];
-    if (mode <= ERE_MODE_ESCAPED_DELIMITER) {
-      state->ere_mode = (EreMode)mode;
+    if (mode <= LEXICAL_MODE_STRING) {
+      state->mode = (LexicalMode)mode;
     }
   }
 }
@@ -1201,17 +1215,17 @@ static bool scan_ere_context(
 
   const bool at_ere_end = lexer->lookahead == '\n' || lexer->eof(lexer);
   if (at_ere_end && valid_symbols[ERE_LEXICAL_END]) {
-    return emit_ere_mode(state, lexer, ERE_MODE_OUTSIDE, ERE_LEXICAL_END);
+    return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, ERE_LEXICAL_END);
   }
 
-  if (state->ere_mode == ERE_MODE_ESCAPED_DELIMITER) {
+  if (state->mode == LEXICAL_MODE_ERE_ESCAPED_DELIMITER) {
     if (lexer->lookahead == '/' && valid_symbols[ERE_ESCAPED_DELIMITER_END]) {
       lexer->advance(lexer, false);
       lexer->mark_end(lexer);
-      return emit_ere_mode(
+      return emit_mode(
         state,
         lexer,
-        ERE_MODE_BODY,
+        LEXICAL_MODE_ERE_BODY,
         ERE_ESCAPED_DELIMITER_END
       );
     }
@@ -1232,7 +1246,7 @@ static bool scan_ere_context(
   if (lexer->lookahead == '/' && valid_symbols[ERE_CLOSING]) {
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
-    return emit_ere_mode(state, lexer, ERE_MODE_OUTSIDE, ERE_CLOSING);
+    return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, ERE_CLOSING);
   }
 
   if (lexer->lookahead == '-' && valid_symbols[ERE_CLOSING_HYPHEN]) {
@@ -1245,6 +1259,35 @@ static bool scan_ere_context(
   }
 
   return scan_ere_backslash_context(state, lexer, valid_symbols);
+}
+
+// A string ends lexically at its closing quote, a raw newline, or EOF; the
+// zero-width end returns the scanner to OUTSIDE before the grammar's closing
+// quote (or the standard recovery for its absence) takes over.
+static bool scan_string_context(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+  lexer->mark_end(lexer);
+  const bool at_string_end =
+    lexer->lookahead == '"' || lexer->lookahead == '\n' || lexer->eof(lexer);
+  if (at_string_end && valid_symbols[STRING_END]) {
+    return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, STRING_END);
+  }
+  return false;
+}
+
+static bool scan_string_opening(ScannerState *state, TSLexer *lexer) {
+  lexer->advance(lexer, false);
+  lexer->mark_end(lexer);
+  return emit_mode(state, lexer, LEXICAL_MODE_STRING, STRING_OPENING);
+}
+
+static bool scan_comment(TSLexer *lexer) {
+  advance_comment_to_boundary(lexer);
+  lexer->mark_end(lexer);
+  return emit(lexer, COMMENT);
 }
 
 static bool has_number_marker(const bool *valid_symbols) {
@@ -1310,8 +1353,14 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   const bool *valid_symbols
 ) {
   ScannerState *state = payload;
-  if (state->ere_mode != ERE_MODE_OUTSIDE) {
+  switch (state->mode) {
+  case LEXICAL_MODE_ERE_BODY:
+  case LEXICAL_MODE_ERE_ESCAPED_DELIMITER:
     return scan_ere_context(state, lexer, valid_symbols);
+  case LEXICAL_MODE_STRING:
+    return scan_string_context(state, lexer, valid_symbols);
+  case LEXICAL_MODE_OUTSIDE:
+    break;
   }
 
   // Error recovery marks every token valid, so only real tokens are scanned
@@ -1320,6 +1369,10 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   const bool recovering = valid_symbols[ERROR_SENTINEL];
   skip_ascii_blanks(lexer);
   lexer->mark_end(lexer);
+
+  if (lexer->lookahead == '#' && valid_symbols[COMMENT]) {
+    return scan_comment(lexer);
+  }
 
   if (!recovering) {
     if (lexer->lookahead == '\n' && has_required_target_guard(valid_symbols)) {
@@ -1346,17 +1399,13 @@ bool tree_sitter_posix_awk_external_scanner_scan(
     ) {
       return scan_line_continuation_marker(lexer, valid_symbols);
     }
-    // A comment is layout before whatever follows it; the newline after it
-    // decides.
-    if (
-      lexer->lookahead !=
-      '{' &&
-      lexer->lookahead !=
-      '#' &&
-      emit_action_recovery(lexer, valid_symbols)
-    ) {
+    if (lexer->lookahead != '{' && emit_action_recovery(lexer, valid_symbols)) {
       return true;
     }
+  }
+
+  if (lexer->lookahead == '"' && valid_symbols[STRING_OPENING]) {
+    return scan_string_opening(state, lexer);
   }
 
   if (is_word_start(lexer->lookahead)) {

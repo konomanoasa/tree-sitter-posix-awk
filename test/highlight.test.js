@@ -138,6 +138,12 @@ const finalCaptureCases = [
     label: "element after a range-ending hyphen",
     row: 4,
   },
+  {
+    column: 2,
+    expected: "string regexp",
+    label: "lone bracket hyphen",
+    row: 5,
+  },
 ];
 const finalCaptureSource = [
   "function spaced (first) { return first }",
@@ -145,6 +151,7 @@ const finalCaptureSource = [
   "/[x[=a=]]/ { print }",
   "END { print first ? 1 : 2 }",
   "/[%--@]/ { print }",
+  "/[-]/ { print }",
   "",
 ].join("\n");
 

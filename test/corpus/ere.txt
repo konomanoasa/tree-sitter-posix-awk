@@ -339,7 +339,7 @@ BEGIN { print /[]-a][]--]/ }
 matching and nonmatching lists preserve first bracket and last hyphen
 ==================
 
-BEGIN { print /[]a-][^]b-]/ }
+BEGIN { print /[]a-][^]b-][-][^-]/ }
 
 ---
 
@@ -366,17 +366,44 @@ BEGIN { print /[]a-][^]b-]/ }
                             (extended_reg_exp
                               (ere_branch
                                 (ere_branch
+                                  (ere_branch
+                                    (ere_branch
+                                      (ere_expression
+                                        (one_char_or_coll_elem_ere
+                                          (bracket_expression
+                                            (matching_list
+                                              (bracket_list
+                                                (follow_list
+                                                  (follow_list
+                                                    (expression_term
+                                                      (single_expression
+                                                        (end_range
+                                                          (collating_element)))))
+                                                  (expression_term
+                                                    (single_expression
+                                                      (end_range
+                                                        (collating_element)))))))))))
+                                    (ere_expression
+                                      (one_char_or_coll_elem_ere
+                                        (bracket_expression
+                                          (nonmatching_list
+                                            (bracket_list
+                                              (follow_list
+                                                (follow_list
+                                                  (expression_term
+                                                    (single_expression
+                                                      (end_range
+                                                        (collating_element)))))
+                                                (expression_term
+                                                  (single_expression
+                                                    (end_range
+                                                      (collating_element)))))))))))
                                   (ere_expression
                                     (one_char_or_coll_elem_ere
                                       (bracket_expression
                                         (matching_list
                                           (bracket_list
                                             (follow_list
-                                              (follow_list
-                                                (expression_term
-                                                  (single_expression
-                                                    (end_range
-                                                      (collating_element)))))
                                               (expression_term
                                                 (single_expression
                                                   (end_range
@@ -387,11 +414,6 @@ BEGIN { print /[]a-][^]b-]/ }
                                       (nonmatching_list
                                         (bracket_list
                                           (follow_list
-                                            (follow_list
-                                              (expression_term
-                                                (single_expression
-                                                  (end_range
-                                                    (collating_element)))))
                                             (expression_term
                                               (single_expression
                                                 (end_range

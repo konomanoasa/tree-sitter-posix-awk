@@ -1,7 +1,7 @@
 ==================
-empty and ordinary strings preserve maximal physical content
+empty, hash-leading, and ordinary strings preserve maximal physical content
 ==================
-BEGIN { print "" "a #/é value" }
+BEGIN { print "" "#" "a #/é value" }
 ---
 
 (program
@@ -21,7 +21,11 @@ BEGIN { print "" "a #/é value" }
                     (print_expr
                       (non_unary_print_expr
                         (non_unary_print_expr
-                          (string))
+                          (non_unary_print_expr
+                            (string))
+                          (non_unary_print_expr
+                            (string
+                              (string_content))))
                         (non_unary_print_expr
                           (string
                             (string_content)))))))))))))))

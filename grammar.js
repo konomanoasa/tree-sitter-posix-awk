@@ -879,6 +879,9 @@ module.exports = grammar({
     $._ere_closing_hyphen,
     $._ere_lexical_end,
     $._ere_closing,
+    $._string_opening,
+    $._string_end,
+    $.comment,
     $._expression_target_guard,
     $._print_expression_target_guard,
     $._action_target_guard,
@@ -1401,14 +1404,21 @@ module.exports = grammar({
     number: ($) =>
       choice($._number_integer, $._number_fraction, $._number_exponent),
 
+    // The scanner owns the lexical modes of a static ERE and a string, so the
+    // tokens that enter and leave them are external, and so is the comment:
+    // it is lexed only outside those modes, where a `#` between tokens is
+    // never content. Inside them the grammar decides what a `#` is, even
+    // where it accepts no character (after a class name or an interval
+    // count), instead of an extra swallowing the rest of the line.
     string: ($) =>
       seq(
-        field("opening", '"'),
+        field("opening", alias($._string_opening, '"')),
         repeat(choice($.string_content, $.escape_sequence)),
+        $._string_end,
         field("closing", token.immediate('"')),
       ),
 
-    string_content: () => token.immediate(prec(1, /[^"\\\n]+/)),
+    string_content: () => token.immediate(/[^"\\\n]+/),
 
     escape_sequence: ($) =>
       seq(
@@ -1562,7 +1572,7 @@ module.exports = grammar({
 
     matching_list: ($) => $.bracket_list,
 
-    nonmatching_list: ($) => seq(token.immediate(prec(3, "^")), $.bracket_list),
+    nonmatching_list: ($) => seq(token.immediate(prec(1, "^")), $.bracket_list),
 
     bracket_list: ($) =>
       choice(
@@ -1579,9 +1589,13 @@ module.exports = grammar({
 
     ...initialFollowListRules("close", ($) => $._ere_bracket_close_character),
 
-    ...initialFollowListRules("hyphen", ($) =>
+    ...initialFollowListRules("hyphen", ($) => $._ere_initial_hyphen),
+
+    // The alias nearest a token wins, so aliasing this choice inline would
+    // let the closing hyphen's anonymous alias replace the collating_element
+    // wrapper; the hidden rule keeps the wrapper for both hyphen tokens.
+    _ere_initial_hyphen: ($) =>
       choice($._ere_bracket_hyphen, ereClosingHyphen($)),
-    ),
 
     follow_list: ($) =>
       choice($.expression_term, seq($.follow_list, $.expression_term)),
@@ -1695,44 +1709,44 @@ module.exports = grammar({
 
     // Tree-sitter rejects the POSIX bracket spelling for these delimiter
     // characters, so the exclusion sets use its hexadecimal regex escape.
-    // The comment extra competes in ERE lexical states, so every ERE token
-    // whose set contains "#" carries a lexical precedence above the comment.
-    _ordinary_character: () =>
-      token.immediate(prec(1, /[^.\x5B\x5C*^$+?{|}()/\n]/)),
+    // Every ERE token is immediate and the comment is external, so no extra
+    // competes here; a lexical precedence marks the token that wins where two
+    // ERE spellings of one character are valid in the same state: a closing
+    // delimiter over the ordinary character, the negation over the bracket
+    // character, and a defined escape over the undefined one.
+    _ordinary_character: () => token.immediate(/[^.\x5B\x5C*^$+?{|}()/\n]/),
 
-    _ere_ordinary_close_parenthesis: () => token.immediate(prec(1, ")")),
+    _ere_ordinary_close_parenthesis: () => token.immediate(")"),
 
-    _ere_ordinary_close_brace: () => token.immediate(prec(1, "}")),
+    _ere_ordinary_close_brace: () => token.immediate("}"),
 
-    _ere_close_parenthesis: () => token.immediate(prec(2, ")")),
+    _ere_close_parenthesis: () => token.immediate(prec(1, ")")),
 
-    _ere_close_brace: () => token.immediate(prec(2, "}")),
+    _ere_close_brace: () => token.immediate(prec(1, "}")),
 
-    _ere_close_bracket: () => token.immediate(prec(3, "]")),
+    _ere_close_bracket: () => token.immediate(prec(1, "]")),
 
     _ere_bracket_hyphen: () => token.immediate("-"),
 
-    _ere_bracket_character: () =>
-      token.immediate(prec(1, /[^\x2D\x2F\x5B\x5C\x5D\n]/)),
+    _ere_bracket_character: () => token.immediate(/[^\x2D\x2F\x5B\x5C\x5D\n]/),
 
-    _ere_bracket_open_character: () => token.immediate(prec(1, "[")),
+    _ere_bracket_open_character: () => token.immediate("["),
 
-    _ere_bracket_close_character: () => token.immediate(prec(1, "]")),
+    _ere_bracket_close_character: () => token.immediate("]"),
 
     _ere_compound_nonmeta_character: () =>
-      token.immediate(prec(1, /[^\x2D\x2F\x5C\x5D\x5E\n]/)),
+      token.immediate(/[^\x2D\x2F\x5C\x5D\x5E\n]/),
 
     _ere_compound_meta_character: () => token.immediate(/[\x2D\x5D\x5E]/),
 
     _ere_class_name_spelling: () => token.immediate(/[A-Za-z][A-Za-z0-9]*/),
 
-    _ere_named_escape_character: () => token.immediate(prec(2, /[abfnrtv]/)),
+    _ere_named_escape_character: () => token.immediate(prec(1, /[abfnrtv]/)),
 
     _ere_quoted_escape_character: () =>
-      token.immediate(prec(2, /[().*+?{}|^$\x5B\x5C\x5D]/)),
+      token.immediate(prec(1, /[().*+?{}|^$\x5B\x5C\x5D]/)),
 
-    _ere_undefined_escape_character: () =>
-      token.immediate(prec(1, /[^0-7\x2F\x5C\n]/)),
+    _ere_undefined_escape_character: () => token.immediate(/[^0-7\x2F\x5C\n]/),
 
     newline_opt: ($) => rawNewlines($),
 
@@ -1746,14 +1760,11 @@ module.exports = grammar({
 
     line_continuation: () => token(seq("\\", "\n")),
 
-    comment: () => token(seq("#", /[^\n]*/)),
-
     _number_digit_chunk: () => token.immediate(/[0-9]+/),
 
     _escape_introducer: () => token.immediate(/\\/),
 
-    _escape_character: () =>
-      choice(token.immediate(/\\/), token.immediate(prec(1, /[^0-7\\\n]/))),
+    _escape_character: () => token.immediate(/[^0-7\n]/),
 
     _escape_octal_digits: () => token.immediate(/[0-7]{1,3}/),
   },

@@ -163,6 +163,13 @@ BEGIN {
 #     ^ punctuation.bracket
 #      ^ punctuation.delimiter
 
+/[-]/ { print }
+# <- punctuation.delimiter
+#^ punctuation.bracket
+# ^ string.regexp
+#  ^ punctuation.bracket
+#   ^ punctuation.delimiter
+
 /a)b}c/ { print }
 # <- punctuation.delimiter
 #^ string.regexp

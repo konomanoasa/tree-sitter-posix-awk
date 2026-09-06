@@ -427,6 +427,8 @@ const physicallyClosedMalformedItems = [
   ["missing do tail after a bodyless control", "middle { do while (inner) }"],
   ["missing left range arm", ", right {}"],
   ["missing right range arm", "left, {}"],
+  ["hash after an ERE class name", "middle { print /[[:alpha#:]]/ }"],
+  ["hash after an ERE interval count", "middle { print /a{2#}/ }"],
 ];
 
 for (const [label, malformed] of physicallyClosedMalformedItems) {
@@ -701,6 +703,18 @@ const invalidClassificationCases = [
     },
     name: "an assignment never nests inside a conditional alternative",
     source: lines("BEGIN { x = a ? b : c = d }"),
+  },
+  {
+    assertions: (tree) => excludes(tree, "comment"),
+    name: "a hash where the ERE grammar accepts no character never opens a comment",
+    source: lines(
+      "BEGIN {",
+      "  print /[[:alpha#:]]/",
+      "  print /a{2#}/",
+      "  print /[[:#:]]/",
+      "  print /a{#}/",
+      "}",
+    ),
   },
 ];
 
@@ -1203,6 +1217,52 @@ const unclosedString = lines('BEGIN { print "abc', "}");
 determinismTest("insert-string-closing-quote", unclosedString, closedString, [
   '18 0 "',
 ]);
+
+const hashString = lines('BEGIN { print "#"', "}");
+const hashComment = lines('BEGIN { print #"', "}");
+determinismTest(
+  "string-to-comment",
+  hashString,
+  hashComment,
+  ["14 1 "],
+  (tree) => {
+    contains(tree, "comment");
+    excludes(tree, "string");
+  },
+);
+determinismTest(
+  "comment-to-string",
+  hashComment,
+  hashString,
+  ['14 0 "'],
+  (tree) => {
+    contains(tree, "string_content");
+    excludes(tree, "comment");
+  },
+);
+
+const hashEre = lines("BEGIN { print /#/", "}");
+const hashEreComment = lines("BEGIN { print #/", "}");
+determinismTest(
+  "ere-to-comment",
+  hashEre,
+  hashEreComment,
+  ["14 1 "],
+  (tree) => {
+    contains(tree, "comment");
+    excludes(tree, "ere");
+  },
+);
+determinismTest(
+  "comment-to-ere",
+  hashEreComment,
+  hashEre,
+  ["14 0 /"],
+  (tree) => {
+    contains(tree, "ordinary_character");
+    excludes(tree, "comment");
+  },
+);
 
 const plainEscape = lines('BEGIN { print "an" }');
 const backslashEscape = lines(String.raw`BEGIN { print "a\n" }`);

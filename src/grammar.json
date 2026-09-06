@@ -1961,6 +1961,62 @@
       "type": "SYMBOL",
       "name": "_function_word"
     },
+    "print_keyword": {
+      "type": "SYMBOL",
+      "name": "_print_word"
+    },
+    "break_keyword": {
+      "type": "SYMBOL",
+      "name": "_break_word"
+    },
+    "continue_keyword": {
+      "type": "SYMBOL",
+      "name": "_continue_word"
+    },
+    "delete_keyword": {
+      "type": "SYMBOL",
+      "name": "_delete_word"
+    },
+    "do_keyword": {
+      "type": "SYMBOL",
+      "name": "_do_word"
+    },
+    "else_keyword": {
+      "type": "SYMBOL",
+      "name": "_else_word"
+    },
+    "exit_keyword": {
+      "type": "SYMBOL",
+      "name": "_exit_word"
+    },
+    "for_keyword": {
+      "type": "SYMBOL",
+      "name": "_for_word"
+    },
+    "if_keyword": {
+      "type": "SYMBOL",
+      "name": "_if_word"
+    },
+    "next_keyword": {
+      "type": "SYMBOL",
+      "name": "_next_word"
+    },
+    "nextfile_keyword": {
+      "type": "SYMBOL",
+      "name": "_nextfile_word"
+    },
+    "printf_keyword": {
+      "type": "SYMBOL",
+      "name": "_printf_word"
+    },
+    "return_keyword": {
+      "type": "SYMBOL",
+      "name": "_return_word"
+    },
+    "while_keyword": {
+      "type": "SYMBOL",
+      "name": "_while_word"
+    },
     "action_boundary_body": {
       "type": "CHOICE",
       "members": [
@@ -4601,62 +4657,6 @@
           ]
         }
       ]
-    },
-    "print_keyword": {
-      "type": "SYMBOL",
-      "name": "_print_word"
-    },
-    "printf_keyword": {
-      "type": "SYMBOL",
-      "name": "_printf_word"
-    },
-    "break_keyword": {
-      "type": "SYMBOL",
-      "name": "_break_word"
-    },
-    "continue_keyword": {
-      "type": "SYMBOL",
-      "name": "_continue_word"
-    },
-    "delete_keyword": {
-      "type": "SYMBOL",
-      "name": "_delete_word"
-    },
-    "do_keyword": {
-      "type": "SYMBOL",
-      "name": "_do_word"
-    },
-    "else_keyword": {
-      "type": "SYMBOL",
-      "name": "_else_word"
-    },
-    "exit_keyword": {
-      "type": "SYMBOL",
-      "name": "_exit_word"
-    },
-    "for_keyword": {
-      "type": "SYMBOL",
-      "name": "_for_word"
-    },
-    "if_keyword": {
-      "type": "SYMBOL",
-      "name": "_if_word"
-    },
-    "next_keyword": {
-      "type": "SYMBOL",
-      "name": "_next_word"
-    },
-    "nextfile_keyword": {
-      "type": "SYMBOL",
-      "name": "_nextfile_word"
-    },
-    "return_keyword": {
-      "type": "SYMBOL",
-      "name": "_return_word"
-    },
-    "while_keyword": {
-      "type": "SYMBOL",
-      "name": "_while_word"
     },
     "print_expr_list": {
       "type": "SEQ",
@@ -11107,6 +11107,10 @@
         }
       ]
     },
+    "div_assign": {
+      "type": "SYMBOL",
+      "name": "_div_assign_operator"
+    },
     "add_assign": {
       "type": "SYMBOL",
       "name": "_add_assign_operator"
@@ -11118,10 +11122,6 @@
     "mul_assign": {
       "type": "SYMBOL",
       "name": "_mul_assign_operator"
-    },
-    "div_assign": {
-      "type": "SYMBOL",
-      "name": "_div_assign_operator"
     },
     "mod_assign": {
       "type": "SYMBOL",

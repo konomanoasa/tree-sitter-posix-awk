@@ -60,6 +60,61 @@ const continuationRules = Object.fromEntries(
   ]),
 );
 
+// Keywords the scanner lexes as `_<keyword>_word` and the CST exposes as
+// `<keyword>_keyword`, in the order of the scanner's token enum. `getline`
+// and `in` also have promoted scanner tokens, so their rules are spelled out.
+const KEYWORDS = [
+  "begin",
+  "end",
+  "function",
+  "print",
+  "break",
+  "continue",
+  "delete",
+  "do",
+  "else",
+  "exit",
+  "for",
+  "if",
+  "next",
+  "nextfile",
+  "printf",
+  "return",
+  "while",
+];
+
+const keywordRules = Object.fromEntries(
+  KEYWORDS.map((keyword) => [
+    `${keyword}_keyword`,
+    ($) => $[`_${keyword}_word`],
+  ]),
+);
+
+// POSIX named two-character tokens: the scanner lexes `_<name>_operator` and
+// the CST exposes `<name>`, in the order of the scanner's token enum.
+const TWO_CHARACTER_TOKENS = [
+  "div_assign",
+  "add_assign",
+  "sub_assign",
+  "mul_assign",
+  "mod_assign",
+  "pow_assign",
+  "or",
+  "and",
+  "no_match",
+  "eq",
+  "le",
+  "ge",
+  "ne",
+  "incr",
+  "decr",
+  "append",
+];
+
+const twoCharacterTokenRules = Object.fromEntries(
+  TWO_CHARACTER_TOKENS.map((name) => [name, ($) => $[`_${name}_operator`]]),
+);
+
 const continuationsBefore = ($, target) => $[`_${target}_continuation`];
 
 const optionalContinuationsBefore = ($, target) =>
@@ -176,10 +231,8 @@ const ereCompoundClosing = (guard, punctuation) =>
 // A raw newline or EOF ends a static ERE, or its compound bracket form,
 // lexically; the scanner's zero-width lexical end stands in for the absent
 // closing, so the ERE never owns the source that follows the newline.
-const ereLexicalEnd = ($) => $._ere_lexical_end;
-
 const ereRequiredPayload = ($, payload, closing) =>
-  choice(ereLexicalEnd($), seq(payload, choice(closing, ereLexicalEnd($))));
+  choice($._ere_lexical_end, seq(payload, choice(closing, $._ere_lexical_end)));
 
 const ereCompound = ($, opening, payload, closing) =>
   seq(opening, ereRequiredPayload($, payload, closing));
@@ -221,20 +274,10 @@ const controlStatements = ($, body) => [
 const actionBoundaryControlBody = ($) =>
   alias($.action_body_boundary_control, $.unterminated_statement);
 
-// Structural Recovery (CST.md) fixes the boundary of an item around a
-// required member that is absent. Tree-sitter's cost-based recovery would
-// take the next item's action for that member, so a zero-width scanner
-// token stands in for it instead. The token has no node: the member is
-// simply absent from the CST, and the item ends where POSIX ends it.
-//
-// The scanner emits the absent statement only when the closing brace (or
-// EOF) follows the construct that still requires it: the body of a control
-// header, or the `while` tail of a do statement.
+// These zero-width tokens prevent recovery from absorbing the next item's
+// action as a missing member of this item.
 const missingStatement = ($) => $._statement_recovery;
 
-// The scanner emits the absent action when what follows a special pattern
-// or a function header (past blanks, continuations, and the header's own
-// newlines) cannot open an action.
 const missingAction = ($) => $._action_recovery;
 
 const statementTerminatedBy = ($, target, terminator) =>
@@ -282,9 +325,6 @@ const subscript = ($, subscripts) =>
     continuedExpressionMember($, subscripts),
     $._continued_close_bracket,
   );
-
-const subscriptedName = ($, subscripts) =>
-  seq($.name, subscript($, subscripts));
 
 // Another item follows an item without a terminator: the scanner's
 // zero-width boundary stands in for the absent terminator (see
@@ -817,23 +857,7 @@ module.exports = grammar({
   name: "posix_awk",
 
   externals: ($) => [
-    $._begin_word,
-    $._end_word,
-    $._function_word,
-    $._print_word,
-    $._break_word,
-    $._continue_word,
-    $._delete_word,
-    $._do_word,
-    $._else_word,
-    $._exit_word,
-    $._for_word,
-    $._if_word,
-    $._next_word,
-    $._nextfile_word,
-    $._printf_word,
-    $._return_word,
-    $._while_word,
+    ...KEYWORDS.map((keyword) => $[`_${keyword}_word`]),
     $._name_word,
     $._for_in_variable_word,
     $._getline_word,
@@ -847,22 +871,7 @@ module.exports = grammar({
     $._number_exponent,
     $._division_slash,
     $._ere_opening_slash,
-    $._div_assign_operator,
-    $._add_assign_operator,
-    $._sub_assign_operator,
-    $._mul_assign_operator,
-    $._mod_assign_operator,
-    $._pow_assign_operator,
-    $._or_operator,
-    $._and_operator,
-    $._no_match_operator,
-    $._eq_operator,
-    $._le_operator,
-    $._ge_operator,
-    $._ne_operator,
-    $._incr_operator,
-    $._decr_operator,
-    $._append_operator,
+    ...TWO_CHARACTER_TOKENS.map((name) => $[`_${name}_operator`]),
     $._output_greater_guard,
     ...CONTINUATION_TARGETS.map((target) => $[`_lc_before_${target}`]),
     $._closed_item_boundary,
@@ -1077,11 +1086,7 @@ module.exports = grammar({
 
     special_pattern: ($) => choice($.begin_keyword, $.end_keyword),
 
-    begin_keyword: ($) => $._begin_word,
-
-    end_keyword: ($) => $._end_word,
-
-    function_keyword: ($) => $._function_word,
+    ...keywordRules,
 
     // Visible only through aliases; see classOperandName.
     action_boundary_body: ($) =>
@@ -1249,34 +1254,6 @@ module.exports = grammar({
         continuedExpressionMember($, $.expr),
       ),
 
-    print_keyword: ($) => $._print_word,
-
-    printf_keyword: ($) => $._printf_word,
-
-    break_keyword: ($) => $._break_word,
-
-    continue_keyword: ($) => $._continue_word,
-
-    delete_keyword: ($) => $._delete_word,
-
-    do_keyword: ($) => $._do_word,
-
-    else_keyword: ($) => $._else_word,
-
-    exit_keyword: ($) => $._exit_word,
-
-    for_keyword: ($) => $._for_word,
-
-    if_keyword: ($) => $._if_word,
-
-    next_keyword: ($) => $._next_word,
-
-    nextfile_keyword: ($) => $._nextfile_word,
-
-    return_keyword: ($) => $._return_word,
-
-    while_keyword: ($) => $._while_word,
-
     print_expr_list: ($) =>
       seq($.print_expr, repeat(continuedPrintListElement($, $.print_expr))),
 
@@ -1344,7 +1321,7 @@ module.exports = grammar({
     lvalue: ($) =>
       choice(
         $.name,
-        subscriptedName($, $.expr_list),
+        seq($.name, subscript($, $.expr_list)),
         seq(
           field("operator", "$"),
           continuedExpression($, "operand", alias($.normal_field_expr, $.expr)),
@@ -1404,12 +1381,6 @@ module.exports = grammar({
     number: ($) =>
       choice($._number_integer, $._number_fraction, $._number_exponent),
 
-    // The scanner owns the lexical modes of a static ERE and a string, so the
-    // tokens that enter and leave them are external, and so is the comment:
-    // it is lexed only outside those modes, where a `#` between tokens is
-    // never content. Inside them the grammar decides what a `#` is, even
-    // where it accepts no character (after a class name or an interval
-    // count), instead of an extra swallowing the rest of the line.
     string: ($) =>
       seq(
         field("opening", alias($._string_opening, '"')),
@@ -1426,37 +1397,7 @@ module.exports = grammar({
         choice($._escape_character, $._escape_octal_digits),
       ),
 
-    add_assign: ($) => $._add_assign_operator,
-
-    sub_assign: ($) => $._sub_assign_operator,
-
-    mul_assign: ($) => $._mul_assign_operator,
-
-    div_assign: ($) => $._div_assign_operator,
-
-    mod_assign: ($) => $._mod_assign_operator,
-
-    pow_assign: ($) => $._pow_assign_operator,
-
-    or: ($) => $._or_operator,
-
-    and: ($) => $._and_operator,
-
-    no_match: ($) => $._no_match_operator,
-
-    eq: ($) => $._eq_operator,
-
-    le: ($) => $._le_operator,
-
-    ge: ($) => $._ge_operator,
-
-    ne: ($) => $._ne_operator,
-
-    incr: ($) => $._incr_operator,
-
-    decr: ($) => $._decr_operator,
-
-    append: ($) => $._append_operator,
+    ...twoCharacterTokenRules,
 
     ere: ($) =>
       seq(
@@ -1468,7 +1409,7 @@ module.exports = grammar({
           ),
           seq(
             optional(field("expression", $.extended_reg_exp)),
-            ereLexicalEnd($),
+            $._ere_lexical_end,
           ),
         ),
       ),

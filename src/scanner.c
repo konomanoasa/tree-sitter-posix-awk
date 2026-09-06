@@ -217,10 +217,8 @@ typedef enum {
   NUMBER_KIND_EXPONENT,
 } NumberKind;
 
-// The scanner owns the lexical modes of a static ERE and a string: the
-// opening token of each enters its mode, and the token that ends it returns
-// to OUTSIDE. A comment is lexed only in OUTSIDE, so a `#` inside an ERE or a
-// string never opens one.
+// Lexical modes prevent comments from consuming string or ERE content,
+// including a misplaced '#' that the ERE grammar cannot accept.
 typedef enum {
   LEXICAL_MODE_OUTSIDE,
   LEXICAL_MODE_ERE_BODY,
@@ -528,7 +526,6 @@ static bool emit(TSLexer *lexer, enum TokenType token) {
   return true;
 }
 
-// Emits the token that moves the scanner into a lexical mode.
 static bool emit_mode(
   ScannerState *state,
   TSLexer *lexer,
@@ -670,8 +667,6 @@ static bool word_kind_is_valid(const bool *valid_symbols, WordKind kind) {
   return token != NULL && valid_symbols[token->token];
 }
 
-// A spelling is worth scanning when its kind or a kind it can be promoted to
-// is valid.
 static bool word_spelling_is_valid(const bool *valid_symbols, WordKind kind) {
   switch (kind) {
   case WORD_KIND_NAME:
@@ -703,7 +698,7 @@ scan_word_token(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
   );
 }
 
-static bool has_word_marker(const bool *valid_symbols) {
+static bool has_word_token(const bool *valid_symbols) {
   for (size_t i = 0; i < ARRAY_LENGTH(WORD_TOKENS); i++) {
     if (valid_symbols[WORD_TOKENS[i].token]) {
       return true;
@@ -1290,7 +1285,7 @@ static bool scan_comment(TSLexer *lexer) {
   return emit(lexer, COMMENT);
 }
 
-static bool has_number_marker(const bool *valid_symbols) {
+static bool has_number_token(const bool *valid_symbols) {
   return valid_symbols[NUMBER_INTEGER] ||
     valid_symbols[NUMBER_FRACTION] ||
     valid_symbols[NUMBER_EXPONENT];
@@ -1308,7 +1303,7 @@ static bool scan_word_or_item_boundary(
   const bool *valid_symbols,
   bool allow_item_boundary
 ) {
-  const bool word_is_valid = has_word_marker(valid_symbols);
+  const bool word_is_valid = has_word_token(valid_symbols);
   const bool item_boundary_is_valid = allow_item_boundary &&
     (valid_symbols[CLOSED_ITEM_BOUNDARY] ||
       valid_symbols[NORMAL_PATTERN_ITEM_BOUNDARY]);
@@ -1333,7 +1328,7 @@ static bool scan_number_or_item_boundary(
 ) {
   const bool item_boundary_is_valid =
     allow_item_boundary && valid_symbols[CLOSED_ITEM_BOUNDARY];
-  if (!item_boundary_is_valid && !has_number_marker(valid_symbols)) {
+  if (!item_boundary_is_valid && !has_number_token(valid_symbols)) {
     return false;
   }
 

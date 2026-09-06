@@ -113,9 +113,6 @@
   (wildcard)
 ] @character.special
 
-(nonmatching_list
-  "^" @operator)
-
 (start_range
   "-" @operator)
 

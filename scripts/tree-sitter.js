@@ -128,10 +128,7 @@ module.exports = {
 };
 
 if (require.main === module) {
-  const result = run(process.argv.slice(2), {
-    encoding: null,
-    stdio: "inherit",
-  });
+  const result = run(process.argv.slice(2), { stdio: "inherit" });
   if (result.error !== undefined) {
     throw result.error;
   }

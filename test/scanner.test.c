@@ -588,6 +588,21 @@ static int check_action_recovery(void) {
       true,
       ACTION_RECOVERY},
     {"continued EOF without an action", "\\\n", false, true, ACTION_RECOVERY},
+    {"continued header layout leads to an action",
+      "\\\n # c\n{",
+      false,
+      true,
+      LC_BEFORE_NEWLINE},
+    {"continued header layout does not lead to an action",
+      "\\\n # c\nEND",
+      false,
+      true,
+      ACTION_RECOVERY},
+    {"continued header newline reaches EOF",
+      "\\\n\n",
+      false,
+      true,
+      ACTION_RECOVERY},
     {"action after the header newline",
       "\n\n  # c\n{",
       true,
@@ -596,9 +611,9 @@ static int check_action_recovery(void) {
     {"reserved word after the header newline",
       "\nEND",
       true,
-      true,
+      false,
       ACTION_RECOVERY},
-    {"EOF after the header newline", "\n", true, true, ACTION_RECOVERY},
+    {"EOF after the header newline", "\n", true, false, ACTION_RECOVERY},
   };
 
   int failed = 0;
@@ -606,6 +621,7 @@ static int check_action_recovery(void) {
     bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
     valid_symbols[ACTION_RECOVERY] = true;
     valid_symbols[LC_BEFORE_ACTION] = true;
+    valid_symbols[LC_BEFORE_NEWLINE] = true;
     valid_symbols[ACTION_TARGET_GUARD] = cases[i].guard_valid;
     failed |= expect_scan_result(
       cases[i].name,

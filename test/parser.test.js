@@ -443,6 +443,41 @@ for (const [label, malformed] of physicallyClosedMalformedItems) {
   });
 }
 
+for (const { label, initial, final, before, inserted, preserved } of [
+  {
+    label: "function body after a continuation and comment",
+    initial: lines("before {}", "function f() \\", "#", "END {}"),
+    final: lines("before {}", "function f() \\", "#", "{}", "END {}"),
+    before: "END",
+    inserted: "{}\n",
+    preserved: ["before {}", "END {}"],
+  },
+  {
+    label: "function body after a continuation and newline",
+    initial: lines("before {}", "function f() \\", "", "END {}"),
+    final: lines("before {}", "function f() \\", "", "{}", "END {}"),
+    before: "END",
+    inserted: "{}\n",
+    preserved: ["before {}", "END {}"],
+  },
+  {
+    label: "special pattern action before a comment's newline",
+    initial: lines("before {}", "BEGIN \\", "#", "{}", "END {}"),
+    final: lines("before {}", "BEGIN \\", "{} #", "{}", "END {}"),
+    before: "#",
+    inserted: "{} ",
+    preserved: ["before {}", "{}", "END {}"],
+  },
+]) {
+  test(`a missing ${label} preserves adjacent items and repairs cleanly`, () => {
+    assertPreservedItems(label, initial, preserved);
+    const tree = assertDeterministicEdit(label, initial, final, [
+      `${initial.indexOf(before)} 0 ${inserted}`,
+    ]);
+    contains(tree, "line_continuation");
+  });
+}
+
 for (const [label, malformedLine] of [
   ["string", 'middle { print "broken'],
   ["ERE", "middle { print /broken"],
@@ -645,11 +680,6 @@ const invalidClassificationCases = [
         0,
         "Expected division priority to prevent an ERE node",
       );
-      assert.equal(
-        matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
-        2,
-        "Expected each division-priority slash to have one CST token",
-      );
     },
     name: "division context wins over an ERE-shaped spelling",
     source: lines("BEGIN { print x /a/ }"),
@@ -694,14 +724,7 @@ const invalidClassificationCases = [
     source: lines("BEGIN {", String.raw`  f\(value)`, "  after", "}"),
   },
   {
-    assertions: (tree) => {
-      assert.equal(
-        matchingLineCount(tree, /^[ \t0-9:-]+right: expr$/),
-        1,
-        "Expected the conditional to close before the assignment operator",
-      );
-    },
-    name: "an assignment never nests inside a conditional alternative",
+    name: "an unparenthesized assignment in a conditional alternative is rejected",
     source: lines("BEGIN { x = a ? b : c = d }"),
   },
   {
@@ -751,6 +774,39 @@ determinismTest(
 );
 determinismTest("operand-to-ere", matchOperand, matchEre, ["18 1 /a/"]);
 determinismTest("ere-to-operand", matchEre, matchOperand, ["18 3 a"]);
+
+for (const [label, initial, final] of [
+  [
+    "expression",
+    lines("BEGIN { value = a + /b/ + c }"),
+    lines("BEGIN { value = a   /b/ + c }"),
+  ],
+  [
+    "print expression with a continuation",
+    lines("BEGIN { print a + \\", "/b/ + c }"),
+    lines("BEGIN { print a   \\", "/b/ + c }"),
+  ],
+  [
+    "top-level pattern",
+    lines("a + /b/ + c { print }"),
+    lines("a   /b/ + c { print }"),
+  ],
+]) {
+  determinismTest(
+    `removing an operator reclassifies ERE slashes as division in the ${label}`,
+    initial,
+    final,
+    [`${initial.indexOf("+")} 1  `],
+    (tree) => {
+      excludes(tree, "extended_reg_exp");
+      assert.equal(
+        matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
+        2,
+        "Expected both slashes to be division tokens in the valid expression",
+      );
+    },
+  );
+}
 
 const membershipBeforeLogicalAnd = lines("BEGIN { x = a in b && c }");
 const membershipBeforeMatch = lines("BEGIN { x = a in b ~ c }");

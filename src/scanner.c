@@ -980,9 +980,7 @@ scan_required_target_guard(TSLexer *lexer, const bool *valid_symbols) {
     }
   }
 
-  // The newline led to no target; an action that the parser still requires
-  // is absent, and the newline ends its item.
-  return emit_action_recovery(lexer, valid_symbols);
+  return false;
 }
 
 static bool scan_ere_backslash_context(
@@ -1116,6 +1114,17 @@ emit_boundary_target_marker(TSLexer *lexer, const bool *valid_symbols) {
   }
 
   const int32_t first = lexer->lookahead;
+  // A newline marker commits the function-body layout before its target
+  // guard can reject a missing action.
+  if (
+    first ==
+    '\n' &&
+    valid_symbols[LC_BEFORE_NEWLINE] &&
+    valid_symbols[ACTION_RECOVERY] &&
+    (!advance_layout_gap(lexer) || lexer->lookahead != '{')
+  ) {
+    return false;
+  }
   int32_t second = 0;
   if (has_two_character_target(first)) {
     lexer->advance(lexer, false);

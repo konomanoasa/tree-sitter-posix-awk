@@ -1,5 +1,3 @@
-// Even numbers only: the adjacent operand chain (see CLASSIFICATIONS) uses
-// the odd number just above each tier to outrank the non_unary chain.
 const PRECEDENCE = {
   assignment: 2,
   logicalOr: 4,
@@ -271,9 +269,6 @@ const controlStatements = ($, body) => [
   seq($._for_header, continuedStatement($, field("body", body))),
 ];
 
-const actionBoundaryControlBody = ($) =>
-  alias($.action_body_boundary_control, $.unterminated_statement);
-
 // These zero-width tokens prevent recovery from absorbing the next item's
 // action as a missing member of this item.
 const missingStatement = ($) => $._statement_recovery;
@@ -391,14 +386,6 @@ const anyTierName = (context, tier) => `${context.prefix}_${tier}_expr`;
 const classTier = ($, context, classification, tier) =>
   $[classTierName(context, classification, tier)];
 
-// The adjacent chain shares its productions with the non_unary chain; where a
-// parser state could reduce into either, the adjacent chain wins.
-const adjacentLeaf = (classification, rule) =>
-  classification === "adjacent" ? prec(1, rule) : rule;
-
-const classPrecedence = (classification, precedence) =>
-  classification === "adjacent" ? precedence + 1 : precedence;
-
 const aliasedClassTier = ($, context, classification, tier) =>
   alias(
     $[classOperandName(context, classification, tier)],
@@ -409,13 +396,7 @@ const aliasedClassTier = ($, context, classification, tier) =>
     ],
   );
 
-// Operand classifications: POSIX unary_expr, POSIX non_unary_expr, and the
-// non_unary_expr that directly follows another operand (the right operand of
-// a concatenation). A slash after a complete operand is always division, so
-// an ERE can never start an adjacent operand; keeping it out of the grammar
-// stops a reused subtree from re-lexing that slash as an ERE.
-const CLASSIFICATIONS = ["unary", "non_unary", "adjacent"];
-const BINARY_CLASSIFICATIONS = ["unary", "non_unary"];
+const CLASSIFICATIONS = ["unary", "non_unary"];
 
 const aliasedAnyTier = ($, context, tier) =>
   alias($[anyTierName(context, tier)], $[context.expression]);
@@ -423,7 +404,7 @@ const aliasedAnyTier = ($, context, tier) =>
 const expressionTargetGuard = ($, context) =>
   context.input ? $._expression_target_guard : $._print_expression_target_guard;
 
-const nonUnaryAtom = ($, context, adjacent = false) => {
+const nonUnaryAtom = ($, context) => {
   const atoms = [
     $._parenthesized_expression,
     $.number,
@@ -432,10 +413,8 @@ const nonUnaryAtom = ($, context, adjacent = false) => {
     $._user_function_call,
     $._builtin_function_call,
     $.builtin_func_name,
+    $.ere,
   ];
-  if (!adjacent) {
-    atoms.push($.ere);
-  }
   if (context.input) {
     atoms.push($.non_unary_input_function);
   }
@@ -496,7 +475,7 @@ const tieredExpressionRules = (context) => {
     );
 
   const addAnyTier = (tier) => {
-    for (const classification of BINARY_CLASSIFICATIONS) {
+    for (const classification of CLASSIFICATIONS) {
       addOperand(classification, tier);
     }
     rules[any(tier)] = ($) =>
@@ -509,21 +488,15 @@ const tieredExpressionRules = (context) => {
   // POSIX fixes the right operand of `in` to a NAME, so a membership
   // expression is complete before any operator that follows it and can be
   // the left operand of every higher-precedence binary operator without
-  // parentheses ("a in b ~ c" is "(a in b) ~ c"). The adjacent chain never
-  // holds one: after a complete operand, the concatenation binds first and
-  // becomes the left operand of `in` ("a b in c" is "(a b) in c").
+  // parentheses ("a in b ~ c" is "(a in b) ~ c").
   const membershipInLeft = ($, classification, tail) =>
-    classification === "adjacent"
-      ? []
-      : [
-          seq(
-            field(
-              "left",
-              aliasedClassTier($, context, classification, "membership_in"),
-            ),
-            tail,
-          ),
-        ];
+    seq(
+      field(
+        "left",
+        aliasedClassTier($, context, classification, "membership_in"),
+      ),
+      tail,
+    );
 
   const addLeftAssociativeTier = (tier, nextTier, operator, precedence) => {
     addAnyTier(nextTier);
@@ -535,15 +508,13 @@ const tieredExpressionRules = (context) => {
         choice(
           classTier($, context, classification, nextTier),
           prec.left(
-            classPrecedence(classification, precedence),
+            precedence,
             seq(
               field("left", aliasedClassTier($, context, classification, tier)),
               $[tail],
             ),
           ),
-          ...membershipInLeft($, classification, $[tail]).map((rule) =>
-            prec.left(precedence, rule),
-          ),
+          prec.left(precedence, membershipInLeft($, classification, $[tail])),
         );
     }
   };
@@ -552,7 +523,7 @@ const tieredExpressionRules = (context) => {
     addAnyTier(nextTier);
     const tail = `_${context.prefix}_${tier}_tail`;
     rules[tail] = ($) => seq(operator($), requiredTier($, "right", nextTier));
-    for (const classification of BINARY_CLASSIFICATIONS) {
+    for (const classification of CLASSIFICATIONS) {
       rules[classTierName(context, classification, tier)] = ($) =>
         choice(
           classTier($, context, classification, nextTier),
@@ -566,9 +537,7 @@ const tieredExpressionRules = (context) => {
               $[tail],
             ),
           ),
-          ...membershipInLeft($, classification, $[tail]).map((rule) =>
-            prec(precedence, rule),
-          ),
+          prec(precedence, membershipInLeft($, classification, $[tail])),
         );
     }
   };
@@ -603,7 +572,7 @@ const tieredExpressionRules = (context) => {
   // precedence assignment never nests inside it: "a ? b : c = d" is invalid,
   // as it is after every other operator.
   addAnyTier("conditional");
-  for (const classification of BINARY_CLASSIFICATIONS) {
+  for (const classification of CLASSIFICATIONS) {
     addOperand(classification, "logical_or");
     rules[classTierName(context, classification, "conditional")] = ($) =>
       choice(
@@ -631,7 +600,7 @@ const tieredExpressionRules = (context) => {
           requiredTier($, "right", nextTier),
         ),
       );
-    for (const classification of BINARY_CLASSIFICATIONS) {
+    for (const classification of CLASSIFICATIONS) {
       rules[classTierName(context, classification, tier)] = ($) =>
         choice(
           classTier($, context, classification, nextTier),
@@ -666,7 +635,7 @@ const tieredExpressionRules = (context) => {
       $._continued_membership_operator,
       continuedExpression($, "right", $.name),
     );
-  for (const classification of BINARY_CLASSIFICATIONS) {
+  for (const classification of CLASSIFICATIONS) {
     addOperand(classification, "membership_in");
     rules[classTierName(context, classification, "membership_in")] = ($) => {
       const members = [
@@ -716,14 +685,13 @@ const tieredExpressionRules = (context) => {
     );
   }
 
-  addOperand("adjacent", "additive");
   const concatenationTail = `_${context.prefix}_concatenation_tail`;
   rules[concatenationTail] = ($) =>
     continuedExpressionMember(
       $,
-      field("right", aliasedClassTier($, context, "adjacent", "additive")),
+      field("right", aliasedClassTier($, context, "non_unary", "additive")),
     );
-  for (const classification of BINARY_CLASSIFICATIONS) {
+  for (const classification of CLASSIFICATIONS) {
     rules[classTierName(context, classification, "concatenation")] = ($) =>
       choice(
         classTier($, context, classification, "additive"),
@@ -737,8 +705,9 @@ const tieredExpressionRules = (context) => {
             $[concatenationTail],
           ),
         ),
-        ...membershipInLeft($, classification, $[concatenationTail]).map(
-          (rule) => prec.left(PRECEDENCE.concatenation, rule),
+        prec.left(
+          PRECEDENCE.concatenation,
+          membershipInLeft($, classification, $[concatenationTail]),
         ),
       );
   }
@@ -766,13 +735,8 @@ const tieredExpressionRules = (context) => {
     );
   rules[not] = ($) =>
     seq(field("operator", "!"), requiredTier($, "operand", "unary"));
-  for (const classification of ["non_unary", "adjacent"]) {
-    rules[classTierName(context, classification, "unary")] = ($) =>
-      choice(
-        classTier($, context, classification, "exponentiation"),
-        adjacentLeaf(classification, $[not]),
-      );
-  }
+  rules[nonUnary("unary")] = ($) =>
+    choice($[nonUnary("exponentiation")], $[not]);
 
   // The unary update tier holds only the unary input function, which print
   // expressions lack, so their unary exponentiation tier keeps just the
@@ -802,31 +766,27 @@ const tieredExpressionRules = (context) => {
               ),
             ]
           : []),
-        ...membershipInLeft($, classification, $[exponentiationTail]),
+        membershipInLeft($, classification, $[exponentiationTail]),
       );
   }
   if (context.input) {
     rules[unary("update")] = ($) => $.unary_input_function;
   }
 
-  for (const classification of ["non_unary", "adjacent"]) {
-    rules[classTierName(context, classification, "update")] = ($) =>
-      choice(
-        classTier($, context, classification, "atom"),
-        adjacentLeaf(classification, $._prefix_update_expr),
-        prec.left(
-          classPrecedence(classification, PRECEDENCE.postfixUpdate),
-          seq(
-            field("operand", $.lvalue),
-            continuedOperator($, choice($.incr, $.decr)),
-          ),
+  rules[nonUnary("update")] = ($) =>
+    choice(
+      $[nonUnary("atom")],
+      $._prefix_update_expr,
+      prec.left(
+        PRECEDENCE.postfixUpdate,
+        seq(
+          field("operand", $.lvalue),
+          continuedOperator($, choice($.incr, $.decr)),
         ),
-      );
-  }
+      ),
+    );
 
   rules[nonUnary("atom")] = ($) => nonUnaryAtom($, context);
-  rules[classTierName(context, "adjacent", "atom")] = ($) =>
-    prec(1, nonUnaryAtom($, context, true));
 
   return rules;
 };
@@ -1088,18 +1048,6 @@ module.exports = grammar({
 
     ...keywordRules,
 
-    // Visible only through aliases; see classOperandName.
-    action_boundary_body: ($) =>
-      statementListWithTail($, actionBoundaryControlBody($)),
-
-    action_body_boundary_control: ($) =>
-      choice(
-        seq($._if_header, missingStatement($)),
-        seq($._while_header, missingStatement($)),
-        seq($._for_header, missingStatement($)),
-        ...controlStatements($, actionBoundaryControlBody($)),
-      ),
-
     action: ($) =>
       seq(
         field("opening", "{"),
@@ -1112,7 +1060,6 @@ module.exports = grammar({
               choice(
                 $.terminated_statement_list,
                 $.unterminated_statement_list,
-                alias($.action_boundary_body, $.unterminated_statement_list),
               ),
             ),
           ),
@@ -1170,6 +1117,9 @@ module.exports = grammar({
 
     terminated_statement: ($) =>
       choice(
+        seq($._if_header, missingStatement($)),
+        seq($._while_header, missingStatement($)),
+        seq($._for_header, missingStatement($)),
         seq($.action, newlineLayout($)),
         $._self_terminating_statement,
         seq(field("terminator", ";"), newlineLayout($)),
@@ -1194,16 +1144,7 @@ module.exports = grammar({
         seq($.return_keyword, optional(continuedExpressionMember($, $.expr))),
         seq(
           $._do_header,
-          continuedStatement(
-            $,
-            field(
-              "body",
-              choice(
-                $.terminated_statement,
-                alias($.action_body_boundary_control, $.terminated_statement),
-              ),
-            ),
-          ),
+          continuedStatement($, field("body", $.terminated_statement)),
           choice(continuedDoTail($), missingStatement($)),
         ),
       ),

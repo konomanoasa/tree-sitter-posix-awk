@@ -88,6 +88,8 @@ enum TokenType {
   CLOSED_ITEM_BOUNDARY,
   NORMAL_PATTERN_ITEM_BOUNDARY,
   STATEMENT_RECOVERY,
+  ACTION_CLOSING,
+  ACTION_END,
   ACTION_RECOVERY,
   ERE_COMPOUND_OPEN_GUARD,
   ERE_DOT_CLOSE_GUARD,
@@ -224,6 +226,7 @@ typedef enum {
   LEXICAL_MODE_ERE_BODY,
   LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
   LEXICAL_MODE_STRING,
+  LEXICAL_MODE_ACTION_END,
 } LexicalMode;
 
 typedef struct {
@@ -571,8 +574,6 @@ static WordKind scan_word_spelling(TSLexer *lexer) {
   return classify_word(word, length);
 }
 
-static WordKind scan_word_kind(TSLexer *lexer);
-
 // Recognizes "in NAME )" after a scanned name, the only shape of a for-in
 // header, so the parser does not have to hold a name open until the
 // closing parenthesis decides between for-in and a classic for.
@@ -630,7 +631,9 @@ promote_word_kind(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
       return WORD_KIND_GETLINE_TARGET;
     }
     if (
-      is_word_start(lexer->lookahead) && scan_word_kind(lexer) == WORD_KIND_NAME
+      scan_word_spelling(lexer) ==
+      WORD_KIND_NAME &&
+      promote_word_kind(lexer, NULL, WORD_KIND_NAME) == WORD_KIND_NAME
     ) {
       return WORD_KIND_GETLINE_TARGET;
     }
@@ -1204,7 +1207,7 @@ void tree_sitter_posix_awk_external_scanner_deserialize(
   state->mode = LEXICAL_MODE_OUTSIDE;
   if (length == SERIALIZED_SCANNER_STATE_SIZE) {
     const unsigned char mode = (unsigned char)buffer[0];
-    if (mode <= LEXICAL_MODE_STRING) {
+    if (mode <= LEXICAL_MODE_ACTION_END) {
       state->mode = (LexicalMode)mode;
     }
   }
@@ -1358,6 +1361,14 @@ bool tree_sitter_posix_awk_external_scanner_scan(
 ) {
   ScannerState *state = payload;
   switch (state->mode) {
+  case LEXICAL_MODE_ACTION_END:
+    // Pairing the delimiter with its end marker prevents recovery from
+    // attaching the next item to an earlier control statement.
+    if (valid_symbols[ACTION_END]) {
+      lexer->mark_end(lexer);
+      return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, ACTION_END);
+    }
+    return false;
   case LEXICAL_MODE_ERE_BODY:
   case LEXICAL_MODE_ERE_ESCAPED_DELIMITER:
     return scan_ere_context(state, lexer, valid_symbols);
@@ -1376,6 +1387,12 @@ bool tree_sitter_posix_awk_external_scanner_scan(
 
   if (lexer->lookahead == '#' && valid_symbols[COMMENT]) {
     return scan_comment(lexer);
+  }
+
+  if (valid_symbols[ACTION_CLOSING] && lexer->lookahead == '}') {
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit_mode(state, lexer, LEXICAL_MODE_ACTION_END, ACTION_CLOSING);
   }
 
   if (!recovering) {

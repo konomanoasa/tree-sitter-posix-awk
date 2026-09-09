@@ -1497,18 +1497,18 @@ BEGIN {
       (newline))))
 
 ==================
-membership results remain left operands of higher precedence operators
+parenthesized membership results are operands of higher precedence operators
 ==================
 
 BEGIN {
-  a in b ~ c
-  a in b < c
-  a in b c
-  a in b + c
-  a in b * d ^ e
-  -a in b ^ c
-  (a, b) in c ~ d
-  print a in b ~ c, -a in b ^ c
+  (a in b) ~ c
+  (a in b) < c
+  (a in b) c
+  (a in b) + c
+  (a in b) * d ^ e
+  (-a in b) ^ c
+  ((a, b) in c) ~ d
+  print (a in b) ~ c, (-a in b) ^ c
 }
 
 ---
@@ -1531,11 +1531,13 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (non_unary_expr
-                      (non_unary_expr
-                        (lvalue
-                          (name)))
-                      (in_keyword)
-                      (name))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1547,11 +1549,13 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (non_unary_expr
-                      (non_unary_expr
-                        (lvalue
-                          (name)))
-                      (in_keyword)
-                      (name))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1563,11 +1567,13 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (non_unary_expr
-                      (non_unary_expr
-                        (lvalue
-                          (name)))
-                      (in_keyword)
-                      (name))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
                     (non_unary_expr
                       (lvalue
                         (name)))))))
@@ -1578,11 +1584,13 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (non_unary_expr
-                      (non_unary_expr
-                        (lvalue
-                          (name)))
-                      (in_keyword)
-                      (name))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1594,11 +1602,13 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (non_unary_expr
-                      (non_unary_expr
-                        (lvalue
-                          (name)))
-                      (in_keyword)
-                      (name))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
                     (expr
                       (non_unary_expr
                         (non_unary_expr
@@ -1613,15 +1623,17 @@ BEGIN {
             (terminatable_statement
               (simple_statement
                 (expr
-                  (unary_expr
-                    (unary_expr
-                      (unary_expr
-                        (expr
-                          (non_unary_expr
-                            (lvalue
-                              (name)))))
-                      (in_keyword)
-                      (name))
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (unary_expr
+                          (unary_expr
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))
+                          (in_keyword)
+                          (name))))
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1633,17 +1645,19 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (non_unary_expr
-                      (multiple_expr_list
-                        (expr
-                          (non_unary_expr
-                            (lvalue
-                              (name))))
-                        (expr
-                          (non_unary_expr
-                            (lvalue
-                              (name)))))
-                      (in_keyword)
-                      (name))
+                      (expr
+                        (non_unary_expr
+                          (multiple_expr_list
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))
+                          (in_keyword)
+                          (name))))
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1659,25 +1673,29 @@ BEGIN {
                       (print_expr
                         (non_unary_print_expr
                           (non_unary_print_expr
-                            (non_unary_print_expr
-                              (lvalue
-                                (name)))
-                            (in_keyword)
-                            (name))
+                            (expr
+                              (non_unary_expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))
+                                (in_keyword)
+                                (name))))
                           (print_expr
                             (non_unary_print_expr
                               (lvalue
                                 (name))))))
                       (print_expr
-                        (unary_print_expr
-                          (unary_print_expr
-                            (unary_print_expr
-                              (print_expr
-                                (non_unary_print_expr
-                                  (lvalue
-                                    (name)))))
-                            (in_keyword)
-                            (name))
+                        (non_unary_print_expr
+                          (non_unary_print_expr
+                            (expr
+                              (unary_expr
+                                (unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (name)))))
+                                (in_keyword)
+                                (name))))
                           (print_expr
                             (non_unary_print_expr
                               (lvalue

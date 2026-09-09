@@ -17,9 +17,9 @@ const budgets = {
   STATE_COUNT: 18963,
   LARGE_STATE_COUNT: 4488,
   SYMBOL_COUNT: 538,
-  EXTERNAL_TOKEN_COUNT: 98,
+  EXTERNAL_TOKEN_COUNT: 100,
   parser_bytes: 37838049,
-  maximum_ACTIONS_index: 8804,
+  maximum_ACTIONS_index: 9154,
   parse_table_storage_bytes: 6140066,
 };
 

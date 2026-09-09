@@ -485,19 +485,6 @@ const tieredExpressionRules = (context) => {
       );
   };
 
-  // POSIX fixes the right operand of `in` to a NAME, so a membership
-  // expression is complete before any operator that follows it and can be
-  // the left operand of every higher-precedence binary operator without
-  // parentheses ("a in b ~ c" is "(a in b) ~ c").
-  const membershipInLeft = ($, classification, tail) =>
-    seq(
-      field(
-        "left",
-        aliasedClassTier($, context, classification, "membership_in"),
-      ),
-      tail,
-    );
-
   const addLeftAssociativeTier = (tier, nextTier, operator, precedence) => {
     addAnyTier(nextTier);
     const tail = `_${context.prefix}_${tier}_tail`;
@@ -514,7 +501,6 @@ const tieredExpressionRules = (context) => {
               $[tail],
             ),
           ),
-          prec.left(precedence, membershipInLeft($, classification, $[tail])),
         );
     }
   };
@@ -537,7 +523,6 @@ const tieredExpressionRules = (context) => {
               $[tail],
             ),
           ),
-          prec(precedence, membershipInLeft($, classification, $[tail])),
         );
     }
   };
@@ -636,9 +621,9 @@ const tieredExpressionRules = (context) => {
       continuedExpression($, "right", $.name),
     );
   for (const classification of CLASSIFICATIONS) {
-    addOperand(classification, "membership_in");
-    rules[classTierName(context, classification, "membership_in")] = ($) => {
+    rules[classTierName(context, classification, "membership")] = ($) => {
       const members = [
+        classTier($, context, classification, "match"),
         prec.left(
           PRECEDENCE.membership,
           seq(
@@ -661,11 +646,6 @@ const tieredExpressionRules = (context) => {
       }
       return choice(...members);
     };
-    rules[classTierName(context, classification, "membership")] = ($) =>
-      choice(
-        classTier($, context, classification, "match"),
-        classTier($, context, classification, "membership_in"),
-      );
   }
 
   const comparisonTier = context.comparison ? "comparison" : "concatenation";
@@ -705,10 +685,6 @@ const tieredExpressionRules = (context) => {
             $[concatenationTail],
           ),
         ),
-        prec.left(
-          PRECEDENCE.concatenation,
-          membershipInLeft($, classification, $[concatenationTail]),
-        ),
       );
   }
 
@@ -728,7 +704,9 @@ const tieredExpressionRules = (context) => {
 
   rules[unary("unary")] = ($) =>
     choice(
-      classTier($, context, "unary", "exponentiation"),
+      ...(context.input
+        ? [classTier($, context, "unary", "exponentiation")]
+        : []),
       ...["+", "-"].map((operator) =>
         seq(field("operator", operator), requiredTier($, "operand", "unary")),
       ),
@@ -738,35 +716,24 @@ const tieredExpressionRules = (context) => {
   rules[nonUnary("unary")] = ($) =>
     choice($[nonUnary("exponentiation")], $[not]);
 
-  // The unary update tier holds only the unary input function, which print
-  // expressions lack, so their unary exponentiation tier keeps just the
-  // membership operand.
   const exponentiationTail = `_${context.prefix}_exponentiation_tail`;
   rules[exponentiationTail] = ($) =>
     seq(
       $._continued_exponentiation_operator,
       requiredTier($, "right", "unary"),
     );
-  for (const classification of CLASSIFICATIONS) {
-    const hasUpdateTier = classification !== "unary" || context.input;
-    if (hasUpdateTier) {
-      addOperand(classification, "update");
-    }
+  const exponentiationClassifications = context.input
+    ? CLASSIFICATIONS
+    : ["non_unary"];
+  for (const classification of exponentiationClassifications) {
+    addOperand(classification, "update");
     rules[classTierName(context, classification, "exponentiation")] = ($) =>
       choice(
-        ...(hasUpdateTier
-          ? [
-              classTier($, context, classification, "update"),
-              seq(
-                field(
-                  "left",
-                  aliasedClassTier($, context, classification, "update"),
-                ),
-                $[exponentiationTail],
-              ),
-            ]
-          : []),
-        membershipInLeft($, classification, $[exponentiationTail]),
+        classTier($, context, classification, "update"),
+        seq(
+          field("left", aliasedClassTier($, context, classification, "update")),
+          $[exponentiationTail],
+        ),
       );
   }
   if (context.input) {
@@ -837,6 +804,8 @@ module.exports = grammar({
     $._closed_item_boundary,
     $._normal_pattern_item_boundary,
     $._statement_recovery,
+    $._action_closing,
+    $._action_end,
     $._action_recovery,
     $._ere_compound_open_guard,
     $._ere_dot_close_guard,
@@ -1065,7 +1034,8 @@ module.exports = grammar({
           ),
         ),
         optionalContinuationsBefore($, "close_brace"),
-        field("closing", "}"),
+        field("closing", alias($._action_closing, "}")),
+        $._action_end,
       ),
 
     terminated_statement_list: ($) => terminatedStatements($),

@@ -443,6 +443,83 @@ for (const [label, malformed] of physicallyClosedMalformedItems) {
   });
 }
 
+for (const { label, initial, final, removed, inserted } of [
+  {
+    label: "an else without a consequence",
+    initial: "{ if (a) else }",
+    final: "{ if (a) ; }",
+    removed: "else",
+    inserted: ";",
+  },
+  {
+    label: "an incomplete for header",
+    initial: "{ for (); }",
+    final: "{ for (;;); }",
+    removed: ")",
+    inserted: ";;)",
+  },
+  {
+    label: "a do without a body or tail",
+    initial: "{ do }",
+    final: "{ do ; while (a) }",
+    removed: "do",
+    inserted: "do ; while (a)",
+  },
+  {
+    label: "a delete without an array name",
+    initial: "{ if(a) delete [] }",
+    final: "{ if(a) delete a[0] }",
+    removed: "[]",
+    inserted: "a[0]",
+  },
+  {
+    label: "a call with missing arguments",
+    initial: "{ if(a) f(,) }",
+    final: "{ if(a) f(x) }",
+    removed: ",",
+    inserted: "x",
+  },
+  {
+    label: "a membership operator without operands",
+    initial: "{ if(a) in }",
+    final: "{ if(a) x in a }",
+    removed: "in",
+    inserted: "x in a",
+  },
+]) {
+  test(`a closed action containing ${label} preserves adjacent items`, () => {
+    for (const [separatorName, separator] of [
+      ["space", " "],
+      ["semicolon", ";"],
+      ["newline", "\n"],
+    ]) {
+      for (const [followingName, following] of [
+        ["empty END", "END {}"],
+        ["END", "END { print after }"],
+        ["function", "function after() {}"],
+        ["ERE pattern", "/after/ { print after }"],
+      ]) {
+        assertPreservedItems(
+          `${label} before ${separatorName} and ${followingName}`,
+          lines("before {}", initial + separator + following),
+          ["before {}", following],
+        );
+      }
+    }
+  });
+
+  const prefix = lines("before {}");
+  const following = "END { print after }";
+  determinismTest(
+    `repairing ${label} preserves the action boundary`,
+    prefix + lines(initial, following),
+    prefix + lines(final, following),
+    [
+      `${prefix.length + initial.indexOf(removed)} ${removed.length} ${inserted}`,
+    ],
+  );
+}
+
 for (const { label, initial, final, before, inserted, preserved } of [
   {
     label: "function body after a continuation and comment",
@@ -672,7 +749,43 @@ const divisionAssignment = lines("BEGIN { x /= 2 }");
 const divisionExpression = lines("BEGIN { x / 2 }");
 const matchOperand = lines("BEGIN { print x ~ a }");
 
+const membershipPrecedenceCases = [
+  ["exponentiation", "", "a in b", "^ c"],
+  ["multiplication", "", "a in b", "* c"],
+  ["division", "", "a in b", "/ c"],
+  ["modulus", "", "a in b", "% c"],
+  ["addition", "", "a in b", "+ c"],
+  ["subtraction", "", "a in b", "- c"],
+  ["concatenation", "", "a in b", "c"],
+  ["less than", "", "a in b", "< c"],
+  ["less than or equal", "", "a in b", "<= c"],
+  ["inequality", "", "a in b", "!= c"],
+  ["equality", "", "a in b", "== c"],
+  ["greater than", "", "a in b", "> c"],
+  ["greater than or equal", "", "a in b", ">= c"],
+  ["ERE match", "", "a in b", "~ c"],
+  ["ERE non-match", "", "a in b", "!~ c"],
+  ["unary exponentiation", "", "-a in b", "^ c"],
+  ["multiple-index ERE match", "", "(a, c) in b", "~ d"],
+  ["print addition", "print ", "a in b", "+ c"],
+  ["unary print exponentiation", "print ", "-a in b", "^ c"],
+  ["multiple-index print ERE match", "print ", "(a, c) in b", "~ d"],
+  ["continued addition", "", "a in b", "\\\n+ c"],
+].map(([name, prefix, left, tail]) => {
+  const beginning = `BEGIN { ${prefix}`;
+  return {
+    name,
+    source: lines(`${beginning}${left} ${tail} }`),
+    parenthesized: lines(`${beginning}(${left}) ${tail} }`),
+    edits: [`${beginning.length + left.length} 0 )`, `${beginning.length} 0 (`],
+  };
+});
+
 const invalidClassificationCases = [
+  ...membershipPrecedenceCases.map(({ name, source }) => ({
+    name: `unparenthesized membership before ${name} is rejected`,
+    source,
+  })),
   {
     assertions: (tree) => {
       assert.equal(
@@ -808,13 +921,27 @@ for (const [label, initial, final] of [
   );
 }
 
-const membershipBeforeLogicalAnd = lines("BEGIN { x = a in b && c }");
-const membershipBeforeMatch = lines("BEGIN { x = a in b ~ c }");
+for (const {
+  name,
+  source,
+  parenthesized,
+  edits,
+} of membershipPrecedenceCases) {
+  determinismTest(
+    `parentheses repair membership before ${name}`,
+    source,
+    parenthesized,
+    edits,
+  );
+}
+
+const membershipBeforeLogicalAnd = lines("BEGIN { x = (a in b) && c }");
+const membershipBeforeMatch = lines("BEGIN { x = (a in b) ~ c }");
 determinismTest(
   "membership-logical-and-to-match",
   membershipBeforeLogicalAnd,
   membershipBeforeMatch,
-  ["19 2 ~"],
+  ["21 2 ~"],
   (tree) => {
     contains(tree, '"~"');
     excludes(tree, "operator: and");
@@ -824,20 +951,20 @@ determinismTest(
   "membership-match-to-logical-and",
   membershipBeforeMatch,
   membershipBeforeLogicalAnd,
-  ["19 1 &&"],
+  ["21 1 &&"],
   (tree) => {
     contains(tree, "operator: and");
     excludes(tree, '"~"');
   },
 );
 
-const plainMembership = lines("BEGIN { x = a in b }");
-const concatenatedMembership = lines("BEGIN { x = a in b c }");
+const plainMembership = lines("BEGIN { x = (a in b) }");
+const concatenatedMembership = lines("BEGIN { x = (a in b) c }");
 determinismTest(
   "insert-membership-concatenation-operand",
   plainMembership,
   concatenatedMembership,
-  ["18 0  c"],
+  ["20 0  c"],
   (tree) => {
     assert.match(tree, /^[ \t0-9:-]+right: name `b`$/m);
     assert.match(tree, /^[ \t0-9:-]+right: non_unary_expr$/m);
@@ -847,7 +974,7 @@ determinismTest(
   "delete-membership-concatenation-operand",
   concatenatedMembership,
   plainMembership,
-  ["18 2 "],
+  ["20 2 "],
 );
 
 const plainBracketList = lines("BEGIN { print /[+]?[a]/ }");

@@ -176,8 +176,10 @@ function excludes(tree, unexpected) {
 
 // The --cst error marker covers both ERROR and missing nodes; missing named
 // leaves do not include the word MISSING.
+const recoveryMarker = /^[0-9: \t-]+•/m;
+
 function clean(tree) {
-  excludes(tree, "•");
+  assert.doesNotMatch(tree, recoveryMarker, tree);
 }
 
 function cleanContinuation(tree) {
@@ -186,7 +188,7 @@ function cleanContinuation(tree) {
 }
 
 function dirty(tree) {
-  contains(tree, "•");
+  assert.match(tree, recoveryMarker, tree);
 }
 
 function matchingLineCount(tree, pattern) {
@@ -464,6 +466,95 @@ const divisionAssignment = lines("BEGIN { x /= 2 }");
 const divisionExpression = lines("BEGIN { x / 2 }");
 const matchOperand = lines("BEGIN { print x ~ a }");
 
+for (const { name, initial, final, edits, update } of [
+  {
+    name: "a getline target becomes a concatenated postfix increment",
+    initial: "getline x",
+    final: "getline x++",
+    edits: ["17 0 ++"],
+    update: "incr",
+  },
+  {
+    name: "a getline array target becomes a concatenated postfix decrement",
+    initial: "getline a[1]",
+    final: "getline a[1]--",
+    edits: ["20 0 --"],
+    update: "decr",
+  },
+  {
+    name: "a getline field target becomes a concatenated postfix increment",
+    initial: "getline $i",
+    final: "getline $i++",
+    edits: ["18 0 ++"],
+    update: "incr",
+  },
+  {
+    name: "a piped getline target becomes a concatenated postfix decrement",
+    initial: "command | getline x",
+    final: "command | getline x--",
+    edits: ["27 0 --"],
+    update: "decr",
+  },
+]) {
+  determinismTest(
+    name,
+    lines(`BEGIN { ${initial} }`),
+    lines(`BEGIN { ${final} }`),
+    edits,
+    (tree) => {
+      contains(tree, `operator: ${update}`);
+      excludes(tree, "target:");
+    },
+  );
+}
+
+determinismTest(
+  "removing a postfix update restores the getline target",
+  lines("BEGIN { getline x++ }"),
+  lines("BEGIN { getline x }"),
+  ["17 2 "],
+  (tree) => contains(tree, "target: lvalue"),
+);
+
+for (const { name, initial, final, edits, number } of [
+  {
+    name: "joining a floating suffix replaces concatenation with one number",
+    initial: "1.0 f",
+    final: "1.0f",
+    edits: ["17 1 "],
+    number: "1.0f",
+  },
+  {
+    name: "completing an exponent includes its floating suffix",
+    initial: "1.0eF",
+    final: "1.0e2F",
+    edits: ["18 0 2"],
+    number: "1.0e2F",
+  },
+  {
+    name: "adding a decimal point makes the following letter a floating suffix",
+    initial: "1l",
+    final: "1.l",
+    edits: ["15 0 ."],
+    number: "1.l",
+  },
+  {
+    name: "separating a floating suffix restores concatenation",
+    initial: "1.L",
+    final: "1. L",
+    edits: ["16 0  "],
+    number: "1.",
+  },
+]) {
+  determinismTest(
+    name,
+    lines(`BEGIN { print ${initial} }`),
+    lines(`BEGIN { print ${final} }`),
+    edits,
+    (tree) => contains(tree, `number \`${number}\``),
+  );
+}
+
 const membershipPrecedenceCases = [
   ["exponentiation", "", "a in b", "^ c"],
   ["multiplication", "", "a in b", "* c"],
@@ -547,6 +638,14 @@ const invalidSyntaxCases = [
       "  print /a{#}/",
       "}",
     ),
+  },
+  {
+    name: "a raw hyphen cannot be the sole equivalence class payload",
+    source: lines("/[[=-=]]/"),
+  },
+  {
+    name: "a raw closing bracket cannot be the sole equivalence class payload",
+    source: lines("/[[=]=]]/"),
   },
   {
     name: "a missing terminator between actions is rejected",
@@ -890,6 +989,36 @@ determinismTest(
 );
 
 const equivalenceEre = lines("BEGIN { print /[[=a=]]/ }");
+
+determinismTest(
+  "a collating caret becomes a meta character when replaced by a hyphen",
+  lines("/[[.^.]]/"),
+  lines("/[[.-.]]/"),
+  ["4 1 -"],
+  (tree) => contains(tree, "meta_character `-`"),
+);
+determinismTest(
+  "an equivalence class accepts a caret in place of a raw hyphen",
+  lines("/[[=-=]]/"),
+  lines("/[[=^=]]/"),
+  ["4 1 ^"],
+  (tree) => {
+    contains(tree, "equivalence_class");
+    contains(tree, "collating_element `^`");
+    excludes(tree, "meta_character");
+  },
+);
+determinismTest(
+  "a multi-character equivalence payload can begin with a closing bracket",
+  lines("/[[=]=]]/"),
+  lines("/[[=]a=]]/"),
+  ["5 0 a"],
+  (tree) => {
+    contains(tree, "equivalence_class");
+    contains(tree, "collating_element");
+    excludes(tree, "meta_character");
+  },
+);
 const classEre = lines("BEGIN { print /[[:alpha:]]/ }");
 determinismTest(
   "equivalence-to-character-class",

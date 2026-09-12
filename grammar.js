@@ -703,7 +703,6 @@ export default grammar({
     $._name_word,
     $._for_in_variable_word,
     $._getline_word,
-    $._getline_target_word,
     $._in_word,
     $._builtin_func_name_word,
     $._builtin_call_word,
@@ -740,7 +739,7 @@ export default grammar({
     $._print_unary_assignment_expr,
   ],
 
-  conflicts: () => [],
+  conflicts: ($) => [[$.simple_get]],
 
   rules: {
     program: ($) =>
@@ -1149,9 +1148,12 @@ export default grammar({
     simple_get: ($) =>
       choice(
         $.getline_keyword,
-        seq(
-          alias($._getline_target_word, $.getline_keyword),
-          continuedExpressionMember($, field("target", $.lvalue)),
+        prec.dynamic(
+          1,
+          seq(
+            $.getline_keyword,
+            continuedExpressionMember($, field("target", $.lvalue)),
+          ),
         ),
       ),
 
@@ -1346,10 +1348,7 @@ export default grammar({
     equivalence_class: ($) =>
       seq(
         $._ere_open_equal,
-        choice(
-          alias($._ere_compound_collating_element, $.collating_element),
-          alias($._ere_compound_meta_character, $.collating_element),
-        ),
+        alias($._ere_compound_collating_element, $.collating_element),
         $._ere_equal_close,
       ),
 
@@ -1442,9 +1441,9 @@ export default grammar({
     _ere_bracket_close_character: () => token.immediate("]"),
 
     _ere_compound_nonmeta_character: () =>
-      token.immediate(/[^\x2D\x2F\x5C\x5D\x5E\n]/),
+      token.immediate(/[^\x2D\x2F\x5C\x5D\n]/),
 
-    _ere_compound_meta_character: () => token.immediate(/[\x2D\x5D\x5E]/),
+    _ere_compound_meta_character: () => token.immediate(/[\x2D\x5D]/),
 
     _ere_class_name_spelling: () => token.immediate(/[A-Za-z][A-Za-z0-9]*/),
 

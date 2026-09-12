@@ -951,6 +951,30 @@ BEGIN {
       (newline))))
 
 ==================
+getline followed by a postfix update remains a concatenation
+==================
+{ getline value++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
 getline forms preserve get target and source ownership
 ==================
 

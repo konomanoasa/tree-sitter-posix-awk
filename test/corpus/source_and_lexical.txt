@@ -135,6 +135,39 @@ BEGIN { print 1.5 1. .5 1e+2 }
                           (number))))))))))))))
 
 ==================
+floating suffixes remain inside their decimal number tokens
+==================
+BEGIN { print 1.0f, .5F, 1e2l, 1.L }
+---
+
+(program
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (number)))
+                    (print_expr
+                      (non_unary_print_expr
+                        (number)))
+                    (print_expr
+                      (non_unary_print_expr
+                        (number)))
+                    (print_expr
+                      (non_unary_print_expr
+                        (number)))))))))))))
+
+==================
 slash tokens use assignment, division, match, then ERE contexts
 ==================
 

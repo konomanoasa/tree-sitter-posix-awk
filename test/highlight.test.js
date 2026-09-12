@@ -48,9 +48,14 @@ function assertCommand(args) {
   return result;
 }
 
+function assertCleanParse(sourcePath) {
+  // Missing named leaves can leave the parse command's exit status at zero.
+  const result = assertCommand(["parse", "--cst", sourcePath]);
+  assert.doesNotMatch(result.stdout, /^[0-9: \t-]+•/m, result.stdout);
+}
+
 test("highlight query", () => {
-  // Query assertions can pass inside ERROR subtrees; validate the fixture first.
-  assertCommand(["parse", "--quiet", fixture]);
+  assertCleanParse(fixture);
   assertCommand([
     "highlight",
     "--check",
@@ -187,6 +192,7 @@ function finalClassesPerLine(html) {
 test("final capture resolution", () => {
   const probePath = path.join(environment.directory, "probe.awk");
   fs.writeFileSync(probePath, finalCaptureSource);
+  assertCleanParse(probePath);
   const result = assertCommand([
     "highlight",
     "--html",

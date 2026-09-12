@@ -27,7 +27,6 @@ enum TokenType {
   NAME_WORD,
   FOR_IN_VARIABLE_WORD,
   GETLINE_WORD,
-  GETLINE_TARGET_WORD,
   IN_WORD,
   BUILTIN_FUNC_NAME_WORD,
   BUILTIN_CALL_WORD,
@@ -130,7 +129,6 @@ typedef enum {
   WORD_KIND_RETURN,
   WORD_KIND_WHILE,
   WORD_KIND_GETLINE,
-  WORD_KIND_GETLINE_TARGET,
   WORD_KIND_IN,
   WORD_KIND_BUILTIN_FUNC_NAME,
   WORD_KIND_BUILTIN_CALL,
@@ -277,7 +275,6 @@ static const WordToken WORD_TOKENS[] = {
   {WORD_KIND_NAME, NAME_WORD, VALUE_MARKERS},
   {WORD_KIND_FOR_IN_VARIABLE, FOR_IN_VARIABLE_WORD, VALUE_MARKERS},
   {WORD_KIND_GETLINE, GETLINE_WORD, VALUE_MARKERS},
-  {WORD_KIND_GETLINE_TARGET, GETLINE_TARGET_WORD, VALUE_MARKERS},
   {WORD_KIND_IN, IN_WORD, MARKERS(LC_BEFORE_MEMBERSHIP_OPERATOR)},
   {WORD_KIND_BUILTIN_FUNC_NAME, BUILTIN_FUNC_NAME_WORD, VALUE_MARKERS},
   {WORD_KIND_BUILTIN_CALL, BUILTIN_CALL_WORD, VALUE_MARKERS},
@@ -527,21 +524,6 @@ promote_word_kind(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
       return kind;
     }
     return lexer->lookahead == '(' ? WORD_KIND_BUILTIN_CALL : kind;
-  case WORD_KIND_GETLINE:
-    if (!advance_boundary_gap_remainder(lexer)) {
-      return kind;
-    }
-    if (lexer->lookahead == '$') {
-      return WORD_KIND_GETLINE_TARGET;
-    }
-    if (
-      scan_word_spelling(lexer) ==
-      WORD_KIND_NAME &&
-      promote_word_kind(lexer, NULL, WORD_KIND_NAME) == WORD_KIND_NAME
-    ) {
-      return WORD_KIND_GETLINE_TARGET;
-    }
-    return kind;
   default:
     return kind;
   }
@@ -583,9 +565,6 @@ static bool word_spelling_is_valid(const bool *valid_symbols, WordKind kind) {
   case WORD_KIND_BUILTIN_FUNC_NAME:
     return word_kind_is_valid(valid_symbols, kind) ||
       word_kind_is_valid(valid_symbols, WORD_KIND_BUILTIN_CALL);
-  case WORD_KIND_GETLINE:
-    return word_kind_is_valid(valid_symbols, kind) ||
-      word_kind_is_valid(valid_symbols, WORD_KIND_GETLINE_TARGET);
   default:
     return word_kind_is_valid(valid_symbols, kind);
   }
@@ -660,10 +639,27 @@ static NumberKind scan_number_kind(TSLexer *lexer, bool mark_end) {
     if (lexer->lookahead == '+' || lexer->lookahead == '-') {
       lexer->advance(lexer, false);
     }
+    if (!is_ascii_digit(lexer->lookahead)) {
+      return kind;
+    }
     while (is_ascii_digit(lexer->lookahead)) {
       lexer->advance(lexer, false);
       kind = accept_number(lexer, NUMBER_KIND_EXPONENT, mark_end);
     }
+  }
+  if (
+    kind !=
+    NUMBER_KIND_INTEGER &&
+    (lexer->lookahead ==
+      'f' ||
+      lexer->lookahead ==
+      'F' ||
+      lexer->lookahead ==
+      'l' ||
+      lexer->lookahead == 'L')
+  ) {
+    lexer->advance(lexer, false);
+    kind = accept_number(lexer, kind, mark_end);
   }
   return kind;
 }

@@ -138,6 +138,7 @@ static int check_source_token_ranges(void) {
     size_t expected_token_end;
   } cases[] = {
     {"keyword spelling", "END", END_WORD, 3},
+    {"getline spelling excludes its target", "getline value", GETLINE_WORD, 7},
     {"name spelling", "value", NAME_WORD, 5},
     {"built-in spelling", "length", BUILTIN_FUNC_NAME_WORD, 6},
     {"function name excludes parenthesis", "follow(", FUNC_NAME_WORD, 6},
@@ -158,7 +159,36 @@ static int check_source_token_ranges(void) {
     {"integer spelling", "123", NUMBER_INTEGER, 3},
     {"fraction spelling", ".5", NUMBER_FRACTION, 2},
     {"exponent spelling", "1.5e+2", NUMBER_EXPONENT, 6},
+    {"fraction with lowercase float suffix", "1.0f", NUMBER_FRACTION, 4},
+    {"leading fraction with uppercase float suffix", ".5F", NUMBER_FRACTION, 3},
+    {"exponent with lowercase long double suffix", "1e2l", NUMBER_EXPONENT, 4},
+    {"trailing period with uppercase long double suffix",
+      "1.L",
+      NUMBER_FRACTION,
+      3},
+    {"fraction and exponent with float suffix", "1.5e+2F", NUMBER_EXPONENT, 7},
+    {"fraction consumes only one suffix character",
+      "1.5ff",
+      NUMBER_FRACTION,
+      4},
+    {"exponent consumes only one suffix character",
+      "1e2LL",
+      NUMBER_EXPONENT,
+      4},
+    {"integer does not consume a floating suffix", "1f", NUMBER_INTEGER, 1},
     {"incomplete exponent keeps integer", "1e+", NUMBER_INTEGER, 1},
+    {"incomplete exponent and float suffix keep integer",
+      "1ef",
+      NUMBER_INTEGER,
+      1},
+    {"incomplete signed exponent and float suffix keep fraction",
+      "1.e+f",
+      NUMBER_FRACTION,
+      2},
+    {"incomplete exponent and long double suffix keep fraction",
+      ".5eL",
+      NUMBER_FRACTION,
+      2},
     {"addition assignment spelling", "+=", ADD_ASSIGN_OPERATOR, 2},
     {"logical-or spelling", "||", OR_OPERATOR, 2},
   };
@@ -228,98 +258,6 @@ static int check_source_token_ranges(void) {
     NAME_WORD,
     1
   );
-  return failed;
-}
-
-static int check_getline_target_lookahead(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    enum TokenType token;
-    size_t maximum_advances;
-  } cases[] = {
-    {"getline before a name takes a target",
-      "getline value",
-      GETLINE_TARGET_WORD,
-      13},
-    {"getline before a field takes a target",
-      "getline $1",
-      GETLINE_TARGET_WORD,
-      8},
-    {"getline before a string is bare", "getline \"a\"", GETLINE_WORD, 8},
-    {"getline before an adjacent call is bare", "getline f(", GETLINE_WORD, 9},
-    {"getline before a spaced name takes a target",
-      "getline f (",
-      GETLINE_TARGET_WORD,
-      9},
-    {"getline before a keyword is bare", "getline next", GETLINE_WORD, 12},
-    {"getline before a built-in stops after its spelling",
-      "getline length (value)",
-      GETLINE_WORD,
-      14},
-    {"continued getline before a name takes a target",
-      "getline \\\nvalue",
-      GETLINE_TARGET_WORD,
-      15},
-    {"getline before a continued call is bare",
-      "getline f\\\n(",
-      GETLINE_WORD,
-      11},
-    {"getline before a spaced continued name takes a target",
-      "getline f \\\n(",
-      GETLINE_TARGET_WORD,
-      9},
-    {"two getlines stop lookahead after the second spelling",
-      "getline getline",
-      GETLINE_WORD,
-      15},
-    {"many getlines stop lookahead after the second spelling",
-      "getline getline getline getline getline getline target",
-      GETLINE_WORD,
-      15},
-  };
-
-  int failed = 0;
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[GETLINE_WORD] = true;
-  valid_symbols[GETLINE_TARGET_WORD] = true;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    MockLexer mock = make_mock_lexer(cases[i].source);
-    ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
-    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-      &state,
-      &mock.lexer,
-      valid_symbols
-    );
-    if (
-      scanned &&
-      mock.lexer.result_symbol ==
-      cases[i].token &&
-      mock.token_start ==
-      0 &&
-      mock.token_end ==
-      7 &&
-      state.mode ==
-      LEXICAL_MODE_OUTSIDE &&
-      mock.advance_count <= cases[i].maximum_advances
-    ) {
-      continue;
-    }
-    fprintf(
-      stderr,
-      "%s: scanned=%u symbol=%u start=%zu end=%zu mode=%u advances=%zu "
-      "maximum=%zu\n",
-      cases[i].name,
-      scanned,
-      mock.lexer.result_symbol,
-      mock.token_start,
-      mock.token_end,
-      (unsigned)state.mode,
-      mock.advance_count,
-      cases[i].maximum_advances
-    );
-    failed = 1;
-  }
   return failed;
 }
 
@@ -989,10 +927,10 @@ static int check_error_mode_real_tokens(void) {
       BUILTIN_CALL_WORD,
       6,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits getline target",
+    {"error mode emits getline keyword",
       "getline x",
       true,
-      GETLINE_TARGET_WORD,
+      GETLINE_WORD,
       7,
       LEXICAL_MODE_OUTSIDE},
     {"error mode emits integer",
@@ -1198,7 +1136,6 @@ int main(void) {
   int failed = 0;
   failed |= check_serialization();
   failed |= check_source_token_ranges();
-  failed |= check_getline_target_lookahead();
   failed |= check_blank_skip_token_ranges();
   failed |= check_greater_dispatch();
   failed |= check_slash_dispatch();

@@ -9154,48 +9154,47 @@
           "name": "getline_keyword"
         },
         {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "ALIAS",
-              "content": {
+          "type": "PREC_DYNAMIC",
+          "value": 1,
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
                 "type": "SYMBOL",
-                "name": "_getline_target_word"
+                "name": "getline_keyword"
               },
-              "named": true,
-              "value": "getline_keyword"
-            },
-            {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "FIELD",
-                  "name": "target",
-                  "content": {
-                    "type": "SYMBOL",
-                    "name": "lvalue"
-                  }
-                },
-                {
-                  "type": "SEQ",
-                  "members": [
-                    {
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "FIELD",
+                    "name": "target",
+                    "content": {
                       "type": "SYMBOL",
-                      "name": "_expression_continuation"
-                    },
-                    {
-                      "type": "FIELD",
-                      "name": "target",
-                      "content": {
-                        "type": "SYMBOL",
-                        "name": "lvalue"
-                      }
+                      "name": "lvalue"
                     }
-                  ]
-                }
-              ]
-            }
-          ]
+                  },
+                  {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "_expression_continuation"
+                      },
+                      {
+                        "type": "FIELD",
+                        "name": "target",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "lvalue"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
         }
       ]
     },
@@ -10365,27 +10364,13 @@
           "name": "_ere_open_equal"
         },
         {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "ALIAS",
-              "content": {
-                "type": "SYMBOL",
-                "name": "_ere_compound_collating_element"
-              },
-              "named": true,
-              "value": "collating_element"
-            },
-            {
-              "type": "ALIAS",
-              "content": {
-                "type": "SYMBOL",
-                "name": "_ere_compound_meta_character"
-              },
-              "named": true,
-              "value": "collating_element"
-            }
-          ]
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_ere_compound_collating_element"
+          },
+          "named": true,
+          "value": "collating_element"
         },
         {
           "type": "SYMBOL",
@@ -10817,14 +10802,14 @@
       "type": "IMMEDIATE_TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": "[^\\x2D\\x2F\\x5C\\x5D\\x5E\\n]"
+        "value": "[^\\x2D\\x2F\\x5C\\x5D\\n]"
       }
     },
     "_ere_compound_meta_character": {
       "type": "IMMEDIATE_TOKEN",
       "content": {
         "type": "PATTERN",
-        "value": "[\\x2D\\x5D\\x5E]"
+        "value": "[\\x2D\\x5D]"
       }
     },
     "_ere_class_name_spelling": {
@@ -11041,7 +11026,11 @@
       "name": "comment"
     }
   ],
-  "conflicts": [],
+  "conflicts": [
+    [
+      "simple_get"
+    ]
+  ],
   "precedences": [],
   "externals": [
     {
@@ -11123,10 +11112,6 @@
     {
       "type": "SYMBOL",
       "name": "_getline_word"
-    },
-    {
-      "type": "SYMBOL",
-      "name": "_getline_target_word"
     },
     {
       "type": "SYMBOL",

@@ -12,13 +12,13 @@ import { generateParsers, grammars, packageName, root } from "./tree-sitter.js";
 
 const parserBudgets = {
   posix_awk: {
-    STATE_COUNT: 18_963,
-    LARGE_STATE_COUNT: 4_488,
-    SYMBOL_COUNT: 538,
-    EXTERNAL_TOKEN_COUNT: 100,
-    parser_bytes: 37_838_049,
-    maximum_ACTIONS_index: 9_154,
-    parse_table_storage_bytes: 6_140_066,
+    STATE_COUNT: 2_200,
+    LARGE_STATE_COUNT: 250,
+    SYMBOL_COUNT: 450,
+    EXTERNAL_TOKEN_COUNT: 70,
+    parser_bytes: 3_000_000,
+    maximum_ACTIONS_index: 2_600,
+    parse_table_storage_bytes: 360_000,
   },
 };
 const prerequisiteScripts = [];

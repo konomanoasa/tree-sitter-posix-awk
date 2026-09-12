@@ -454,169 +454,173 @@ static int test_slash_dispatch(void) {
   return failed;
 }
 
-static int test_line_continuation_markers(void) {
+static int test_word_boundary_lookahead(void) {
   static const struct {
     const char *name;
     const char *source;
-    enum TokenType marker;
-    bool expected_scanned;
+    enum TokenType expected_symbol;
+    size_t expected_token_end;
   } cases[] = {
-    {"continued generic operator", "\\\n+=", LC_BEFORE_OPERATOR, true},
-    {"continued additive operator", "\\\n+", LC_BEFORE_ADDITIVE_OPERATOR, true},
-    {"continued expression word", "\\\nname", LC_BEFORE_EXPRESSION, true},
-    {"continued expression number", "\\\n.5", LC_BEFORE_EXPRESSION, true},
-    {"continued else", "\\\nelse", LC_BEFORE_ELSE, true},
-    {"continued do tail", "\\\nwhile", LC_BEFORE_DO_TAIL, true},
-    {"non-while word is not a do tail", "\\\nEND", LC_BEFORE_DO_TAIL, false},
-    {"continued membership operator",
-      "\\\nin",
-      LC_BEFORE_MEMBERSHIP_OPERATOR,
-      true},
-    {"continued simple statement",
-      "\\\nprint",
-      LC_BEFORE_SIMPLE_STATEMENT,
-      true},
-    {"continued statement keyword", "\\\nif", LC_BEFORE_STATEMENT, true},
-    {"continued statement word", "\\\nname", LC_BEFORE_STATEMENT, true},
-    {"continued statement action", "\\\n{", LC_BEFORE_STATEMENT, true},
-    {"continued empty statement", "\\\n;", LC_BEFORE_STATEMENT, true},
-    {"continued while statement", "\\\nwhile", LC_BEFORE_STATEMENT, true},
-    {"reserved item start is not a statement",
-      "\\\nEND",
-      LC_BEFORE_STATEMENT,
-      false},
-    {"continued item keyword", "\\\nBEGIN", LC_BEFORE_ITEM, true},
-    {"continued item expression", "\\\n$1", LC_BEFORE_ITEM, true},
-    {"continued item action", "\\\n{", LC_BEFORE_ITEM, true},
-    {"statement keyword is not an item", "\\\nif", LC_BEFORE_ITEM, false},
-    {"continued EOF", "\\\n", LC_BEFORE_EOF, true},
-    {"continued comment at EOF", "\\\n# note", LC_BEFORE_EOF, true},
-    {"continued blank EOF", "\\\n  \\\n ", LC_BEFORE_EOF, true},
-    {"newline is not EOF", "\\\n\n", LC_BEFORE_EOF, false},
-    {"continued semicolon", "\\\n;", LC_BEFORE_SEMICOLON, true},
-    {"continued comma", "\\\n,", LC_BEFORE_COMMA, true},
-    {"continued close parenthesis", "\\\n)", LC_BEFORE_CLOSE_PARENTHESIS, true},
-    {"continued action", "\\\n{", LC_BEFORE_ACTION, true},
-    {"continued close brace", "\\\n}", LC_BEFORE_CLOSE_BRACE, true},
-    {"continued newline", "\\\n\n", LC_BEFORE_NEWLINE, true},
-    {"continued comment before a newline",
-      "\\\n# note\n",
-      LC_BEFORE_NEWLINE,
-      true},
-    {"continued comment at EOF is not a newline",
-      "\\\n# note",
-      LC_BEFORE_NEWLINE,
-      false},
+    {"function adjacency ignores repeated continuations",
+      "follow\\\n\\\n(",
+      FUNC_NAME_WORD,
+      6},
+    {"blank before a continuation prevents function adjacency",
+      "follow \\\n(",
+      NAME_WORD,
+      6},
+    {"blank after a continuation prevents function adjacency",
+      "follow\\\n (",
+      NAME_WORD,
+      6},
+    {"raw newline prevents function adjacency", "follow\\\n\n(", NAME_WORD, 6},
+    {"comment prevents function adjacency",
+      "follow\\\n# note\n(",
+      NAME_WORD,
+      6},
+    {"incomplete continuation prevents function adjacency",
+      "follow\\(",
+      NAME_WORD,
+      6},
+    {"built-in call ignores mixed blank and continuation gaps",
+      "length \t\\\n \\\n\t(",
+      BUILTIN_CALL_WORD,
+      6},
+    {"raw newline prevents built-in call lookahead",
+      "length \\\n\n(",
+      BUILTIN_FUNC_NAME_WORD,
+      6},
+    {"comment prevents built-in call lookahead",
+      "length \\\n# note\n(",
+      BUILTIN_FUNC_NAME_WORD,
+      6},
+    {"incomplete continuation prevents built-in call lookahead",
+      "length \\(",
+      BUILTIN_FUNC_NAME_WORD,
+      6},
+    {"for-in lookahead ignores gaps around both words and closing parenthesis",
+      "k \\\nin \t\\\narray \\\n)",
+      FOR_IN_VARIABLE_WORD,
+      1},
+    {"raw newline prevents for-in lookahead",
+      "k in \\\n\narray)",
+      NAME_WORD,
+      1},
+    {"comment prevents for-in lookahead",
+      "k in array \\\n# note\n)",
+      NAME_WORD,
+      1},
+    {"incomplete continuation prevents for-in lookahead",
+      "k in array \\)",
+      NAME_WORD,
+      1},
+    {"reserved array word prevents for-in lookahead",
+      "k in length)",
+      NAME_WORD,
+      1},
+  };
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
+    [NAME_WORD] = true,
+    [FUNC_NAME_WORD] = true,
+    [FOR_IN_VARIABLE_WORD] = true,
+    [BUILTIN_FUNC_NAME_WORD] = true,
+    [BUILTIN_CALL_WORD] = true,
   };
 
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[cases[i].marker] = true;
     failed |= expect_scan_result(
       cases[i].name,
       cases[i].source,
       valid_symbols,
-      cases[i].expected_scanned,
-      cases[i].marker,
-      0
-    );
-  }
-
-  static const struct {
-    const char *name;
-    const char *source;
-    enum TokenType fallback;
-    enum TokenType preferred;
-  } priorities[] = {
-    {"action before statement", "\\\n{", LC_BEFORE_STATEMENT, LC_BEFORE_ACTION},
-    {"statement before item", "\\\n{", LC_BEFORE_ITEM, LC_BEFORE_STATEMENT},
-    {"terminator before empty statement",
-      "\\\n;",
-      LC_BEFORE_STATEMENT,
-      LC_BEFORE_SEMICOLON},
-    {"do tail before while statement",
-      "\\\nwhile",
-      LC_BEFORE_STATEMENT,
-      LC_BEFORE_DO_TAIL},
-    {"expression before statement",
-      "\\\nname",
-      LC_BEFORE_STATEMENT,
-      LC_BEFORE_EXPRESSION},
-    {"expression before item",
-      "\\\nname",
-      LC_BEFORE_ITEM,
-      LC_BEFORE_EXPRESSION},
-    {"operator before expression",
-      "\\\n-1",
-      LC_BEFORE_EXPRESSION,
-      LC_BEFORE_ADDITIVE_OPERATOR},
-    {"simple statement before expression",
-      "\\\nx",
-      LC_BEFORE_EXPRESSION,
-      LC_BEFORE_SIMPLE_STATEMENT},
-  };
-  for (size_t i = 0; i < ARRAY_LENGTH(priorities); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[priorities[i].fallback] = true;
-    valid_symbols[priorities[i].preferred] = true;
-    failed |= expect_scan_result(
-      priorities[i].name,
-      priorities[i].source,
-      valid_symbols,
       true,
-      priorities[i].preferred,
-      0
+      cases[i].expected_symbol,
+      cases[i].expected_token_end
     );
   }
   return failed;
 }
 
-static int test_linear_line_continuation_lookahead(void) {
+static int test_linear_word_boundary_lookahead(void) {
+  static const struct {
+    const char *name;
+    const char *prefix;
+    const char *suffix;
+    enum TokenType expected_symbol;
+    size_t expected_token_end;
+  } cases[] = {
+    {"linear function-name continuation lookahead",
+      "follow",
+      "(",
+      FUNC_NAME_WORD,
+      6},
+    {"linear built-in continuation lookahead",
+      "length ",
+      "(",
+      BUILTIN_CALL_WORD,
+      6},
+    {"linear for-in continuation lookahead",
+      "k in array ",
+      ")",
+      FOR_IN_VARIABLE_WORD,
+      1},
+  };
   const size_t continuation_count = 32768;
-  char *source = malloc((continuation_count * 2U) + 2U);
-  if (source == NULL) {
-    fprintf(stderr, "linear line-continuation lookahead: allocation failed\n");
-    return 1;
-  }
-  for (size_t i = 0; i < continuation_count; i++) {
-    source[i * 2U] = '\\';
-    source[(i * 2U) + 1U] = '\n';
-  }
-  source[continuation_count * 2U] = 'a';
-  source[(continuation_count * 2U) + 1U] = '\0';
-
-  MockLexer mock = make_mock_lexer(source);
-  ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[LC_BEFORE_EXPRESSION] = true;
-  const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-    &state,
-    &mock.lexer,
-    valid_symbols
-  );
-  const bool valid_result = scanned &&
-    mock.lexer.result_symbol ==
-    LC_BEFORE_EXPRESSION &&
-    mock.token_end ==
-    0 &&
-    mock.advance_count <=
-    continuation_count *
-    4U;
-  if (!valid_result) {
-    fprintf(
-      stderr,
-      "linear line-continuation lookahead: scanned=%u symbol=%u advances=%zu "
-      "end=%zu\n",
-      scanned,
-      mock.lexer.result_symbol,
-      mock.advance_count,
-      mock.token_end
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    const size_t prefix_length = strlen(cases[i].prefix);
+    const size_t suffix_length = strlen(cases[i].suffix);
+    const size_t source_length =
+      prefix_length + continuation_count * 2U + suffix_length;
+    char *source = malloc(source_length + 1U);
+    if (source == NULL) {
+      fprintf(stderr, "%s: allocation failed\n", cases[i].name);
+      return 1;
+    }
+    memcpy(source, cases[i].prefix, prefix_length);
+    for (size_t index = 0; index < continuation_count; index++) {
+      source[prefix_length + index * 2U] = '\\';
+      source[prefix_length + index * 2U + 1U] = '\n';
+    }
+    memcpy(
+      source + prefix_length + continuation_count * 2U,
+      cases[i].suffix,
+      suffix_length + 1U
     );
-  }
 
-  free(source);
-  return valid_result ? 0 : 1;
+    MockLexer mock = make_mock_lexer(source);
+    ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].expected_symbol] = true;
+    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
+      &state,
+      &mock.lexer,
+      valid_symbols
+    );
+    const bool valid_result = scanned &&
+      mock.lexer.result_symbol ==
+      cases[i].expected_symbol &&
+      mock.token_start ==
+      0 &&
+      mock.token_end ==
+      cases[i].expected_token_end &&
+      mock.advance_count <= source_length;
+    if (!valid_result) {
+      fprintf(
+        stderr,
+        "%s: scanned=%u symbol=%u advances=%zu start=%zu end=%zu\n",
+        cases[i].name,
+        scanned,
+        mock.lexer.result_symbol,
+        mock.advance_count,
+        mock.token_start,
+        mock.token_end
+      );
+      failed = 1;
+    }
+    free(source);
+  }
+  return failed;
 }
 
 static int test_ere_state_transitions(void) {
@@ -1019,10 +1023,10 @@ static int test_error_mode_real_tokens(void) {
       OUTPUT_GREATER_GUARD,
       0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses line-continuation markers",
+    {"error mode leaves line continuation to the internal lexer",
       "\\\nname",
       false,
-      LC_BEFORE_EXPRESSION,
+      ERROR_SENTINEL,
       0,
       LEXICAL_MODE_OUTSIDE},
     {"error mode emits no token for unknown punctuation",
@@ -1276,8 +1280,8 @@ int main(void) {
   failed |= test_blank_skip_token_ranges();
   failed |= test_greater_dispatch();
   failed |= test_slash_dispatch();
-  failed |= test_line_continuation_markers();
-  failed |= test_linear_line_continuation_lookahead();
+  failed |= test_word_boundary_lookahead();
+  failed |= test_linear_word_boundary_lookahead();
   failed |= test_ere_state_transitions();
   failed |= test_string_and_comment_modes();
   failed |= test_error_mode_real_tokens();

@@ -39,13 +39,9 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "newline_opt",
           "named": true
@@ -679,10 +675,6 @@
           "named": true
         },
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "newline_opt",
           "named": true
         }
@@ -723,16 +715,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -771,10 +753,6 @@
       "types": [
         {
           "type": "expr_list",
-          "named": true
-        },
-        {
-          "type": "line_continuation",
           "named": true
         },
         {
@@ -827,10 +805,6 @@
           "named": true
         },
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "newline_opt",
           "named": true
         }
@@ -855,10 +829,6 @@
       "multiple": true,
       "required": true,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "newline",
           "named": true
@@ -1105,10 +1075,6 @@
           "named": true
         },
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "lvalue",
           "named": true
         },
@@ -1159,16 +1125,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -1371,10 +1327,6 @@
           "named": true
         },
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "lvalue",
           "named": true
         },
@@ -1444,15 +1396,11 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
         {
           "type": "expr",
-          "named": true
-        },
-        {
-          "type": "line_continuation",
           "named": true
         },
         {
@@ -1541,10 +1489,6 @@
         {
           "type": "expr",
           "named": true
-        },
-        {
-          "type": "line_continuation",
-          "named": true
         }
       ]
     }
@@ -1557,10 +1501,6 @@
       "multiple": true,
       "required": true,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "name",
           "named": true
@@ -1624,10 +1564,6 @@
       "required": true,
       "types": [
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "newline_opt",
           "named": true
         },
@@ -1667,16 +1603,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -1699,10 +1625,6 @@
         },
         {
           "type": "item_list",
-          "named": true
-        },
-        {
-          "type": "line_continuation",
           "named": true
         }
       ]
@@ -1768,15 +1690,11 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
           "type": "getline_keyword",
-          "named": true
-        },
-        {
-          "type": "line_continuation",
           "named": true
         }
       ]
@@ -1802,13 +1720,9 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "print_keyword",
           "named": true
@@ -1846,7 +1760,7 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
@@ -1855,10 +1769,6 @@
         },
         {
           "type": "expr",
-          "named": true
-        },
-        {
-          "type": "line_continuation",
           "named": true
         },
         {
@@ -2017,10 +1927,6 @@
         },
         {
           "type": "expr",
-          "named": true
-        },
-        {
-          "type": "line_continuation",
           "named": true
         },
         {
@@ -2184,10 +2090,6 @@
           "named": true
         },
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "newline_opt",
           "named": true
         },
@@ -2207,10 +2109,6 @@
       "required": true,
       "types": [
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "terminated_statement",
           "named": true
         }
@@ -2225,10 +2123,6 @@
       "multiple": true,
       "required": false,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "newline",
           "named": true
@@ -2384,13 +2278,9 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "newline_opt",
           "named": true
@@ -2426,16 +2316,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -2558,13 +2438,9 @@
       }
     },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "newline_opt",
           "named": true
@@ -2692,10 +2568,6 @@
           "named": true
         },
         {
-          "type": "line_continuation",
-          "named": true
-        },
-        {
           "type": "newline_opt",
           "named": true
         },
@@ -2714,10 +2586,6 @@
       "multiple": true,
       "required": true,
       "types": [
-        {
-          "type": "line_continuation",
-          "named": true
-        },
         {
           "type": "terminated_statement",
           "named": true
@@ -2838,7 +2706,8 @@
   },
   {
     "type": "line_continuation",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "newline",

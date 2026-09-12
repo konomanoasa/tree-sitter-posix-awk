@@ -238,6 +238,46 @@ mod tests {
   }
 
   #[test]
+  fn line_continuations_keep_exact_ranges_and_owners() {
+    let source = "\\\nBEGIN { print f\\\n(x) \\\n+ \\\ny }\\\n";
+    let mut parser = Parser::new();
+    parser
+      .set_language(&super::LANGUAGE.into())
+      .expect("generated grammar must load");
+    let tree = parser
+      .parse(source, None)
+      .expect("parser must return a tree");
+    assert!(!tree.root_node().has_error());
+    let mut leaves = Vec::new();
+    collect_leaves(tree.root_node(), &mut leaves);
+    let actual: Vec<_> = leaves
+      .into_iter()
+      .filter(|node| node.kind() == "line_continuation")
+      .map(|node| {
+        assert_eq!(node.utf8_text(source.as_bytes()).unwrap(), "\\\n");
+        let owner = node.parent().expect("continuation must have an owner");
+        (
+          node.start_byte(),
+          node.end_byte(),
+          owner.kind(),
+          owner.start_byte(),
+          owner.end_byte(),
+        )
+      })
+      .collect();
+    assert_eq!(
+      actual,
+      [
+        (0, 2, "program", 0, 34),
+        (17, 19, "non_unary_print_expr", 16, 22),
+        (23, 25, "non_unary_print_expr", 16, 30),
+        (27, 29, "non_unary_print_expr", 16, 30),
+        (32, 34, "program", 0, 34),
+      ],
+    );
+  }
+
+  #[test]
   fn posix_awk_grammar_loads_and_parses() {
     let source = "BEGIN { print 1 }\n";
     let mut parser = tree_sitter::Parser::new();

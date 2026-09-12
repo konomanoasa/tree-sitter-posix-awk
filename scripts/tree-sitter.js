@@ -1,9 +1,10 @@
-const childProcess = require("node:child_process");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repositoryDirectory = path.resolve(__dirname, "..");
+const repositoryDirectory = path.resolve(import.meta.dirname, "..");
 const manifest = JSON.parse(
   fs.readFileSync(path.join(repositoryDirectory, "tree-sitter.json"), "utf8"),
 );
@@ -28,7 +29,9 @@ if (
 }
 
 const grammarDirectory = path.resolve(repositoryDirectory, grammarPath);
-const treeSitterCli = require.resolve("tree-sitter-cli/cli.js");
+const treeSitterCli = fileURLToPath(
+  import.meta.resolve("tree-sitter-cli/cli.js"),
+);
 
 function createEnvironment(prefix = "tree-sitter-posix-awk.") {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -117,7 +120,7 @@ function runChecked(args, options = {}) {
   return result;
 }
 
-module.exports = {
+export {
   createEnvironment,
   grammar,
   grammarDirectory,
@@ -127,7 +130,7 @@ module.exports = {
   throwIfFailed,
 };
 
-if (require.main === module) {
+if (import.meta.main) {
   const result = run(process.argv.slice(2), { stdio: "inherit" });
   if (result.error !== undefined) {
     throw result.error;

@@ -1,15 +1,15 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const { after, before, test } = require("node:test");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { after, before, test } from "node:test";
 
-const {
+import {
   createEnvironment,
   grammar,
   repositoryDirectory,
   run,
   runChecked,
-} = require("../scripts/tree-sitter.js");
+} from "../scripts/tree-sitter.js";
 
 const runtime = createEnvironment("tree-sitter-posix-awk-runtime.");
 const nativeLibrary = path.join(

@@ -22,7 +22,7 @@ jobs:
       - run: npm ci
       - name: Verify tag matches package version
         run: |
-          package_version=$(node --print "require('./package.json').version")
+          package_version=$(node --input-type=module --eval "import pkg from './package.json' with { type: 'json' }; console.log(pkg.version)")
           test "v${package_version}" = "${GITHUB_REF_NAME}"
       - run: npm run check
       - run: npm publish

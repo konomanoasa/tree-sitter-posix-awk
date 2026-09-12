@@ -1,8 +1,8 @@
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-const { grammarDirectory, runChecked } = require("./tree-sitter.js");
+import { grammarDirectory, runChecked } from "./tree-sitter.js";
 
 const expectedGeneratedFiles = [
   "grammar.json",

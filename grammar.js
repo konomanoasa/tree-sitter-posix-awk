@@ -695,7 +695,7 @@ const continuedListElement = ($, element) =>
 const continuedPipeGet = ($) =>
   continuedExpressionMember($, field("get", $.simple_get));
 
-module.exports = grammar({
+export default grammar({
   name: "posix_awk",
 
   externals: ($) => [

@@ -1,13 +1,14 @@
-const childProcess = require("node:child_process");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-const {
+import {
   grammarDirectory,
   repositoryDirectory,
   throwIfFailed,
-} = require("./tree-sitter.js");
+} from "./tree-sitter.js";
+
 const cFiles = [
   path.join(grammarDirectory, "src", "scanner.c"),
   path.join(repositoryDirectory, "test", "scanner.test.c"),

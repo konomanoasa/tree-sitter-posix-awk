@@ -1,7 +1,40 @@
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "../src/scanner.c"
+
+#ifdef TREE_SITTER_REUSE_ALLOCATOR
+static size_t reuse_calloc_calls;
+static size_t reuse_free_calls;
+static size_t reuse_live_allocations;
+static bool reuse_fail_next_calloc;
+
+static void *reuse_calloc(size_t count, size_t size) {
+  reuse_calloc_calls += 1;
+  if (reuse_fail_next_calloc) {
+    reuse_fail_next_calloc = false;
+    return NULL;
+  }
+  void *result = calloc(count, size);
+  if (result != NULL) {
+    reuse_live_allocations += 1;
+  }
+  return result;
+}
+
+static void reuse_free(void *allocation) {
+  reuse_free_calls += 1;
+  if (allocation != NULL) {
+    assert(reuse_live_allocations > 0);
+    reuse_live_allocations -= 1;
+  }
+  free(allocation);
+}
+
+void *(*ts_current_calloc)(size_t, size_t) = reuse_calloc;
+void (*ts_current_free)(void *) = reuse_free;
+#endif
 
 typedef struct {
   TSLexer lexer;
@@ -1221,6 +1254,18 @@ static int test_serialization(void) {
   return failed;
 }
 
+#ifdef TREE_SITTER_REUSE_ALLOCATOR
+static void test_reuse_allocator_contract(void) {
+  assert(reuse_calloc_calls > 0);
+  assert(reuse_free_calls > 0);
+  assert(reuse_live_allocations == 0);
+  reuse_fail_next_calloc = true;
+  assert(tree_sitter_posix_awk_external_scanner_create() == NULL);
+  assert(!reuse_fail_next_calloc);
+  assert(reuse_live_allocations == 0);
+}
+#endif
+
 int main(void) {
   int failed = 0;
   test_lifecycle();
@@ -1236,5 +1281,8 @@ int main(void) {
   failed |= test_ere_state_transitions();
   failed |= test_string_and_comment_modes();
   failed |= test_error_mode_real_tokens();
+#ifdef TREE_SITTER_REUSE_ALLOCATOR
+  test_reuse_allocator_contract();
+#endif
   return failed;
 }

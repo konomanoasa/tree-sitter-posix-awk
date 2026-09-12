@@ -19,7 +19,7 @@
     "access": "public"
   },
   "scripts": {
-    "check": "biome check . && node scripts/check-c.js && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && node scripts/check-generated.js && npm test",
+    "check": "biome check . && node scripts/check-c.js && cargo fmt --check && cargo check --all-targets --locked && cargo clippy --all-targets --locked -- -D warnings && node scripts/check-generated.js && npm test",
     "format": "biome check --write . && node scripts/check-c.js --write && cargo fmt",
     "generate": "npm run tree-sitter -- generate-all",
     "parse": "npm run tree-sitter -- parse --scope source.awk",

@@ -17,6 +17,7 @@ import { grammars, packageName, root } from "./tree-sitter.js";
 const scannerConfigurations = {
   posix_awk: {
     externalCount: "TOKEN_TYPE_COUNT",
+    reuseAllocator: true,
   },
 };
 
@@ -122,6 +123,10 @@ function scannerVariants() {
     const configuration = scannerConfigurations[grammar.name];
     if (configuration === undefined)
       throw new Error(`Unsupported scanner grammar ${grammar.name}.`);
+    if (typeof configuration.reuseAllocator !== "boolean")
+      throw new Error(
+        `Scanner grammar ${grammar.name} must declare reuseAllocator.`,
+      );
     const includeDirectory = join(root, grammar.path, "src");
     return {
       ...configuration,

@@ -318,7 +318,7 @@ const finalCaptureCases = [
     ],
   },
   {
-    name: "ERE character escapes and escaped delimiters override literal captures",
+    name: "ERE character escapes and escaped delimiters retain escape captures",
     source: "/a\\n\\t\\/b/ { print }\n",
     captures: [
       [0, 1, "punctuation.delimiter"],
@@ -394,7 +394,7 @@ const finalCaptureCases = [
     ],
   },
   {
-    name: "ERE literal closers and escaped slashes override punctuation captures",
+    name: "ERE literal closers and escaped slashes retain their lexical captures",
     source: "BEGIN { print /a)b}c\\/d/ }\n",
     captures: [
       [0, 5, "keyword"],
@@ -519,6 +519,30 @@ const finalCaptureCases = [
 for (const { name, source, captures } of finalCaptureCases) {
   test(`${grammar.name}: ${name}`, () => {
     assertCaptures(source, highlight(grammar.scope, source), captures);
+  });
+}
+
+for (const [name, source] of [
+  ["collating symbols", `${String.raw`/[[.a\né\141 \e\/日\..]]/`}\n`],
+  ["equivalence classes", `${String.raw`/[[=a\né\141 \e\/日\.=]]/`}\n`],
+]) {
+  test(`${grammar.name}: ${name} separate Unicode and blank content from escapes`, () => {
+    assertCaptures(source, highlight(grammar.scope, source), [
+      [0, 1, "punctuation.delimiter"],
+      [1, 3, "punctuation.bracket"],
+      [3, 4, "punctuation.delimiter"],
+      [4, 5, "character.special"],
+      [5, 7, "string.escape"],
+      [7, 9, "character.special"],
+      [9, 13, "string.escape"],
+      [13, 14, "character.special"],
+      [14, 18, "string.escape"],
+      [18, 21, "character.special"],
+      [21, 23, "string.escape"],
+      [23, 24, "punctuation.delimiter"],
+      [24, 26, "punctuation.bracket"],
+      [26, 27, "punctuation.delimiter"],
+    ]);
   });
 }
 

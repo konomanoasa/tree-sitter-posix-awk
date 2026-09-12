@@ -349,7 +349,7 @@ determinismTest(
       "Expected one range expression ending at the inserted hyphen",
     );
     assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+collating_element/),
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element$/),
       2,
       "Expected the range start and the following element only",
     );
@@ -363,7 +363,7 @@ determinismTest(
   [{ byte: 18, deleteBytes: 1, insert: "" }],
   (tree) => {
     assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+collating_element/),
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element$/),
       2,
       "Expected a plain range between two collating elements",
     );
@@ -422,7 +422,7 @@ determinismTest(
   [{ byte: 18, deleteBytes: 0, insert: "3" }],
   (tree) => {
     contains(tree, "escape_sequence");
-    contains(tree, "ordinary_character");
+    assert.match(tree, /^[ \t0-9:-]+ordinary_character$/m);
   },
 );
 
@@ -474,7 +474,7 @@ determinismTest(
   [{ byte: 4, deleteBytes: 1, insert: "^" }],
   (tree) => {
     contains(tree, "equivalence_class");
-    contains(tree, "collating_element `^`");
+    contains(tree, "collating_element_content `^`");
     excludes(tree, "meta_character");
   },
 );
@@ -486,10 +486,50 @@ determinismTest(
   [{ byte: 5, deleteBytes: 0, insert: "a" }],
   (tree) => {
     contains(tree, "equivalence_class");
-    contains(tree, "collating_element");
+    assert.match(tree, /^[ \t0-9:-]+collating_element$/m);
     excludes(tree, "meta_character");
   },
 );
+
+for (const { name, escaped, plain } of [
+  {
+    name: "collating symbol",
+    escaped: lines(String.raw`/[[.a\né\141 \e\/日.]]/`),
+    plain: lines(String.raw`/[[.aé\141 \e\/日.]]/`),
+  },
+  {
+    name: "equivalence class",
+    escaped: lines(String.raw`/[[=a\né\141 \e\/日=]]/`),
+    plain: lines(String.raw`/[[=aé\141 \e\/日=]]/`),
+  },
+]) {
+  determinismTest(
+    `inserting a ${name} escape preserves neighboring Unicode content leaves`,
+    plain,
+    escaped,
+    [{ byte: 5, deleteBytes: 0, insert: String.raw`\n` }],
+    (tree) => {
+      contains(tree, "collating_element_content `a`");
+      contains(tree, "collating_element_content `é`");
+      contains(tree, "collating_element_content `日`");
+    },
+  );
+  determinismTest(
+    `deleting a ${name} escape preserves neighboring Unicode content leaves`,
+    escaped,
+    plain,
+    [{ byte: 5, deleteBytes: 2, insert: "" }],
+  );
+  editHistoryTest(
+    `a ${name} regains its content leaves after delimiter and Unicode repairs`,
+    escaped,
+    [
+      { byte: 21, deleteBytes: 1, insert: "" },
+      { byte: 16, deleteBytes: 1, insert: "" },
+      { byte: 7, deleteBytes: 2, insert: "🙂" },
+    ],
+  );
+}
 
 const classEre = lines("BEGIN { print /[[:alpha:]]/ }");
 
@@ -536,7 +576,7 @@ determinismTest(
   literalOpenBracketEre,
   [{ byte: 17, deleteBytes: 4, insert: "" }],
   (tree) => {
-    contains(tree, "collating_element");
+    assert.match(tree, /^[ \t0-9:-]+collating_element$/m);
     excludes(tree, "collating_symbol");
   },
 );
@@ -892,7 +932,7 @@ determinismTest(
   hashEre,
   [{ byte: 14, deleteBytes: 0, insert: "/" }],
   (tree) => {
-    contains(tree, "ordinary_character");
+    assert.match(tree, /^[ \t0-9:-]+ordinary_character$/m);
     excludes(tree, "comment");
   },
 );

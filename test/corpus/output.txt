@@ -334,7 +334,8 @@ BEGIN {
                                           (ere_branch
                                             (ere_expression
                                               (one_char_or_coll_elem_ere
-                                                (ordinary_character)))))))))
+                                                (ordinary_character
+                                                  (ordinary_character_content))))))))))
                                 (in_keyword)
                                 (name))
                               (and)

@@ -1238,7 +1238,7 @@ export default grammar({
 
     ordinary_character: ($) =>
       choice(
-        $._ordinary_character,
+        alias($._ordinary_character, $.ordinary_character_content),
         $._ere_ordinary_close_parenthesis,
         $._ere_ordinary_close_brace,
         $.escaped_delimiter,
@@ -1303,9 +1303,12 @@ export default grammar({
         ),
       ),
 
-    ...initialFollowListRules("close", ($) => $._ere_bracket_close_character),
+    ...initialFollowListRules("close", ($) => $._ere_initial_close),
 
     ...initialFollowListRules("hyphen", ($) => $._ere_initial_hyphen),
+
+    _ere_initial_close: ($) =>
+      alias(token.immediate("]"), $.collating_element_content),
 
     // Inlining this choice would let the anonymous hyphen alias replace the
     // collating_element wrapper.
@@ -1328,8 +1331,8 @@ export default grammar({
 
     collating_element: ($) =>
       choice(
-        $._ere_bracket_character,
-        $._ere_bracket_open_character,
+        alias($._ere_bracket_character, $.collating_element_content),
+        alias(token.immediate("["), $.collating_element_content),
         $.escaped_delimiter,
         alias($._ere_bracket_escape_sequence, $.escape_sequence),
       ),
@@ -1369,11 +1372,14 @@ export default grammar({
       ),
 
     _ere_compound_atom: ($) =>
-      choice($._ere_compound_nonmeta_atom, $._ere_compound_meta_character),
+      choice(
+        $._ere_compound_nonmeta_atom,
+        alias($._ere_compound_meta_character, $.collating_element_content),
+      ),
 
     _ere_compound_nonmeta_atom: ($) =>
       choice(
-        $._ere_compound_nonmeta_character,
+        alias($._ere_compound_nonmeta_character, $.collating_element_content),
         $.escaped_delimiter,
         alias($._ere_bracket_escape_sequence, $.escape_sequence),
       ),
@@ -1394,7 +1400,7 @@ export default grammar({
       seq(
         $._ere_escaped_delimiter_start,
         $._escape_introducer,
-        alias($._ere_escaped_delimiter_end, "/"),
+        $._ere_escaped_delimiter_end,
       ),
 
     _ere_named_escape_sequence: ($) =>
@@ -1434,10 +1440,6 @@ export default grammar({
     _ere_bracket_hyphen: () => token.immediate("-"),
 
     _ere_bracket_character: () => token.immediate(/[^\x2D\x2F\x5B\x5C\x5D\n]/),
-
-    _ere_bracket_open_character: () => token.immediate("["),
-
-    _ere_bracket_close_character: () => token.immediate("]"),
 
     _ere_compound_nonmeta_character: () =>
       token.immediate(/[^\x2D\x2F\x5C\x5D\n]/),

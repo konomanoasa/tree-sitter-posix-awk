@@ -153,22 +153,28 @@ an ERE pattern accepts an action
                             (ere_branch
                               (ere_expression
                                 (one_char_or_coll_elem_ere
-                                  (ordinary_character))))
+                                  (ordinary_character
+                                    (ordinary_character_content)))))
                             (ere_expression
                               (one_char_or_coll_elem_ere
-                                (ordinary_character))))
+                                (ordinary_character
+                                  (ordinary_character_content)))))
                           (ere_expression
                             (one_char_or_coll_elem_ere
-                              (ordinary_character))))
+                              (ordinary_character
+                                (ordinary_character_content)))))
                         (ere_expression
                           (one_char_or_coll_elem_ere
-                            (ordinary_character))))
+                            (ordinary_character
+                              (ordinary_character_content)))))
                       (ere_expression
                         (one_char_or_coll_elem_ere
-                          (ordinary_character))))
+                          (ordinary_character
+                            (ordinary_character_content)))))
                     (ere_expression
                       (one_char_or_coll_elem_ere
-                        (ordinary_character))))))))))
+                        (ordinary_character
+                          (ordinary_character_content)))))))))))
       (action))
     (terminator
       (newline))))

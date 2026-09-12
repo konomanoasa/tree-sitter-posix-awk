@@ -56,7 +56,6 @@
   (sub_assign)
   (left_anchor)
   (right_anchor)
-  (repetition_modifier)
   "!"
   "$"
   "%"
@@ -104,14 +103,16 @@
 (ere
   "/" @punctuation.delimiter)
 
-(ordinary_character) @string.regexp
+(ordinary_character_content) @string.regexp
 
 [
-  (collating_element)
+  (collating_element_content)
   (meta_character)
   (class_name)
-  (wildcard)
 ] @character.special
+
+(wildcard
+  "." @character.special)
 
 (start_range
   "-" @operator)
@@ -160,7 +161,6 @@
 
 [
   (escaped_delimiter)
-  (quoted_character)
   (escape_sequence)
 ] @string.escape
 
@@ -169,9 +169,6 @@
     ")"
     "}"
   ] @string.regexp)
-
-(escaped_delimiter
-  "/" @string.escape)
 
 (non_unary_expr
   [

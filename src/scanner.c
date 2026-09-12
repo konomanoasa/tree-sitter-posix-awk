@@ -156,7 +156,6 @@ typedef struct {
     } \
   }
 
-// Prefer specific markers so a value stays in its current expression.
 #define VALUE_MARKERS \
   MARKERS( \
     LC_BEFORE_SIMPLE_STATEMENT, \
@@ -190,7 +189,6 @@ typedef enum {
   NUMBER_KIND_EXPONENT,
 } NumberKind;
 
-// Lexical modes keep comment scanning out of string and ERE content.
 typedef enum {
   LEXICAL_MODE_OUTSIDE,
   LEXICAL_MODE_ERE_BODY,
@@ -482,7 +480,6 @@ static WordKind scan_word_spelling(TSLexer *lexer) {
   return classify_word(word, length);
 }
 
-// Resolve for-in before the parser must choose between loop header forms.
 static bool scan_for_in_shape(TSLexer *lexer) {
   if (
     !advance_boundary_gap_remainder(lexer) ||
@@ -612,7 +609,6 @@ accept_number(TSLexer *lexer, NumberKind kind, bool mark_end) {
   return kind;
 }
 
-// Keep the last complete NUMBER endpoint when an exponent is incomplete.
 static NumberKind scan_number_kind(TSLexer *lexer, bool mark_end) {
   NumberKind kind = NUMBER_KIND_NONE;
 
@@ -1030,7 +1026,6 @@ static bool scan_ere_context(
   return scan_ere_backslash_context(state, lexer, valid_symbols);
 }
 
-// The grammar still requires the closing quote after this lexical-mode reset.
 static bool scan_string_context(
   ScannerState *state,
   TSLexer *lexer,

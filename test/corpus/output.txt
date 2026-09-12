@@ -1,0 +1,1249 @@
+==================
+print accepts an empty argument list
+==================
+
+BEGIN {
+  print
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print accepts a single expression
+==================
+
+BEGIN {
+  print value
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print accepts a parenthesized expression
+==================
+
+BEGIN {
+  print (value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print accepts a parenthesized argument list
+==================
+
+BEGIN {
+  print (first, second)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (multiple_expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+printf accepts a single expression
+==================
+
+BEGIN {
+  printf format
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (printf_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+printf accepts a parenthesized expression
+==================
+
+BEGIN {
+  printf (format)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (printf_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+printf accepts a parenthesized argument list
+==================
+
+BEGIN {
+  printf (format, value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (printf_keyword)
+                    (multiple_expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print expressions preserve operator precedence before an argument separator
+==================
+
+BEGIN {
+  print -a ^ b + c * d e !~ /r/ in array &&
+    f ||
+    g ? h : i,
+    j
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (unary_print_expr
+                          (unary_print_expr
+                            (unary_print_expr
+                              (unary_print_expr
+                                (unary_print_expr
+                                  (unary_print_expr
+                                    (unary_print_expr
+                                      (unary_print_expr
+                                        (print_expr
+                                          (non_unary_print_expr
+                                            (non_unary_print_expr
+                                              (lvalue
+                                                (name)))
+                                            (print_expr
+                                              (non_unary_print_expr
+                                                (lvalue
+                                                  (name)))))))
+                                      (print_expr
+                                        (non_unary_print_expr
+                                          (non_unary_print_expr
+                                            (lvalue
+                                              (name)))
+                                          (print_expr
+                                            (non_unary_print_expr
+                                              (lvalue
+                                                (name)))))))
+                                    (non_unary_print_expr
+                                      (lvalue
+                                        (name))))
+                                  (no_match)
+                                  (print_expr
+                                    (non_unary_print_expr
+                                      (ere
+                                        (extended_reg_exp
+                                          (ere_branch
+                                            (ere_expression
+                                              (one_char_or_coll_elem_ere
+                                                (ordinary_character)))))))))
+                                (in_keyword)
+                                (name))
+                              (and)
+                              (newline_opt
+                                (newline))
+                              (print_expr
+                                (non_unary_print_expr
+                                  (lvalue
+                                    (name)))))
+                            (or)
+                            (newline_opt
+                              (newline))
+                            (print_expr
+                              (non_unary_print_expr
+                                (lvalue
+                                  (name)))))
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name))))
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name))))))
+                      (newline_opt
+                        (newline))
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+parenthesized comparisons and logical negation form print arguments
+==================
+
+BEGIN {
+  print (a > b), (c <= d), !e
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name))))))))
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))
+                              (le)
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name))))))))
+                      (print_expr
+                        (non_unary_print_expr
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print expressions accept parenthesized membership results
+==================
+
+BEGIN {
+  print (a in b) ~ c, (-a in b) ^ c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (non_unary_print_expr
+                            (expr
+                              (non_unary_expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))
+                                (in_keyword)
+                                (name))))
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name))))))
+                      (print_expr
+                        (non_unary_print_expr
+                          (non_unary_print_expr
+                            (expr
+                              (unary_expr
+                                (unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (name)))))
+                                (in_keyword)
+                                (name))))
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print accepts redirection with an empty argument list
+==================
+
+BEGIN {
+  print > file
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print accepts append redirection after its argument
+==================
+
+BEGIN {
+  print value >> archive
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (output_redirection
+                    (append)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+print accepts a pipe after its argument
+==================
+
+BEGIN {
+  print value | command
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+printf accepts redirection after its argument
+==================
+
+BEGIN {
+  printf format > file
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (printf_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized greater-than comparison remains a print argument
+==================
+
+BEGIN {
+  print (left > right)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+logical or remains inside a print argument
+==================
+
+BEGIN {
+  print left || right
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (non_unary_print_expr
+                            (lvalue
+                              (name)))
+                          (or)
+                          (print_expr
+                            (non_unary_print_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized pipe into getline remains a print argument
+==================
+
+BEGIN {
+  print (command | getline input_target)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (non_unary_input_function
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))
+                                (simple_get
+                                  (getline_keyword)
+                                  (lvalue
+                                    (name)))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an unparenthesized pipe redirects output to a getline expression
+==================
+
+BEGIN {
+  print value | getline output_target
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+output redirection owns a comparison in its target expression
+==================
+
+BEGIN {
+  print value > target > suffix
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a print field argument keeps the following output redirection
+==================
+
+BEGIN {
+  print $1 > file
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (number))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+multiple print field arguments keep the following append redirection
+==================
+
+BEGIN {
+  print $1, $2 >> archive
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (number))))))
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (number))))))))
+                  (output_redirection
+                    (append)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a printf field argument keeps the following output redirection
+==================
+
+BEGIN {
+  printf "%s", $field > target
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (printf_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (string
+                            (string_content))))
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+unparenthesized greater-than becomes output redirection
+==================
+
+BEGIN {
+  print left > right
+  after
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+continuation between names belongs to their concatenation
+==================
+BEGIN { print x \
+y }
+---
+
+(program
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))
+                        (line_continuation)
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))))))))))))))
+
+==================
+a print argument owns a continuation before the separating comma
+==================
+
+BEGIN {
+  print first\
+, second
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))
+                      (line_continuation)
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+newlines and continuations after commas stay inside a print argument list
+==================
+
+BEGIN {
+  print first,
+    second,\
+    third
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))
+                      (newline_opt
+                        (newline))
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))
+                      (line_continuation)
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+continuations before and after append redirection keep their owners
+==================
+
+BEGIN {
+  print value\
+>>\
+destination
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))))))
+                  (line_continuation)
+                  (output_redirection
+                    (append)
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))

@@ -1,4 +1,48 @@
 ==================
+an ERE is accepted as a print expression
+==================
+
+# slash
+BEGIN {
+  print /a/
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline)
+      (comment)
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (ere
+                            (extended_reg_exp
+                              (ere_branch
+                                (ere_expression
+                                  (one_char_or_coll_elem_ere
+                                    (ordinary_character)))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
 ordinary characters include blank, hash, non-ASCII, and hyphen
 ==================
 
@@ -51,7 +95,7 @@ BEGIN { print /1 #犬-/ }
       (newline))))
 
 ==================
-AWK escapes preserve source-neutral ERE classifications
+escapes in AWK preserve source-neutral ERE classifications
 ==================
 
 BEGIN { print /\/\\\.\[\(\*\+\?\{\|\^\$\a\b\f\n\r\t\v\1\12\1234\0000\400\052\057\134.\q\x\"/ }
@@ -234,11 +278,59 @@ BEGIN { print /\/\\\.\[\(\*\+\?\{\|\^\$\a\b\f\n\r\t\v\1\12\1234\0000\400\052\057
       (newline))))
 
 ==================
-bracket list positions distinguish closers, literals, and ranges
+a match operator accepts an ERE operand
+==================
+
+# slash
+BEGIN {
+  print x ~ /a/
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline)
+      (comment)
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (non_unary_print_expr
+                            (lvalue
+                              (name)))
+                          (print_expr
+                            (non_unary_print_expr
+                              (ere
+                                (extended_reg_exp
+                                  (ere_branch
+                                    (ere_expression
+                                      (one_char_or_coll_elem_ere
+                                        (ordinary_character)))))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a leading plus and trailing hyphen remain bracket list literals
 ==================
 
 BEGIN { print /[+-]?[a]/ }
-BEGIN { print /[]-a][]--]/ }
 
 ---
 
@@ -288,7 +380,17 @@ BEGIN { print /[]-a][]--]/ }
                                                 (end_range
                                                   (collating_element))))))))))))))))))))))))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+a leading closer remains a list literal before a range
+==================
+BEGIN { print /[]-a][]--]/ }
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (special_pattern

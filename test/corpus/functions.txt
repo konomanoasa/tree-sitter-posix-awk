@@ -1,0 +1,566 @@
+==================
+a user function call accepts an empty argument list
+==================
+
+BEGIN {
+  f()
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (func_name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a user function call accepts an argument
+==================
+
+BEGIN {
+  f(value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (func_name)
+                    (expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a space before a user function parenthesis forms concatenation
+==================
+
+BEGIN {
+  f (value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a built-in function accepts omitted parentheses
+==================
+
+BEGIN {
+  length
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (builtin_func_name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a built-in function accepts an empty argument list
+==================
+
+BEGIN {
+  length()
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (builtin_func_name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a built-in function accepts a space before its call parenthesis
+==================
+
+BEGIN {
+  length (value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (builtin_func_name)
+                    (expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a built-in function accepts multiple arguments
+==================
+
+BEGIN {
+  atan2(1, 2)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (builtin_func_name)
+                    (expr_list
+                      (multiple_expr_list
+                        (expr
+                          (non_unary_expr
+                            (number)))
+                        (expr
+                          (non_unary_expr
+                            (number)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+every POSIX built-in function name remains reserved
+==================
+
+BEGIN {
+  f(atan2, close, cos, exp, fflush, gsub, index, int, length, log, match, rand, sin, split, sprintf, sqrt, srand, sub, substr, system, tolower, toupper)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (func_name)
+                    (expr_list
+                      (multiple_expr_list
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))
+                        (expr
+                          (non_unary_expr
+                            (builtin_func_name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a function definition accepts an adjacent empty parameter list
+==================
+function adjacent() {}
+
+---
+
+(program
+  (item_list
+    (item
+      (function_keyword)
+      (func_name)
+      (action))
+    (terminator
+      (newline))))
+
+==================
+a function definition accepts spaces and newlines around its parameter list and body
+==================
+function spaced (first,
+second)
+{
+  return first
+}
+
+---
+
+(program
+  (item_list
+    (item
+      (function_keyword)
+      (name)
+      (param_list
+        (name)
+        (newline_opt
+          (newline))
+        (name))
+      (newline_opt
+        (newline))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (return_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a function definition accepts a continuation inside its parameter list
+==================
+function continued(param,\
+other) {}
+---
+
+(program
+  (item
+    (function_keyword)
+    (func_name)
+    (param_list
+      (name)
+      (line_continuation)
+      (name))
+    (action)))
+
+==================
+a continued user function name remains adjacent to its call parenthesis
+==================
+
+BEGIN {
+  call\
+(value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (func_name)
+                    (line_continuation)
+                    (expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a built-in function name owns a continuation before its call parenthesis
+==================
+
+BEGIN {
+  length\
+(value)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (builtin_func_name)
+                    (line_continuation)
+                    (expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+continuation after a bare builtin name belongs to its concatenation
+==================
+BEGIN { x = length \
+y }
+---
+
+(program
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))
+                  (expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (builtin_func_name))
+                      (line_continuation)
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))))))))
+
+==================
+a call argument owns a continuation before the closing parenthesis
+==================
+
+BEGIN {
+  f(value\
+)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (func_name)
+                    (expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (line_continuation)))))
+            (newline)))))
+    (terminator
+      (newline))))

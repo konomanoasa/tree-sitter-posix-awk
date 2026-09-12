@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 
 #include "../src/scanner.c"
@@ -5,6 +6,7 @@
 typedef struct {
   TSLexer lexer;
   const char *source;
+  size_t length;
   size_t offset;
   size_t token_start;
   size_t token_end;
@@ -23,7 +25,7 @@ static const MockLexer *const_mock_lexer(const TSLexer *lexer) {
 static void mock_advance(TSLexer *lexer, bool skip) {
   MockLexer *mock = mock_lexer(lexer);
   mock->advance_count++;
-  if (mock->source[mock->offset] != '\0') {
+  if (mock->offset < mock->length) {
     mock->offset++;
   }
   if (skip && !mock->content_started) {
@@ -31,7 +33,8 @@ static void mock_advance(TSLexer *lexer, bool skip) {
   } else {
     mock->content_started = true;
   }
-  lexer->lookahead = (unsigned char)mock->source[mock->offset];
+  lexer->lookahead =
+    mock->offset < mock->length ? (unsigned char)mock->source[mock->offset] : 0;
 }
 
 static void mock_mark_end(TSLexer *lexer) {
@@ -41,7 +44,7 @@ static void mock_mark_end(TSLexer *lexer) {
 
 static bool mock_eof(const TSLexer *lexer) {
   const MockLexer *mock = const_mock_lexer(lexer);
-  return mock->source[mock->offset] == '\0';
+  return mock->offset == mock->length;
 }
 
 static MockLexer make_mock_lexer(const char *source) {
@@ -54,6 +57,7 @@ static MockLexer make_mock_lexer(const char *source) {
         .eof = mock_eof,
       },
     .source = source,
+    .length = strlen(source),
   };
 }
 
@@ -130,7 +134,7 @@ static void set_all_symbols_valid(bool *valid_symbols) {
   }
 }
 
-static int check_source_token_ranges(void) {
+static int test_source_token_ranges(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -261,7 +265,7 @@ static int check_source_token_ranges(void) {
   return failed;
 }
 
-static int check_blank_skip_token_ranges(void) {
+static int test_blank_skip_token_ranges(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -292,7 +296,7 @@ static int check_blank_skip_token_ranges(void) {
   return failed;
 }
 
-static int check_greater_dispatch(void) {
+static int test_greater_dispatch(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -364,7 +368,7 @@ static int check_greater_dispatch(void) {
   return failed;
 }
 
-static int check_slash_dispatch(void) {
+static int test_slash_dispatch(void) {
   int failed = 0;
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
   valid_symbols[DIVISION_SLASH] = true;
@@ -417,7 +421,7 @@ static int check_slash_dispatch(void) {
   return failed;
 }
 
-static int check_line_continuation_markers(void) {
+static int test_line_continuation_markers(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -535,7 +539,7 @@ static int check_line_continuation_markers(void) {
   return failed;
 }
 
-static int check_linear_line_continuation_lookahead(void) {
+static int test_linear_line_continuation_lookahead(void) {
   const size_t continuation_count = 32768;
   char *source = malloc((continuation_count * 2U) + 2U);
   if (source == NULL) {
@@ -582,7 +586,7 @@ static int check_linear_line_continuation_lookahead(void) {
   return valid_result ? 0 : 1;
 }
 
-static int check_ere_state_transitions(void) {
+static int test_ere_state_transitions(void) {
   int failed = 0;
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
   valid_symbols[ERE_OPENING_SLASH] = true;
@@ -733,7 +737,7 @@ static int check_ere_state_transitions(void) {
   return failed;
 }
 
-static int check_string_and_comment_modes(void) {
+static int test_string_and_comment_modes(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -888,7 +892,7 @@ static int check_string_and_comment_modes(void) {
   return failed;
 }
 
-static int check_error_mode_real_tokens(void) {
+static int test_error_mode_real_tokens(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -1059,21 +1063,106 @@ static int check_round_trip(
 ) {
   ScannerState source = {.mode = mode};
   ScannerState destination = {.mode = LEXICAL_MODE_ERE_ESCAPED_DELIMITER};
-  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE] = {0};
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE + 2];
+  memset(buffer, 0x5a, sizeof(buffer));
   const unsigned length =
-    tree_sitter_posix_awk_external_scanner_serialize(&source, buffer);
+    tree_sitter_posix_awk_external_scanner_serialize(&source, buffer + 1);
+  assert(length <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
+  assert(buffer[0] == 0x5a);
+  for (size_t index = length + 1; index < sizeof(buffer); index++) {
+    assert(buffer[index] == 0x5a);
+  }
 
   int failed = expect_length(test_name, expected_length, length);
   tree_sitter_posix_awk_external_scanner_deserialize(
     &destination,
-    buffer,
+    buffer + 1,
     length
   );
   failed |= expect_mode(test_name, mode, destination.mode);
   return failed;
 }
 
-static int check_serialization(void) {
+static void test_lifecycle(void) {
+  ScannerState *state = tree_sitter_posix_awk_external_scanner_create();
+  assert(state != NULL);
+  assert(state->mode == LEXICAL_MODE_OUTSIDE);
+  state->mode = LEXICAL_MODE_STRING;
+  tree_sitter_posix_awk_external_scanner_deserialize(state, NULL, 0);
+  assert(state->mode == LEXICAL_MODE_OUTSIDE);
+  tree_sitter_posix_awk_external_scanner_destroy(state);
+}
+
+static void test_nul_and_eof_are_distinct(void) {
+  const char source[] = "#a\0b\n";
+  MockLexer comment = make_mock_lexer(source);
+  comment.length = sizeof(source) - 1;
+  ScannerState state = {0};
+  bool valid_symbols[TOKEN_TYPE_COUNT] = {[COMMENT] = true};
+  assert(tree_sitter_posix_awk_external_scanner_scan(
+    &state,
+    &comment.lexer,
+    valid_symbols
+  ));
+  assert(comment.lexer.result_symbol == COMMENT);
+  assert(comment.token_end == 4);
+  assert(comment.lexer.lookahead == '\n');
+
+  valid_symbols[COMMENT] = false;
+  valid_symbols[STRING_END] = true;
+  MockLexer nul = make_mock_lexer("\0");
+  nul.length = 1;
+  state.mode = LEXICAL_MODE_STRING;
+  assert(!tree_sitter_posix_awk_external_scanner_scan(
+    &state,
+    &nul.lexer,
+    valid_symbols
+  ));
+  assert(state.mode == LEXICAL_MODE_STRING);
+
+  MockLexer eof = make_mock_lexer("");
+  assert(tree_sitter_posix_awk_external_scanner_scan(
+    &state,
+    &eof.lexer,
+    valid_symbols
+  ));
+  assert(eof.lexer.result_symbol == STRING_END);
+  assert(eof.token_end == 0);
+  assert(state.mode == LEXICAL_MODE_OUTSIDE);
+}
+
+static void test_disabled_tokens_preserve_state(void) {
+  const struct {
+    const char *source;
+    size_t length;
+  } inputs[] = {
+    {"BEGIN", 5},
+    {"/", 1},
+    {"\\/", 2},
+    {"\"", 1},
+    {"#comment", 8},
+    {"", 0},
+    {"\0", 1},
+  };
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+  for (
+    LexicalMode mode = LEXICAL_MODE_OUTSIDE; mode <= LEXICAL_MODE_STRING; mode++
+  ) {
+    for (size_t index = 0; index < ARRAY_LENGTH(inputs); index++) {
+      MockLexer mock = make_mock_lexer(inputs[index].source);
+      mock.length = inputs[index].length;
+      ScannerState state = {.mode = mode};
+      assert(!tree_sitter_posix_awk_external_scanner_scan(
+        &state,
+        &mock.lexer,
+        valid_symbols
+      ));
+      assert(state.mode == mode);
+    }
+  }
+}
+
+static int test_serialization(void) {
   int failed = 0;
   failed |=
     check_round_trip("outside mode round trip", LEXICAL_MODE_OUTSIDE, 0);
@@ -1134,15 +1223,18 @@ static int check_serialization(void) {
 
 int main(void) {
   int failed = 0;
-  failed |= check_serialization();
-  failed |= check_source_token_ranges();
-  failed |= check_blank_skip_token_ranges();
-  failed |= check_greater_dispatch();
-  failed |= check_slash_dispatch();
-  failed |= check_line_continuation_markers();
-  failed |= check_linear_line_continuation_lookahead();
-  failed |= check_ere_state_transitions();
-  failed |= check_string_and_comment_modes();
-  failed |= check_error_mode_real_tokens();
+  test_lifecycle();
+  test_nul_and_eof_are_distinct();
+  test_disabled_tokens_preserve_state();
+  failed |= test_serialization();
+  failed |= test_source_token_ranges();
+  failed |= test_blank_skip_token_ranges();
+  failed |= test_greater_dispatch();
+  failed |= test_slash_dispatch();
+  failed |= test_line_continuation_markers();
+  failed |= test_linear_line_continuation_lookahead();
+  failed |= test_ere_state_transitions();
+  failed |= test_string_and_comment_modes();
+  failed |= test_error_mode_real_tokens();
   return failed;
 }

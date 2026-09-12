@@ -1,0 +1,444 @@
+==================
+delete accepts an array name
+==================
+
+BEGIN {
+  delete whole
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (delete_keyword)
+                (name)))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+delete accepts a multiple-expression subscript
+==================
+
+BEGIN {
+  delete indexed[first, second]
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (delete_keyword)
+                (name)
+                (expr_list
+                  (multiple_expr_list
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+break forms a jump statement
+==================
+
+BEGIN {
+  break
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (break_keyword))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+continue forms a jump statement
+==================
+
+BEGIN {
+  continue
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (continue_keyword))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+next forms a jump statement
+==================
+
+BEGIN {
+  next
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (next_keyword))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+nextfile forms a jump statement
+==================
+
+BEGIN {
+  nextfile
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (nextfile_keyword))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+exit accepts an omitted expression
+==================
+
+BEGIN {
+  exit
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (exit_keyword))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+exit accepts an expression
+==================
+
+BEGIN {
+  exit status + 1
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (exit_keyword)
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (lvalue
+                      (name)))
+                  (expr
+                    (non_unary_expr
+                      (number))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+return accepts an omitted expression
+==================
+
+BEGIN {
+  return
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (return_keyword))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+return accepts an expression
+==================
+
+BEGIN {
+  return value
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (return_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+statement lists preserve empty terminated unterminated and action forms
+==================
+
+BEGIN {
+  ;
+  by_semicolon;
+  by_newline
+  { nested } final }
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (unterminated_statement_list
+          (terminated_statement
+            (newline_opt
+              (newline)))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))
+            (newline_opt
+              (newline)))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))
+            (newline))
+          (terminated_statement
+            (action
+              (unterminated_statement_list
+                (unterminated_statement
+                  (terminatable_statement
+                    (simple_statement
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))))))))))
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))))))
+    (terminator
+      (newline))))
+
+==================
+an expression owns a continuation before its statement terminator
+==================
+
+BEGIN {
+  left\
+;
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))
+            (line_continuation)
+            (newline_opt
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+continuation between terminated statements belongs to the statement list
+==================
+BEGIN {
+;\
+x
+}
+---
+
+(program
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action
+      (newline_opt
+        (newline))
+      (terminated_statement_list
+        (terminated_statement)
+        (line_continuation)
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))))))
+          (newline))))))

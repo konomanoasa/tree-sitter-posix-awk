@@ -1,0 +1,738 @@
+==================
+a while loop accepts a body after a newline
+==================
+
+BEGIN {
+  while (condition)
+    while_body
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (while_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+a do loop accepts a simple statement body
+==================
+
+BEGIN {
+  do
+    do_body;
+  while (condition)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (do_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (terminatable_statement
+                  (simple_statement
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))
+                (newline_opt
+                  (newline)))
+              (while_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a do loop accepts an action body
+==================
+
+BEGIN {
+  do
+    { action_body }
+  while (condition)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (do_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (action
+                  (unterminated_statement_list
+                    (unterminated_statement
+                      (terminatable_statement
+                        (simple_statement
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))))))
+                (newline_opt
+                  (newline)))
+              (while_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a do loop accepts an empty body
+==================
+
+BEGIN {
+  do
+    ;
+  while (condition)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (do_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (newline_opt
+                  (newline)))
+              (while_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a do loop keeps a nested while body before its tail
+==================
+
+BEGIN {
+  do
+    while (inner)
+      nested_body;
+  while (outer)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (do_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (while_keyword)
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))
+                (newline_opt
+                  (newline))
+                (terminated_statement
+                  (terminatable_statement
+                    (simple_statement
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))))))
+                  (newline_opt
+                    (newline))))
+              (while_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a classic for loop accepts empty clauses
+==================
+
+BEGIN {
+  for (;;)
+    empty_clauses
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+a classic for loop accepts all three expression clauses
+==================
+
+BEGIN {
+  for (counter = 0; counter < limit; counter++)
+    full_clauses
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))
+                  (expr
+                    (non_unary_expr
+                      (number))))))
+            (expr
+              (non_unary_expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))
+                  (incr))))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+classic for initialization and update accept simple statements
+==================
+
+BEGIN {
+  for (print start; condition; delete cache)
+    simple_statement_clauses
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (lvalue
+                          (name))))))))
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (simple_statement
+              (delete_keyword)
+              (name))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+a for-in loop retains the variable and array names
+==================
+
+BEGIN {
+  for (key in array)
+    membership_body
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (name)
+            (in_keyword)
+            (name)
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+a do loop keeps an if-else body before its tail
+==================
+
+BEGIN {
+  do if (condition) consequence; else alternative; while (repeat)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (do_keyword)
+              (terminated_statement
+                (if_keyword)
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))
+                (terminated_statement
+                  (terminatable_statement
+                    (simple_statement
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))
+                (else_keyword)
+                (terminated_statement
+                  (terminatable_statement
+                    (simple_statement
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))))))))
+              (while_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a do loop keeps an if-else action body before its tail
+==================
+
+BEGIN {
+  do
+    if (condition) { consequence } else { alternative }
+  while (repeat)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (do_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (if_keyword)
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))
+                (terminated_statement
+                  (action
+                    (unterminated_statement_list
+                      (unterminated_statement
+                        (terminatable_statement
+                          (simple_statement
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))))))))))
+                (else_keyword)
+                (terminated_statement
+                  (action
+                    (unterminated_statement_list
+                      (unterminated_statement
+                        (terminatable_statement
+                          (simple_statement
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))))))
+                  (newline_opt
+                    (newline))))
+              (while_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+classic for initialization accepts delete and its update accepts print
+==================
+
+BEGIN {
+  for (delete cache; condition; print value);
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (simple_statement
+              (delete_keyword)
+              (name))
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (lvalue
+                          (name))))))))
+            (terminated_statement
+              (newline_opt
+                (newline)))))))
+    (terminator
+      (newline))))
+
+==================
+a classic for update accepts delete after a continuation
+==================
+
+BEGIN {
+  for (start; condition; \
+    delete cache);
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (line_continuation)
+            (simple_statement
+              (delete_keyword)
+              (name))
+            (terminated_statement
+              (newline_opt
+                (newline)))))))
+    (terminator
+      (newline))))
+
+==================
+a classic for update accepts print after a continuation
+==================
+
+BEGIN {
+  for (start; condition; \
+    print value);
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (line_continuation)
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (lvalue
+                          (name))))))))
+            (terminated_statement
+              (newline_opt
+                (newline)))))))
+    (terminator
+      (newline))))
+
+==================
+a classic for update accepts an increment after a continuation
+==================
+
+BEGIN {
+  for (start; condition; \
+    update++);
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (for_keyword)
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (line_continuation)
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))
+                  (incr))))
+            (terminated_statement
+              (newline_opt
+                (newline)))))))
+    (terminator
+      (newline))))

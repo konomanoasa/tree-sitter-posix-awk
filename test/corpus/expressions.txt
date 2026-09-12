@@ -1,0 +1,1861 @@
+==================
+a scalar name forms an lvalue
+==================
+
+BEGIN {
+  scalar
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an array subscript accepts one expression
+==================
+
+BEGIN {
+  array[1]
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name)
+                      (expr_list
+                        (expr
+                          (non_unary_expr
+                            (number)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an array subscript accepts multiple expressions
+==================
+
+BEGIN {
+  array[1, offset, 3]
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name)
+                      (expr_list
+                        (multiple_expr_list
+                          (expr
+                            (non_unary_expr
+                              (number)))
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name))))
+                          (expr
+                            (non_unary_expr
+                              (number))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a newline after a comma stays inside an array subscript
+==================
+
+BEGIN {
+  array[first,
+        second]
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name)
+                      (expr_list
+                        (multiple_expr_list
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name))))
+                          (newline_opt
+                            (newline))
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a field reference accepts a parenthesized expression
+==================
+
+BEGIN {
+  $(offset + 1)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))
+                              (expr
+                                (non_unary_expr
+                                  (number))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+multiple expressions form a membership key
+==================
+
+BEGIN {
+  (first, second) in table
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (multiple_expr_list
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (in_keyword)
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+multiplication binds more tightly than addition
+==================
+
+BEGIN {
+  a * b + c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+multiplication division and remainder share precedence above addition
+==================
+
+BEGIN {
+  a + b * c / d % e
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+exponentiation binds more tightly than unary minus
+==================
+
+BEGIN {
+  -d ^ e + f
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (unary_expr
+                    (unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+unary plus binds more tightly than multiplication
+==================
+
+BEGIN {
+  +a * b
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (unary_expr
+                    (unary_expr
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+exponentiation associates to the right
+==================
+
+BEGIN {
+  g ^ h ^ i
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+subtraction associates to the left
+==================
+
+BEGIN {
+  j - k - l
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+addition binds more tightly than concatenation
+==================
+
+BEGIN {
+  m n + o
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+logical negation binds more tightly than logical and
+==================
+
+BEGIN {
+  !p && q
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (and)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+comparison match membership and logical operators precede the conditional operator
+==================
+
+BEGIN {
+  p < q ~ r in array &&
+    s ||
+    t ? u : v
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))
+                          (in_keyword)
+                          (name))
+                        (and)
+                        (newline_opt
+                          (newline))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))))
+                      (or)
+                      (newline_opt
+                        (newline))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+assignment associates to the right
+==================
+
+BEGIN {
+  x = y = z
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+membership associates to the left
+==================
+
+BEGIN {
+  a in first in second
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (in_keyword)
+                      (name))
+                    (in_keyword)
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+the conditional operator associates to the right
+==================
+
+BEGIN {
+  a ? b : c ? d : e
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+prefix and postfix updates bind more tightly than exponentiation
+==================
+
+BEGIN {
+  ++left ^ right-- ^ -$field
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (incr)
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))
+                          (decr))
+                        (expr
+                          (unary_expr
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (name)))))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a postfix update applies to a field reference
+==================
+
+BEGIN {
+  $value++
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (incr)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a prefix increment applies to a field reference
+==================
+
+BEGIN {
+  ++$value
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (incr)
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a postfix decrement applies to a scalar
+==================
+
+BEGIN {
+  other--
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (decr)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a prefix decrement applies to a field reference
+==================
+
+BEGIN {
+  --$other
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (decr)
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized membership result is a match operand
+==================
+
+BEGIN {
+  (a in b) ~ c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized membership result is a comparison operand
+==================
+
+BEGIN {
+  (a in b) < c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized membership result is a concatenation operand
+==================
+
+BEGIN {
+  (a in b) c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
+                    (non_unary_expr
+                      (lvalue
+                        (name)))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized membership result is an addition operand
+==================
+
+BEGIN {
+  (a in b) + c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized membership result is a multiplication operand
+==================
+
+BEGIN {
+  (a in b) * d ^ e
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (in_keyword)
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized membership result is an exponentiation operand
+==================
+
+BEGIN {
+  (-a in b) ^ c
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (unary_expr
+                          (unary_expr
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))
+                          (in_keyword)
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized multiple-expression membership result is a match operand
+==================
+
+BEGIN {
+  ((a, b) in c) ~ d
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (multiple_expr_list
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))))
+                          (in_keyword)
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a slash before equals forms compound assignment
+==================
+
+# slash
+BEGIN {
+  x /= 2
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline)
+      (comment)
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (div_assign)
+                    (expr
+                      (non_unary_expr
+                        (number)))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a slash between operands forms division
+==================
+
+# slash
+BEGIN {
+  x / 2
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline)
+      (comment)
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (number)))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an addition operand owns a following continuation
+==================
+
+BEGIN {
+  left\
++ right
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a multiplication operand owns a following continuation
+==================
+
+BEGIN {
+  left\
+* right
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an exponentiation operand owns a following continuation
+==================
+
+BEGIN {
+  left\
+^ right
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a match operand owns a following continuation
+==================
+
+BEGIN {
+  left\
+~ right
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a membership key owns a following continuation
+==================
+
+BEGIN {
+  element \
+in table
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (in_keyword)
+                    (name)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a logical-or operand owns a following continuation
+==================
+
+BEGIN {
+  left\
+|| right
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (or)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a conditional operand owns a following continuation
+==================
+
+BEGIN {
+  condition\
+? yes : no
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an assignment target owns a following continuation
+==================
+
+BEGIN {
+  target\
+= value
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (line_continuation)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an update target owns a following continuation
+==================
+
+BEGIN {
+  target\
+++
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (line_continuation)
+                    (incr)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an array name owns a continuation before its subscript
+==================
+
+BEGIN {
+  array\
+[position]
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name)
+                      (line_continuation)
+                      (expr_list
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+an array subscript owns a continuation before its closing bracket
+==================
+
+BEGIN {
+  array[position\
+]
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (name)
+                      (expr_list
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))))
+                      (line_continuation))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized expression owns a continuation before its closing parenthesis
+==================
+
+BEGIN {
+  (value\
+)
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))
+                    (line_continuation)))))
+            (newline)))))
+    (terminator
+      (newline))))

@@ -5,6 +5,7 @@
       "name": "posix_awk",
       "title": "POSIX awk",
       "scope": "source.awk",
+      "path": ".",
       "file-types": ["awk"],
       "injection-regex": "^awk$",
       "highlights": "queries/highlights.scm"

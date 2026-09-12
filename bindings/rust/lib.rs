@@ -1,31 +1,25 @@
-//! This crate provides POSIX awk language support for the [tree-sitter] parsing library.
-//!
-//! Typically, you will use the [`LANGUAGE`] constant to add this language to a
-//! tree-sitter [`Parser`], and then use the parser to parse some code:
+//! POSIX awk grammar for the Tree-sitter parsing library.
 //!
 //! ```
-//! let code = r#"
-//! "#;
 //! let mut parser = tree_sitter::Parser::new();
-//! let language = tree_sitter_posix_awk::LANGUAGE;
 //! parser
-//!     .set_language(&language.into())
-//!     .expect("Error loading POSIX awk parser");
-//! let tree = parser.parse(code, None).unwrap();
+//!     .set_language(&tree_sitter_posix_awk::LANGUAGE.into())
+//!     .expect("POSIX awk grammar must load");
+//! let tree = parser
+//!     .parse("BEGIN { print 1 }\n", None)
+//!     .expect("parser must return a tree");
 //! assert!(!tree.root_node().has_error());
 //! ```
-//!
-//! [`Parser`]: https://docs.rs/tree-sitter/0.27.0/tree_sitter/struct.Parser.html
-//! [tree-sitter]: https://tree-sitter.github.io/
 
 use tree_sitter_language::LanguageFn;
 
 unsafe extern "C" {
-    fn tree_sitter_posix_awk() -> *const ();
+  fn tree_sitter_posix_awk() -> *const ();
 }
 
 /// The tree-sitter [`LanguageFn`] for this grammar.
-pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_posix_awk) };
+pub const LANGUAGE: LanguageFn =
+  unsafe { LanguageFn::from_raw(tree_sitter_posix_awk) };
 
 /// The content of the [`node-types.json`] file for this grammar.
 ///
@@ -50,11 +44,20 @@ pub const TAGS_QUERY: &str = include_str!("../../queries/tags.scm");
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_can_load_grammar() {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&super::LANGUAGE.into())
-            .expect("Error loading POSIX awk parser");
-    }
+  #[test]
+  fn posix_awk_grammar_loads_and_parses() {
+    let source = "BEGIN { print 1 }\n";
+    let mut parser = tree_sitter::Parser::new();
+    parser
+      .set_language(&super::LANGUAGE.into())
+      .expect("generated grammar must load");
+    let tree = parser
+      .parse(source, None)
+      .expect("parser must return a tree");
+    let root = tree.root_node();
+    assert_eq!(root.kind(), "program");
+    assert_eq!(root.start_byte(), 0);
+    assert_eq!(root.end_byte(), source.len());
+    assert!(!root.has_error());
+  }
 }

@@ -356,7 +356,6 @@ const tieredExpressionRules = (context) => {
   const unary = (tier) => classTierName(context, "unary", tier);
   const nonUnary = (tier) => classTierName(context, "non_unary", tier);
   const any = (tier) => anyTierName(context, tier);
-  // Reduce a complete operand before passing through to the next tier.
   const addOperand = (classification, tier) => {
     rules[classOperandName(context, classification, tier)] = ($) =>
       prec(1, classTier($, context, classification, tier));

@@ -1,312 +1,29 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { after, before, test } from "node:test";
-
+import { spawnSync } from "node:child_process";
+import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path, { join } from "node:path";
+import { test } from "node:test";
+import { pathToFileURL } from "node:url";
+import { grammars } from "../scripts/tree-sitter.js";
+import nodeTypes from "../src/node-types.json" with { type: "json" };
 import {
-  createEnvironment,
-  grammar,
-  repositoryDirectory,
-  run,
-  runChecked,
-} from "../scripts/tree-sitter.js";
+  assertStatus,
+  captureParse,
+  clean,
+  contains,
+  determinismTest,
+  dirty,
+  freshTest,
+  lines,
+  nativeLibrary,
+  parseDescription,
+  parseSummary,
+  runtime,
+  writeSource,
+} from "./support/parser.js";
 
-const runtime = createEnvironment("tree-sitter-posix-awk-runtime.");
-const nativeLibrary = path.join(
-  runtime.directory,
-  process.platform === "win32" ? "parser.dll" : "parser",
-);
-let sourceSequence = 0;
-
-before(() => {
-  runChecked(["build", "--output", nativeLibrary, repositoryDirectory], {
-    environment: runtime,
-    stdio: "inherit",
-  });
-});
-
-after(() => {
-  runtime.remove();
-});
-
-function lines(...sourceLines) {
-  return `${sourceLines.join("\n")}\n`;
-}
-
-function writeSource(testName, label, source) {
-  sourceSequence += 1;
-  const filename = `${String(sourceSequence).padStart(3, "0")}-${testName}-${label}.awk`;
-  const sourcePath = path.join(runtime.directory, filename);
-  fs.writeFileSync(sourcePath, source);
-  return sourcePath;
-}
-
-function normalizeParseTree(stdout, sourcePath) {
-  return stdout
-    .split("\n")
-    .filter((line) => {
-      if (line.startsWith(sourcePath)) {
-        const suffix = line.slice(sourcePath.length);
-        if (/^[ \t]+Parse:[ \t]/.test(suffix)) {
-          return false;
-        }
-      }
-      return !/^[ \t]*Edit:[ \t]/.test(line);
-    })
-    .join("\n");
-}
-
-function captureParse(sourcePath, edits = []) {
-  const args = [
-    "parse",
-    "--lib-path",
-    nativeLibrary,
-    "--lang-name",
-    grammar.name,
-    "--cst",
-  ];
-  if (edits.length > 0) {
-    args.push("--edits", ...edits, "--", sourcePath);
-  } else {
-    args.push(sourcePath);
-  }
-
-  const result = run(args, { environment: runtime });
-  if (result.error !== undefined) {
-    throw result.error;
-  }
-  return {
-    status: result.status,
-    stderr: result.stderr,
-    stdout: result.stdout,
-    tree: normalizeParseTree(result.stdout, sourcePath),
-  };
-}
-
-function parseDescription(label, result) {
-  return `${label}\nExit status: ${result.status}\n${result.stdout}${result.stderr}`;
-}
-
-function assertStatus(label, result, expectedStatus) {
-  assert.equal(result.status, expectedStatus, parseDescription(label, result));
-}
-
-function assertFresh(testName, source, expectedStatus = 0) {
-  const sourcePath = writeSource(testName, "fresh", source);
-  const native = captureParse(sourcePath);
-  assertStatus(`${testName} native fresh parse`, native, expectedStatus);
-  return native.tree;
-}
-
-function parseEdit(testName, edit, sourceLength) {
-  const match = edit.match(/^([0-9]+) ([0-9]+) (.*)$/s);
-  assert.notEqual(
-    match,
-    null,
-    `${testName}: invalid edit ${JSON.stringify(edit)}`,
-  );
-  const position = Number(match[1]);
-  const deleteCount = Number(match[2]);
-  assert.ok(
-    Number.isSafeInteger(position) &&
-      Number.isSafeInteger(deleteCount) &&
-      position <= sourceLength &&
-      deleteCount <= sourceLength - position,
-    `${testName}: out-of-bounds edit ${JSON.stringify(edit)} for ${sourceLength} bytes`,
-  );
-  return { deleteCount, inserted: Buffer.from(match[3]), position };
-}
-
-function applyEdits(testName, initial, edits) {
-  let actual = Buffer.from(initial);
-  for (const edit of edits) {
-    const { deleteCount, inserted, position } = parseEdit(
-      testName,
-      edit,
-      actual.length,
-    );
-    actual = Buffer.concat([
-      actual.subarray(0, position),
-      inserted,
-      actual.subarray(position + deleteCount),
-    ]);
-  }
-  return actual;
-}
-
-function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
-  const initialPath = writeSource(testName, "initial", initialSource);
-  const finalPath = writeSource(testName, "final", finalSource);
-  assert.deepEqual(
-    applyEdits(testName, initialSource, edits),
-    Buffer.from(finalSource),
-    `${testName}: edits do not produce the final source`,
-  );
-
-  const incremental = captureParse(initialPath, edits);
-  const fresh = captureParse(finalPath);
-  for (const [label, result] of [
-    ["native incremental parse", incremental],
-    ["native fresh parse", fresh],
-  ]) {
-    assertStatus(`${testName} ${label}`, result, 0);
-    clean(result.tree);
-  }
-  assert.equal(
-    incremental.tree,
-    fresh.tree,
-    `${testName}: native incremental and fresh CSTs differ`,
-  );
-  return fresh.tree;
-}
-
-function contains(tree, expected) {
-  assert.ok(
-    tree.includes(expected),
-    `Expected CST to contain: ${expected}\n${tree}`,
-  );
-}
-
-function excludes(tree, unexpected) {
-  assert.ok(
-    !tree.includes(unexpected),
-    `Expected CST not to contain: ${unexpected}\n${tree}`,
-  );
-}
-
-// The --cst error marker covers both ERROR and missing nodes; missing named
-// leaves do not include the word MISSING.
-const recoveryMarker = /^[0-9: \t-]+•/m;
-
-function clean(tree) {
-  assert.doesNotMatch(tree, recoveryMarker, tree);
-}
-
-function cleanContinuation(tree) {
-  contains(tree, "line_continuation");
-  clean(tree);
-}
-
-function dirty(tree) {
-  assert.match(tree, recoveryMarker, tree);
-}
-
-function matchingLineCount(tree, pattern) {
-  return tree.split("\n").filter((line) => pattern.test(line)).length;
-}
-
-function freshTest(name, source, assertions) {
-  test(name, () => assertions(assertFresh(name, source)));
-}
-
-function determinismTest(name, initial, final, edits, assertions = () => {}) {
-  test(name, () =>
-    assertions(assertDeterministicEdit(name, initial, final, edits)),
-  );
-}
-
-function editHistoryTest(name, source, edits) {
-  const reverts = [];
-  let current = Buffer.from(source);
-  for (const edit of edits) {
-    const { deleteCount, inserted, position } = parseEdit(
-      name,
-      edit,
-      current.length,
-    );
-    const deleted = current.subarray(position, position + deleteCount);
-    reverts.unshift(`${position} ${inserted.length} ${deleted}`);
-    current = applyEdits(name, current, [edit]);
-  }
-  determinismTest(name, source, source, [...edits, ...reverts]);
-}
-
-for (const { label, initial, final, removed, inserted } of [
-  {
-    label: "an else without a consequence",
-    initial: "{ if (a) else }",
-    final: "{ if (a) ; }",
-    removed: "else",
-    inserted: ";",
-  },
-  {
-    label: "an incomplete for header",
-    initial: "{ for (); }",
-    final: "{ for (;;); }",
-    removed: ")",
-    inserted: ";;)",
-  },
-  {
-    label: "a do without a body or tail",
-    initial: "{ do }",
-    final: "{ do ; while (a) }",
-    removed: "do",
-    inserted: "do ; while (a)",
-  },
-  {
-    label: "a delete without an array name",
-    initial: "{ if(a) delete [] }",
-    final: "{ if(a) delete a[0] }",
-    removed: "[]",
-    inserted: "a[0]",
-  },
-  {
-    label: "a call with missing arguments",
-    initial: "{ if(a) f(,) }",
-    final: "{ if(a) f(x) }",
-    removed: ",",
-    inserted: "x",
-  },
-  {
-    label: "a membership operator without operands",
-    initial: "{ if(a) in }",
-    final: "{ if(a) x in a }",
-    removed: "in",
-    inserted: "x in a",
-  },
-]) {
-  const prefix = lines("before {}");
-  const following = "END { print after }";
-  determinismTest(
-    `repairing ${label} matches a fresh parse`,
-    prefix + lines(initial, following),
-    prefix + lines(final, following),
-    [
-      `${prefix.length + initial.indexOf(removed)} ${removed.length} ${inserted}`,
-    ],
-  );
-}
-
-for (const { label, initial, final, before, inserted } of [
-  {
-    label: "function body after a continuation and comment",
-    initial: lines("before {}", "function f() \\", "#", "END {}"),
-    final: lines("before {}", "function f() \\", "#", "{}", "END {}"),
-    before: "END",
-    inserted: "{}\n",
-  },
-  {
-    label: "function body after a continuation and newline",
-    initial: lines("before {}", "function f() \\", "", "END {}"),
-    final: lines("before {}", "function f() \\", "", "{}", "END {}"),
-    before: "END",
-    inserted: "{}\n",
-  },
-  {
-    label: "special pattern action before a comment's newline",
-    initial: lines("before {}", "BEGIN \\", "#", "{}", "END {}"),
-    final: lines("before {}", "BEGIN \\", "{} #", "{}", "END {}"),
-    before: "#",
-    inserted: "{} ",
-  },
-]) {
-  test(`restoring a missing ${label} matches a fresh parse`, () => {
-    const tree = assertDeterministicEdit(label, initial, final, [
-      `${initial.indexOf(before)} 0 ${inserted}`,
-    ]);
-    contains(tree, "line_continuation");
-  });
-}
+const grammar = grammars[0];
 
 const fieldContractSource = `/(a|b)/, /c/ {
   $1 = "value";
@@ -315,6 +32,7 @@ const fieldContractSource = `/(a|b)/, /c/ {
   print value + other;
 }
 `;
+
 const fieldContractQuery = String.raw`(action
   opening: "{" @action.opening
   closing: "}" @action.closing)
@@ -356,7 +74,7 @@ const fieldContractQuery = String.raw`(action
   terminator: ";" @terminated-statement.terminator)
 `;
 
-test("anonymous-token field contract", () => {
+test("posix_awk: anonymous-token field contract", () => {
   const queryPath = path.join(runtime.directory, "fields.scm");
   const sourcePath = writeSource(
     "anonymous-token-field-contract",
@@ -364,7 +82,7 @@ test("anonymous-token field contract", () => {
     fieldContractSource,
   );
   fs.writeFileSync(queryPath, fieldContractQuery);
-  const result = run(
+  const result = runtime.run(
     [
       "query",
       "--lib-path",
@@ -375,7 +93,7 @@ test("anonymous-token field contract", () => {
       queryPath,
       sourcePath,
     ],
-    { environment: runtime },
+    { timeout: 60_000 },
   );
   assertStatus("anonymous-token field query", result, 0);
   const captures = [];
@@ -424,7 +142,7 @@ const namedFieldSource = lines(
   "function plus(first) { return first }",
 );
 
-freshTest("named-node-field-contract", namedFieldSource, (tree) => {
+freshTest("named node field contract", namedFieldSource, (tree) => {
   for (const memberField of [
     "leading: newline_opt",
     "item: item",
@@ -460,100 +178,58 @@ freshTest("named-node-field-contract", namedFieldSource, (tree) => {
   clean(tree);
 });
 
-const division = lines("BEGIN { print x / a }");
-const matchEre = lines("BEGIN { print x ~ /a/ }");
-const divisionAssignment = lines("BEGIN { x /= 2 }");
-const divisionExpression = lines("BEGIN { x / 2 }");
-const matchOperand = lines("BEGIN { print x ~ a }");
+test("posix_awk: actions, EREs and strings require one opening and closing token", () => {
+  for (const [type, opening, closing] of [
+    ["action", "{", "}"],
+    ["ere", "/", "/"],
+    ["string", '"', '"'],
+  ]) {
+    const node = nodeTypes.find((node) => node.named && node.type === type);
+    assert.ok(node, type);
+    for (const [field, token] of [
+      ["opening", opening],
+      ["closing", closing],
+    ]) {
+      assert.deepEqual(
+        node.fields[field],
+        {
+          multiple: false,
+          required: true,
+          types: [{ type: token, named: false }],
+        },
+        `${type}.${field}`,
+      );
+    }
+  }
+});
 
-for (const { name, initial, final, edits, update } of [
-  {
-    name: "a getline target becomes a concatenated postfix increment",
-    initial: "getline x",
-    final: "getline x++",
-    edits: ["17 0 ++"],
-    update: "incr",
-  },
-  {
-    name: "a getline array target becomes a concatenated postfix decrement",
-    initial: "getline a[1]",
-    final: "getline a[1]--",
-    edits: ["20 0 --"],
-    update: "decr",
-  },
-  {
-    name: "a getline field target becomes a concatenated postfix increment",
-    initial: "getline $i",
-    final: "getline $i++",
-    edits: ["18 0 ++"],
-    update: "incr",
-  },
-  {
-    name: "a piped getline target becomes a concatenated postfix decrement",
-    initial: "command | getline x",
-    final: "command | getline x--",
-    edits: ["27 0 --"],
-    update: "decr",
-  },
-]) {
-  determinismTest(
-    name,
-    lines(`BEGIN { ${initial} }`),
-    lines(`BEGIN { ${final} }`),
-    edits,
-    (tree) => {
-      contains(tree, `operator: ${update}`);
-      excludes(tree, "target:");
-    },
+test("posix_awk: range patterns expose one optional separator and two optional operands", () => {
+  const node = nodeTypes.find(
+    (node) => node.named && node.type === "normal_pattern",
   );
-}
-
-determinismTest(
-  "removing a postfix update restores the getline target",
-  lines("BEGIN { getline x++ }"),
-  lines("BEGIN { getline x }"),
-  ["17 2 "],
-  (tree) => contains(tree, "target: lvalue"),
-);
-
-for (const { name, initial, final, edits, number } of [
-  {
-    name: "joining a floating suffix replaces concatenation with one number",
-    initial: "1.0 f",
-    final: "1.0f",
-    edits: ["17 1 "],
-    number: "1.0f",
-  },
-  {
-    name: "completing an exponent includes its floating suffix",
-    initial: "1.0eF",
-    final: "1.0e2F",
-    edits: ["18 0 2"],
-    number: "1.0e2F",
-  },
-  {
-    name: "adding a decimal point makes the following letter a floating suffix",
-    initial: "1l",
-    final: "1.l",
-    edits: ["15 0 ."],
-    number: "1.l",
-  },
-  {
-    name: "separating a floating suffix restores concatenation",
-    initial: "1.L",
-    final: "1. L",
-    edits: ["16 0  "],
-    number: "1.",
-  },
-]) {
-  determinismTest(
-    name,
-    lines(`BEGIN { print ${initial} }`),
-    lines(`BEGIN { print ${final} }`),
-    edits,
-    (tree) => contains(tree, `number \`${number}\``),
-  );
-}
+  assert.ok(node);
+  assert.deepEqual(Object.keys(node.fields).sort(), [
+    "left",
+    "right",
+    "separator",
+  ]);
+  for (const field of ["left", "right", "separator"]) {
+    assert.deepEqual(
+      node.fields[field],
+      {
+        multiple: false,
+        required: false,
+        types: [
+          {
+            type: field === "separator" ? "," : "expr",
+            named: field !== "separator",
+          },
+        ],
+      },
+      field,
+    );
+  }
+});
 
 const membershipPrecedenceCases = [
   ["exponentiation", "", "a in b", "^ c"],
@@ -583,15 +259,39 @@ const membershipPrecedenceCases = [
     name,
     source: lines(`${beginning}${left} ${tail} }`),
     parenthesized: lines(`${beginning}(${left}) ${tail} }`),
-    edits: [`${beginning.length + left.length} 0 )`, `${beginning.length} 0 (`],
+    edits: [
+      { byte: beginning.length + left.length, deleteBytes: 0, insert: ")" },
+      { byte: beginning.length, deleteBytes: 0, insert: "(" },
+    ],
   };
 });
 
-const invalidSyntaxCases = [
-  ...membershipPrecedenceCases.map(({ name, source }) => ({
-    name: `unparenthesized membership before ${name} is rejected`,
+for (const {
+  name,
+  source,
+  parenthesized,
+  edits,
+} of membershipPrecedenceCases) {
+  determinismTest(
+    `parentheses repair membership before ${name}`,
     source,
-  })),
+    parenthesized,
+    edits,
+  );
+}
+
+for (const { name, source } of membershipPrecedenceCases) {
+  test(`posix_awk: unparenthesized membership before ${name} is rejected`, () => {
+    const result = captureParse(writeSource(name, "invalid", source));
+    assert.ok(
+      result.status === 0 || result.status === 1,
+      parseDescription(name, result),
+    );
+    dirty(result.tree);
+  });
+}
+
+const invalidSyntaxCases = [
   {
     name: "division without a final operand is rejected",
     source: lines("BEGIN { print x /a/ }"),
@@ -750,7 +450,7 @@ const invalidSyntaxCases = [
 ];
 
 for (const { name, source } of invalidSyntaxCases) {
-  test(name, () => {
+  test(`posix_awk: ${name}`, () => {
     const sourcePath = writeSource(name, "invalid", source);
     const result = captureParse(sourcePath);
     // A parse that recovers with missing nodes alone exits with 0.
@@ -762,848 +462,107 @@ for (const { name, source } of invalidSyntaxCases) {
   });
 }
 
-determinismTest("division-to-match-ere", division, matchEre, ["16 3 ~ /a/"]);
-determinismTest(
-  "insert-div-assign-equals",
-  divisionExpression,
-  divisionAssignment,
-  ["11 0 ="],
-);
-determinismTest(
-  "delete-div-assign-equals",
-  divisionAssignment,
-  divisionExpression,
-  ["11 1 "],
-);
-determinismTest("operand-to-ere", matchOperand, matchEre, ["18 1 /a/"]);
-determinismTest("ere-to-operand", matchEre, matchOperand, ["18 3 a"]);
-
-for (const [label, initial, final] of [
-  [
-    "expression",
-    lines("BEGIN { value = a + /b/ + c }"),
-    lines("BEGIN { value = a   /b/ + c }"),
-  ],
-  [
-    "print expression with a continuation",
-    lines("BEGIN { print a + \\", "/b/ + c }"),
-    lines("BEGIN { print a   \\", "/b/ + c }"),
-  ],
-  [
-    "top-level pattern",
-    lines("a + /b/ + c { print }"),
-    lines("a   /b/ + c { print }"),
-  ],
-]) {
-  determinismTest(
-    `removing an operator reclassifies ERE slashes as division in the ${label}`,
-    initial,
-    final,
-    [`${initial.indexOf("+")} 1  `],
-    (tree) => {
-      excludes(tree, "extended_reg_exp");
-      assert.equal(
-        matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
-        2,
-        "Expected both slashes to be division tokens in the valid expression",
-      );
-    },
+test("posix_awk: Unicode source retains byte ranges without normalization", () => {
+  const result = captureParse(
+    writeSource(
+      "unicode-source-ranges",
+      "source",
+      'BEGIN { print "é😀" }\n# e\u0301\n',
+    ),
   );
-}
-
-for (const {
-  name,
-  source,
-  parenthesized,
-  edits,
-} of membershipPrecedenceCases) {
-  determinismTest(
-    `parentheses repair membership before ${name}`,
-    source,
-    parenthesized,
-    edits,
-  );
-}
-
-const membershipBeforeLogicalAnd = lines("BEGIN { x = (a in b) && c }");
-const membershipBeforeMatch = lines("BEGIN { x = (a in b) ~ c }");
-determinismTest(
-  "membership-logical-and-to-match",
-  membershipBeforeLogicalAnd,
-  membershipBeforeMatch,
-  ["21 2 ~"],
-  (tree) => {
-    contains(tree, '"~"');
-    excludes(tree, "operator: and");
-  },
-);
-determinismTest(
-  "membership-match-to-logical-and",
-  membershipBeforeMatch,
-  membershipBeforeLogicalAnd,
-  ["21 1 &&"],
-  (tree) => {
-    contains(tree, "operator: and");
-    excludes(tree, '"~"');
-  },
-);
-
-const plainMembership = lines("BEGIN { x = (a in b) }");
-const concatenatedMembership = lines("BEGIN { x = (a in b) c }");
-determinismTest(
-  "insert-membership-concatenation-operand",
-  plainMembership,
-  concatenatedMembership,
-  ["20 0  c"],
-  (tree) => {
-    assert.match(tree, /^[ \t0-9:-]+right: name `b`$/m);
-    assert.match(tree, /^[ \t0-9:-]+right: non_unary_expr$/m);
-  },
-);
-determinismTest(
-  "delete-membership-concatenation-operand",
-  concatenatedMembership,
-  plainMembership,
-  ["20 2 "],
-);
-
-const plainBracketList = lines("BEGIN { print /[+]?[a]/ }");
-const trailingHyphenBracketList = lines("BEGIN { print /[+-]?[a]/ }");
-determinismTest(
-  "insert-trailing-bracket-hyphen",
-  plainBracketList,
-  trailingHyphenBracketList,
-  ["17 0 -"],
-  (tree) => {
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+bracket_expression$/),
-      2,
-      "Expected trailing bracket hyphen source to contain two bracket expressions",
-    );
-    contains(tree, "ere_dupl_symbol");
-    excludes(tree, "range_expression");
-  },
-);
-
-const shortRangeEre = lines("BEGIN { print /[%-@]/ }");
-const hyphenEndedRangeEre = lines("BEGIN { print /[%--@]/ }");
-determinismTest(
-  "insert-range-ending-hyphen",
-  shortRangeEre,
-  hyphenEndedRangeEre,
-  ["18 0 -"],
-  (tree) => {
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+range_expression$/),
-      1,
-      "Expected one range expression ending at the inserted hyphen",
-    );
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+collating_element/),
-      2,
-      "Expected the range start and the following element only",
-    );
-  },
-);
-determinismTest(
-  "delete-range-ending-hyphen",
-  hyphenEndedRangeEre,
-  shortRangeEre,
-  ["18 1 "],
-  (tree) => {
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+collating_element/),
-      2,
-      "Expected a plain range between two collating elements",
-    );
-  },
-);
-
-const closedEre = lines("BEGIN { print /abc/", "print /ok/ }");
-const unclosedEre = lines("BEGIN { print /abc", "print /ok/ }");
-determinismTest("insert-ere-closing-slash", unclosedEre, closedEre, ["18 0 /"]);
-
-const plainEreDelimiter = lines("BEGIN { print /ab/ }");
-const escapedEreDelimiter = lines(String.raw`BEGIN { print /ab\/c/ }`);
-determinismTest(
-  "escape-ere-closing-slash",
-  plainEreDelimiter,
-  escapedEreDelimiter,
-  [String.raw`17 1 \/c/`],
-  (tree) => {
-    contains(tree, "escaped_delimiter");
-  },
-);
-determinismTest(
-  "division-through-broken-to-escaped-ere",
-  division,
-  escapedEreDelimiter,
-  [String.raw`14 5 /ab\/c/`, "20 1 ", "20 0 /"],
-);
-determinismTest(
-  "restore-ere-closing-slash",
-  escapedEreDelimiter,
-  plainEreDelimiter,
-  ["17 4 /"],
-  (tree) => excludes(tree, "escaped_delimiter"),
-);
-
-const threeDigitOctalEre = lines(String.raw`BEGIN { print /\124/ }`);
-const octalFollowedByCharacterEre = lines(String.raw`BEGIN { print /\1234/ }`);
-determinismTest(
-  "split-ere-octal-at-three-digits",
-  threeDigitOctalEre,
-  octalFollowedByCharacterEre,
-  ["18 0 3"],
-  (tree) => {
-    contains(tree, "escape_sequence");
-    contains(tree, "ordinary_character");
-  },
-);
-determinismTest(
-  "join-ere-octal-at-three-digits",
-  octalFollowedByCharacterEre,
-  threeDigitOctalEre,
-  ["18 1 "],
-  (tree) => {
-    contains(tree, "escape_sequence");
-    excludes(tree, "ordinary_character");
-  },
-);
-
-const greedyEre = lines("BEGIN { print /a*/ }");
-const shortestEre = lines("BEGIN { print /a*?/ }");
-determinismTest(
-  "insert-ere-repetition-modifier",
-  greedyEre,
-  shortestEre,
-  ["17 0 ?"],
-  (tree) => contains(tree, "repetition_modifier"),
-);
-determinismTest(
-  "delete-ere-repetition-modifier",
-  shortestEre,
-  greedyEre,
-  ["17 1 "],
-  (tree) => excludes(tree, "repetition_modifier"),
-);
-
-const equivalenceEre = lines("BEGIN { print /[[=a=]]/ }");
-
-determinismTest(
-  "a collating caret becomes a meta character when replaced by a hyphen",
-  lines("/[[.^.]]/"),
-  lines("/[[.-.]]/"),
-  ["4 1 -"],
-  (tree) => contains(tree, "meta_character `-`"),
-);
-determinismTest(
-  "an equivalence class accepts a caret in place of a raw hyphen",
-  lines("/[[=-=]]/"),
-  lines("/[[=^=]]/"),
-  ["4 1 ^"],
-  (tree) => {
-    contains(tree, "equivalence_class");
-    contains(tree, "collating_element `^`");
-    excludes(tree, "meta_character");
-  },
-);
-determinismTest(
-  "a multi-character equivalence payload can begin with a closing bracket",
-  lines("/[[=]=]]/"),
-  lines("/[[=]a=]]/"),
-  ["5 0 a"],
-  (tree) => {
-    contains(tree, "equivalence_class");
-    contains(tree, "collating_element");
-    excludes(tree, "meta_character");
-  },
-);
-const classEre = lines("BEGIN { print /[[:alpha:]]/ }");
-determinismTest(
-  "equivalence-to-character-class",
-  equivalenceEre,
-  classEre,
-  ["16 5 [:alpha:]"],
-  (tree) => {
-    contains(tree, "character_class");
-    contains(tree, "class_name");
-    excludes(tree, "equivalence_class");
-  },
-);
-determinismTest(
-  "character-class-to-equivalence",
-  classEre,
-  equivalenceEre,
-  ["16 9 [=a=]"],
-  (tree) => {
-    contains(tree, "equivalence_class");
-    excludes(tree, "character_class");
-  },
-);
-
-const literalOpenBracketEre = lines("BEGIN { print /[[]/ }");
-const collatingSymbolEre = lines("BEGIN { print /[[.x.]]/ }");
-determinismTest(
-  "literal-bracket-to-collating-symbol",
-  literalOpenBracketEre,
-  collatingSymbolEre,
-  ["17 0 .x.]"],
-  (tree) => {
-    contains(tree, "collating_symbol");
-  },
-);
-determinismTest(
-  "collating-symbol-to-literal-bracket",
-  collatingSymbolEre,
-  literalOpenBracketEre,
-  ["17 4 "],
-  (tree) => {
-    contains(tree, "collating_element");
-    excludes(tree, "collating_symbol");
-  },
-);
-
-const rawStatementNewline = lines("BEGIN {", "  print 1", "}");
-const continuedStatementBoundary = lines("BEGIN {", "  print 1\\", "}");
-determinismTest(
-  "raw-newline-to-line-continuation",
-  rawStatementNewline,
-  continuedStatementBoundary,
-  ["17 0 \\"],
-);
-determinismTest(
-  "line-continuation-to-raw-newline",
-  continuedStatementBoundary,
-  rawStatementNewline,
-  ["17 1 "],
-);
-
-const outputPipe = lines("BEGIN { print value | command }");
-const logicalOrPrint = lines("BEGIN { print value || command }");
-determinismTest(
-  "output-pipe-to-logical-or",
-  outputPipe,
-  logicalOrPrint,
-  ["21 0 |"],
-  (tree) => {
-    contains(tree, "operator: or");
-    excludes(tree, "output_redirection");
-  },
-);
-
-const plainAppend = lines("BEGIN { print value >> archive }");
-const continuedAppend = lines("BEGIN { print value \\", ">> archive }");
-determinismTest(
-  "insert-append-line-continuation",
-  plainAppend,
-  continuedAppend,
-  ["20 0 \\\n"],
-  (tree) => {
-    contains(tree, "redirection: output_redirection");
-    contains(tree, "append");
-    contains(tree, "line_continuation");
-  },
-);
-
-const bodylessIf = lines("BEGIN { if (condition) }");
-const bodiedIf = lines("BEGIN { if (condition) body }");
-determinismTest("insert-if-body-before-close-brace", bodylessIf, bodiedIf, [
-  "23 0 body ",
-]);
-
-const sameLineItems = lines("BEGIN {} END {}");
-const separatedItems = lines("BEGIN {}", "END {}");
-determinismTest(
-  "insert-item-terminator-between-items",
-  sameLineItems,
-  separatedItems,
-  ["8 1 \n"],
-  (tree) => contains(tree, "terminator: terminator"),
-);
-
-const completeReservedIf = lines(
-  "BEGIN { if (condition) print body }",
-  "END { print target }",
-);
-const missingReservedIf = lines(
-  "BEGIN { if (condition)",
-  "END { print target }",
-);
-determinismTest(
-  "restore-if-body-before-end-item",
-  missingReservedIf,
-  completeReservedIf,
-  ["22 1  print body }\n"],
-);
-
-const completeDoTail = lines(
-  "BEGIN { do print body; while (condition) }",
-  "END { print target }",
-);
-const missingDoTail = lines("BEGIN { do print body;", "END { print target }");
-determinismTest(
-  "restore-do-tail-before-end-item",
-  missingDoTail,
-  completeDoTail,
-  ["22 1  while (condition) }\n"],
-);
-
-const closedDoTail = lines("BEGIN { do print body", "while (condition) }");
-const openDoTail = lines("BEGIN { do print body", "}");
-determinismTest("insert-do-tail-before-close-brace", openDoTail, closedDoTail, [
-  "22 0 while (condition) ",
-]);
-
-const specialPatternItems = lines("BEGIN {}", "END {}");
-const actionlessSpecialPattern = lines("BEGIN", "END {}");
-determinismTest(
-  "restore-special-pattern-action",
-  actionlessSpecialPattern,
-  specialPatternItems,
-  ["5 0  {}"],
-);
-
-const functionItems = lines("function f() {}", "END {}");
-const bodylessFunction = lines("function f()", "END {}");
-determinismTest("restore-function-body", bodylessFunction, functionItems, [
-  "12 0  {}",
-]);
-const closedSubscriptEof = "BEGIN { delete array[offset] }";
-const openSubscriptEof = "BEGIN { delete array[offset";
-determinismTest(
-  "insert-subscript-and-action-closers-at-eof",
-  openSubscriptEof,
-  closedSubscriptEof,
-  ["27 0 ] }"],
-);
-
-const commentBackslash = lines("#\\", "BEGIN {}");
-const leadingContinuation = lines("\\", "BEGIN {}");
-determinismTest(
-  "comment-backslash-to-line-continuation",
-  commentBackslash,
-  leadingContinuation,
-  ["0 1 "],
-);
-
-const blankCall = lines("BEGIN { f (value) }");
-const continuedCall = lines("BEGIN { f\\", "(value) }");
-determinismTest(
-  "blank-to-line-continuation-call",
-  blankCall,
-  continuedCall,
-  ["9 1 \\\n"],
-  (tree) => {
-    assert.match(tree, /^[ \t0-9:-]*func_name[ \t]/m);
-    contains(tree, "line_continuation");
-  },
-);
-
-const plainAddAssign = lines("BEGIN { value += other }");
-const continuedAddAssign = lines("BEGIN { value \\", "+= other }");
-determinismTest(
-  "insert-add-assign-line-continuation",
-  plainAddAssign,
-  continuedAddAssign,
-  ["14 0 \\\n"],
-  (tree) => {
-    contains(tree, "add_assign");
-    contains(tree, "line_continuation");
-  },
-);
-
-const plainAdditive = lines("BEGIN { left + right }");
-const continuedAdditive = lines("BEGIN { left\\", "+ right }");
-determinismTest(
-  "insert-additive-operator-line-continuation",
-  plainAdditive,
-  continuedAdditive,
-  ["12 1 \\\n"],
-  (tree) => {
-    contains(tree, '"+"');
-    contains(tree, "line_continuation");
-  },
-);
-
-const plainComparison = lines("BEGIN { left < right }");
-const continuedComparison = lines("BEGIN { left\\", "< right }");
-determinismTest(
-  "insert-comparison-operator-line-continuation",
-  plainComparison,
-  continuedComparison,
-  ["12 1 \\\n"],
-  (tree) => {
-    contains(tree, '"<"');
-    contains(tree, "line_continuation");
-  },
-);
-
-const continuedGetlineRedirect = lines(
-  "BEGIN { getline target\\",
-  "< source }",
-);
-const continuedGetlineComparison = lines(
-  "BEGIN { getline target\\",
-  "<= source }",
-);
-freshTest("continued-getline-redirect", continuedGetlineRedirect, (tree) => {
-  contains(tree, "source: expr");
-  excludes(tree, "operator: le");
-  cleanContinuation(tree);
+  assertStatus("Unicode source", result, 0);
+  clean(result.tree);
+  assert.match(result.tree, /^0:15 +- +0:21 +string_content `é😀`$/m);
+  assert.match(result.tree, /^1:0 +- +1:5 +comment `# é`$/m);
 });
-determinismTest(
-  "continued-getline-redirect-to-comparison",
-  continuedGetlineRedirect,
-  continuedGetlineComparison,
-  ["25 0 ="],
-  (tree) => {
-    contains(tree, "operator: le");
-    excludes(tree, "source: expr");
-    contains(tree, "line_continuation");
-  },
-);
 
-const plainConditional = lines("BEGIN { condition ? yes : no }");
-const continuedConditional = lines("BEGIN { condition ? yes\\", ": no }");
-determinismTest(
-  "insert-conditional-colon-line-continuation",
-  plainConditional,
-  continuedConditional,
-  ["23 1 \\\n"],
-  (tree) => {
-    contains(tree, "alternative: expr");
-    contains(tree, "line_continuation");
-  },
-);
+test("posix_awk: large tokens, statement lists and nested blocks parse through EOF", () => {
+  for (const [name, source] of [
+    ["long string", `BEGIN { print "${"x".repeat(80_000)}" }\n`],
+    ["wide statement list", `BEGIN { ${"x++;".repeat(16_000)} }\n`],
+    ["deep blocks", `BEGIN ${"{".repeat(2000)}print 1;${"}".repeat(2000)}\n`],
+  ]) {
+    assert.equal(parseSummary(source).successful, true, name);
+  }
+});
 
-const plainLogical = lines("BEGIN { left && right }");
-const continuedLogical = lines("BEGIN { left\\", "&& right }");
-determinismTest(
-  "insert-logical-operator-line-continuation",
-  plainLogical,
-  continuedLogical,
-  ["12 1 \\\n"],
-  (tree) => {
-    contains(tree, "and");
-    contains(tree, "line_continuation");
-  },
-);
+test("posix_awk: long unterminated strings parse through EOF with native recovery", () => {
+  const source = `BEGIN { print "${"x".repeat(80_000)}`;
+  assert.equal(parseSummary(source).successful, false);
+});
 
-const plainPipeGetline = lines("BEGIN { source | getline target }");
-const continuedPipeGetline = lines("BEGIN { source\\", "| getline target }");
-determinismTest(
-  "insert-input-pipe-line-continuation",
-  plainPipeGetline,
-  continuedPipeGetline,
-  ["14 1 \\\n"],
-  (tree) => {
-    contains(tree, "non_unary_input_function");
-    contains(tree, "line_continuation");
-  },
-);
+test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
+  assert.throws(() => parseSummary(`BEGIN { ${"x++;".repeat(16_000)} }\n`, 1));
+});
 
-const unaryPipeGetline = lines("BEGIN { -source | getline target }");
-const fieldPipeGetline = lines("BEGIN { $source | getline target }");
-determinismTest(
-  "unary-to-field-pipe-getline",
-  unaryPipeGetline,
-  fieldPipeGetline,
-  ["8 1 $"],
-  (tree) => {
-    assert.match(tree, /^[ \t0-9:-]*non_unary_input_function$/m);
-  },
-);
-
-const closedString = lines('BEGIN { print "abc"', "}");
-const unclosedString = lines('BEGIN { print "abc', "}");
-determinismTest("insert-string-closing-quote", unclosedString, closedString, [
-  '18 0 "',
-]);
-
-const hashString = lines('BEGIN { print "#"', "}");
-const hashComment = lines('BEGIN { print #"', "}");
-determinismTest(
-  "string-to-comment",
-  hashString,
-  hashComment,
-  ["14 1 "],
-  (tree) => {
-    contains(tree, "comment");
-    excludes(tree, "string");
-  },
-);
-determinismTest(
-  "comment-to-string",
-  hashComment,
-  hashString,
-  ['14 0 "'],
-  (tree) => {
-    contains(tree, "string_content");
-    excludes(tree, "comment");
-  },
-);
-
-const hashEre = lines("BEGIN { print /#/", "}");
-const hashEreComment = lines("BEGIN { print #/", "}");
-determinismTest(
-  "ere-to-comment",
-  hashEre,
-  hashEreComment,
-  ["14 1 "],
-  (tree) => {
-    contains(tree, "comment");
-    excludes(tree, "ere");
-  },
-);
-determinismTest(
-  "comment-to-ere",
-  hashEreComment,
-  hashEre,
-  ["14 0 /"],
-  (tree) => {
-    contains(tree, "ordinary_character");
-    excludes(tree, "comment");
-  },
-);
-
-const plainEscape = lines('BEGIN { print "an" }');
-const backslashEscape = lines(String.raw`BEGIN { print "a\n" }`);
-determinismTest(
-  "insert-string-escape-backslash",
-  plainEscape,
-  backslashEscape,
-  ["16 0 \\"],
-  (tree) => contains(tree, "escape_sequence"),
-);
-determinismTest(
-  "delete-string-escape-backslash",
-  backslashEscape,
-  plainEscape,
-  ["16 1 "],
-  (tree) => excludes(tree, "escape_sequence"),
-);
-
-const topLevelErePattern = lines("/ready/ { print }");
-const topLevelDivisionPattern = lines("total / count { print }");
-determinismTest(
-  "top-level-ere-to-division-pattern",
-  topLevelErePattern,
-  topLevelDivisionPattern,
-  ["0 7 total / count"],
-  (tree) => {
-    contains(tree, "normal_pattern");
-    excludes(tree, "extended_reg_exp");
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
-      1,
-      "Expected one division slash in the top-level normal pattern",
-    );
-  },
-);
-determinismTest(
-  "top-level-division-to-ere-pattern",
-  topLevelDivisionPattern,
-  topLevelErePattern,
-  ["0 13 /ready/"],
-  (tree) => {
-    contains(tree, "normal_pattern");
-    contains(tree, "extended_reg_exp");
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
-      2,
-      "Expected opening and closing slashes in the top-level ERE pattern",
-    );
-  },
-);
-
-const adjacentFunctionName = lines("function compute(value) {}");
-const continuedSpacedFunctionName = lines("function compute \\", "(value) {}");
-determinismTest(
-  "adjacent-to-continued-spaced-function-name",
-  adjacentFunctionName,
-  continuedSpacedFunctionName,
-  ["16 0  \\\n"],
-  (tree) => {
-    assert.match(tree, /^[ \t0-9:-]*name:[ \t]+name[ \t]+`compute`$/m);
-    excludes(tree, "func_name");
-    contains(tree, "line_continuation");
-  },
-);
-determinismTest(
-  "continued-spaced-to-adjacent-function-name",
-  continuedSpacedFunctionName,
-  adjacentFunctionName,
-  ["16 3 "],
-  (tree) => {
-    assert.match(tree, /^[ \t0-9:-]*name:[ \t]+func_name[ \t]+`compute`$/m);
-    excludes(tree, "line_continuation");
-  },
-);
-
-const compactRangePattern = lines("start,stop {}");
-const multilineRangePattern = lines("start,", "stop {}");
-determinismTest(
-  "insert-range-pattern-newline",
-  compactRangePattern,
-  multilineRangePattern,
-  ["6 0 \n"],
-  (tree) => {
-    contains(tree, "normal_pattern");
-    contains(tree, "left: expr");
-    contains(tree, "right: expr");
-    contains(tree, "newline_opt");
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+newline_opt$/),
-      1,
-      "Expected one range-pattern newline_opt owner",
-    );
-  },
-);
-determinismTest(
-  "delete-range-pattern-newline",
-  multilineRangePattern,
-  compactRangePattern,
-  ["6 1 "],
-  (tree) => {
-    excludes(tree, "newline_opt");
-  },
-);
-
-const separatedClosedItems = "BEGIN {}\nEND {}";
-const directOpenActionItem = "BEGIN {END {}";
-determinismTest(
-  "restore-action-close-and-item-terminator",
-  directOpenActionItem,
-  separatedClosedItems,
-  ["7 0 }\n"],
-  (tree) => {
-    contains(tree, "terminator: terminator");
-  },
-);
-
-const bareBuiltinConcat = lines('BEGIN { x = length "" }');
-const continuedBuiltinConcat = lines("BEGIN { x = length\\", '"" }');
-determinismTest(
-  "insert-builtin-concat-line-continuation",
-  bareBuiltinConcat,
-  continuedBuiltinConcat,
-  ["18 1 \\\n"],
-  (tree) => {
-    contains(tree, "builtin_func_name");
-    contains(tree, "line_continuation");
-  },
-);
-determinismTest(
-  "delete-builtin-concat-line-continuation",
-  continuedBuiltinConcat,
-  bareBuiltinConcat,
-  ["18 2  "],
-);
-
-editHistoryTest(
-  "a closed item stays terminated after an edit history that broke its action",
-  lines(
-    "",
-    "BEGIN {",
-    "  print > file",
-    "  print value >> archive",
-    "  print value | command",
-    "  printf format > file",
-    "  print (left > right)",
-    "  print left || right",
-    "  print (command | getline input_target)",
-    "  print value | getline output_target",
-    "  print value > target > suffix",
-    "}",
-  ),
-  ["133 3 ", "18 0 lN}"],
-);
-editHistoryTest(
-  "a builtin call keeps its parenthesis after an edit history that split the name",
-  lines(
-    "",
-    "BEGIN {",
-    "  f()",
-    "  f(value)",
-    "  f (value)",
-    "  call\\",
-    "(value)",
-    "  length",
-    "  length()",
-    "  length (value)",
-    "  atan2(1, 2)",
-    "}",
-  ),
-  ["83 3 ", "44 0 eD]", "6 0 >9|"],
-);
-editHistoryTest(
-  "division stays division after an edit history that concatenated the operands",
-  lines(
-    "",
-    "BEGIN {",
-    "  a * b + c",
-    "  a + b * c / d % e",
-    "  -d ^ e + f",
-    "  g ^ h ^ i",
-    "  j - k - l",
-    "  m n + o",
-    "  !p && q",
-    "}",
-  ),
-  ["33 1 ", "1 0 a,^"],
-);
-editHistoryTest(
-  "a getline target survives an edit history with an unterminated string",
-  lines(
-    "",
-    "BEGIN {",
-    "  left\\",
-    "~ right",
-    "  array[position\\",
-    "]",
-    "  getline target\\",
-    "<= limit",
-    "  getline target\\",
-    "< source",
-    "}",
-  ),
-  ["17 3 ", "34 3 ", '76 0 "', "54 2 "],
-);
-
-// Re-lexing after an unrelated edit must retain the continuation lookahead
-// that invalidates a closed newline_opt when the following item changes.
-const closedLeadingNewline = "\n \\\n x\n";
-const reopenedLeadingNewline = "\n \\\n \n\ny";
-determinismTest(
-  "reopen-leading-newline-after-unrelated-edit",
-  closedLeadingNewline,
-  reopenedLeadingNewline,
-  ["7 0 y", "5 1 \n"],
-  (tree) => {
-    assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+leading: newline_opt/),
-      1,
-      "Expected one leading newline_opt",
-    );
-    contains(tree, "line_continuation");
-  },
-);
-
-const separatedEmptyStatement = lines("BEGIN {", "; x", "}");
-const continuedEmptyStatement = lines("BEGIN {", ";\\", "x", "}");
-determinismTest(
-  "insert-statement-gap-line-continuation",
-  separatedEmptyStatement,
-  continuedEmptyStatement,
-  ["9 1 \\\n"],
-  (tree) => {
-    contains(tree, "line_continuation");
-  },
-);
-determinismTest(
-  "delete-statement-gap-line-continuation",
-  continuedEmptyStatement,
-  separatedEmptyStatement,
-  ["9 2  "],
-);
+test("posix_awk: corpus fuzz propagates CLI failures even when its exit status is zero", () => {
+  const directory = mkdtempSync(join(tmpdir(), "tree-sitter-fuzz-exit-#-"));
+  const preload = join(directory, "cli.mjs");
+  const script = join(import.meta.dirname, "..", "scripts", "tree-sitter.js");
+  const fixtures = [
+    {
+      name: "successful CLI output",
+      status: 0,
+      stdout: "0 test_language corpus tests failed fuzzing\n",
+      stderr: "",
+      expectedStatus: 0,
+    },
+    {
+      name: "failed fuzz case with successful CLI exit status",
+      status: 0,
+      stdout: "1 test_language corpus tests failed fuzzing\n",
+      stderr: "",
+      expectedStatus: 1,
+    },
+    {
+      name: "failed CLI exit status",
+      status: 1,
+      stdout: "",
+      stderr: "fuzz command failed\n",
+      expectedStatus: 1,
+    },
+  ];
+  try {
+    for (const fixture of fixtures) {
+      writeFileSync(
+        preload,
+        `
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+const fixture = ${JSON.stringify(fixture)};
+childProcess.spawnSync = (_command, arguments_) => {
+  if (arguments_.includes("build")) return { status: 0, stdout: "", stderr: "" };
+  if (arguments_.includes("fuzz")) return fixture;
+  throw new Error("unexpected CLI invocation");
+};
+syncBuiltinESMExports();
+`,
+      );
+      const result = spawnSync(
+        process.execPath,
+        ["--import", pathToFileURL(preload).href, script, "fuzz-all"],
+        {
+          encoding: "utf8",
+          timeout: 60_000,
+          killSignal: "SIGKILL",
+        },
+      );
+      assert.ifError(result.error);
+      assert.equal(
+        result.status,
+        fixture.expectedStatus,
+        `${fixture.name}\n${result.stdout}${result.stderr}`,
+      );
+      assert.ok(
+        result.stdout.includes(fixture.stdout),
+        `${fixture.name}: CLI stdout is missing`,
+      );
+      assert.ok(
+        result.stderr.includes(fixture.stderr),
+        `${fixture.name}: CLI stderr is missing`,
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

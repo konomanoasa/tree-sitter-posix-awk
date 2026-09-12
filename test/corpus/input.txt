@@ -1,0 +1,350 @@
+==================
+getline accepts an omitted target
+==================
+
+BEGIN {
+  getline
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+getline accepts a scalar target
+==================
+
+BEGIN {
+  getline value
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+getline accepts an array target and an input source expression
+==================
+
+BEGIN {
+  getline array[1] < file + suffix
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name)
+                          (expr_list
+                            (expr
+                              (non_unary_expr
+                                (number))))))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name)))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a string command pipes into getline
+==================
+
+BEGIN {
+  "cmd" | getline target
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (non_unary_expr
+                        (string
+                          (string_content)))
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a unary expression pipes into getline
+==================
+
+BEGIN {
+  -command | getline target
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (unary_expr
+                    (unary_input_function
+                      (unary_expr
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))))
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a field reference pipes into getline
+==================
+
+BEGIN {
+  $field | getline target
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (non_unary_expr
+                        (lvalue
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name))))))
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+getline followed by a postfix update remains a concatenation
+==================
+{ getline value++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+a getline target owns a continuation before a comparison operator
+==================
+
+BEGIN {
+  getline target\
+<= limit
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_input_function
+                        (simple_get
+                          (getline_keyword)
+                          (lvalue
+                            (name)))))
+                    (line_continuation)
+                    (le)
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a getline target owns a continuation before input redirection
+==================
+
+BEGIN {
+  getline target\
+< source
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name)))
+                      (line_continuation)
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))
+            (newline)))))
+    (terminator
+      (newline))))

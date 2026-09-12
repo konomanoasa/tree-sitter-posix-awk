@@ -31,6 +31,27 @@ BEGIN { print "" "#" "a #/é value" }
                             (string_content)))))))))))))))
 
 ==================
+a string forms a normal expression
+==================
+BEGIN { "value"; }
+---
+
+(program
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action
+      (terminated_statement_list
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (string
+                    (string_content)))))))))))
+
+==================
 defined and undefined escapes remain escape sequences
 ==================
 BEGIN { print "\"\\\a\b\f\n\r\t\v\/\.\#\q\x" }
@@ -105,44 +126,6 @@ BEGIN { print "\1\12\1234\0000\377\400\777\8\x41" }
                           (string_content))))))))))))))
 
 ==================
-normal expression and continued print expression both accept strings
-==================
-BEGIN { "value"; print x \
-"continued" }
----
-
-(program
-  (item
-    (pattern
-      (special_pattern
-        (begin_keyword)))
-    (action
-      (unterminated_statement_list
-        (terminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (string
-                    (string_content)))))))
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (print_statement
-                (simple_print_statement
-                  (print_keyword)
-                  (print_expr_list
-                    (print_expr
-                      (non_unary_print_expr
-                        (non_unary_print_expr
-                          (lvalue
-                            (name)))
-                        (line_continuation)
-                        (non_unary_print_expr
-                          (string
-                            (string_content)))))))))))))))
-
-==================
 odd and even backslashes distinguish escaped and closing quotes
 ==================
 BEGIN { print "\\" "\"" }
@@ -170,3 +153,34 @@ BEGIN { print "\\" "\"" }
                         (non_unary_print_expr
                           (string
                             (escape_sequence)))))))))))))))
+
+==================
+a continued print expression concatenates a string
+==================
+BEGIN { print x \
+"continued" }
+---
+
+(program
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (name)))
+                        (line_continuation)
+                        (non_unary_print_expr
+                          (string
+                            (string_content)))))))))))))))

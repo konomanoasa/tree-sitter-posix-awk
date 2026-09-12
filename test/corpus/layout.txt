@@ -1,0 +1,108 @@
+==================
+empty source has no layout nodes
+==================
+
+---
+
+(program)
+
+==================
+a newline-only program retains its source layout
+==================
+
+
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline)
+      (newline))))
+
+==================
+space and horizontal tab remain unnamed layout
+==================
+	 
+---
+
+(program)
+
+==================
+source boundary continuations belong directly to program
+==================
+\
+BEGIN {}\
+ 
+---
+
+(program
+  (line_continuation)
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action))
+  (line_continuation))
+
+==================
+continuation-only logical source retains every physical pair
+==================
+\
+\
+\
+ 
+---
+
+(program
+  (line_continuation)
+  (line_continuation)
+  (line_continuation))
+
+==================
+terminator owns continuation before its following raw newline
+==================
+BEGIN {};\
+
+BEGIN {}
+---
+
+(program
+  (item_list
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action))
+    (terminator
+      (line_continuation)
+      (newline)))
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action)))
+
+==================
+continuation before a raw newline does not terminate the item by itself
+==================
+BEGIN {}\
+
+BEGIN {}
+---
+
+(program
+  (item_list
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action))
+    (line_continuation)
+    (terminator
+      (newline)))
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action)))

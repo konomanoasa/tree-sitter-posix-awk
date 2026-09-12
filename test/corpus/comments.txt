@@ -1,0 +1,41 @@
+==================
+a comment-only program retains its comment
+==================
+
+# comment only
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline)
+      (comment)
+      (newline))))
+
+==================
+backslash inside a comment does not continue its raw newline
+==================
+# backslash stays in comment \
+BEGIN {}
+---
+
+(program
+  (comment)
+  (item_list
+    (newline_opt
+      (newline)))
+  (item
+    (pattern
+      (special_pattern
+        (begin_keyword)))
+    (action)))
+
+==================
+comment at EOF excludes the absent newline
+==================
+# comment at EOF
+---
+
+(program
+  (comment))

@@ -1,0 +1,328 @@
+==================
+a raw newline separates an if header from its body
+==================
+
+BEGIN {
+  if (raw_header)
+    raw_body
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (if_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+an if statement accepts an empty consequence before else
+==================
+
+BEGIN {
+  if (empty);
+  else
+    empty_alternative
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (if_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (terminated_statement
+              (newline_opt
+                (newline)))
+            (else_keyword)
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+else binds to the nearest eligible if
+==================
+
+BEGIN {
+  if (outer)
+    if (inner)
+      nearest;
+    else
+      inner_alternative
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (if_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (if_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))))
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (terminatable_statement
+                  (simple_statement
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))
+                (newline_opt
+                  (newline)))
+              (else_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (terminatable_statement
+                  (simple_statement
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))
+                (newline)))))))
+    (terminator
+      (newline))))
+
+==================
+nested if statements each retain their own else clause
+==================
+
+BEGIN {
+  if (outer)
+    if (inner)
+      inner_consequence;
+    else
+      inner_alternative;
+  else
+    outer_alternative
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (if_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (if_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))))
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (terminatable_statement
+                  (simple_statement
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))
+                (newline_opt
+                  (newline)))
+              (else_keyword)
+              (newline_opt
+                (newline))
+              (terminated_statement
+                (terminatable_statement
+                  (simple_statement
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))
+                (newline_opt
+                  (newline))))
+            (else_keyword)
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+a continuation separates an if header from its body
+==================
+
+BEGIN {
+  if (continued_header)\
+    continued_body
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (if_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (line_continuation)
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))
+
+==================
+else owns a continuation before its alternative
+==================
+
+BEGIN {
+  if (branch)
+    consequence;
+  else\
+    alternative
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (if_keyword)
+            (expr
+              (non_unary_expr
+                (lvalue
+                  (name))))
+            (newline_opt
+              (newline))
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline_opt
+                (newline)))
+            (else_keyword)
+            (line_continuation)
+            (terminated_statement
+              (terminatable_statement
+                (simple_statement
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))))))
+              (newline))))))
+    (terminator
+      (newline))))

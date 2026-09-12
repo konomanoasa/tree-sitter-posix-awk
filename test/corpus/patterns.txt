@@ -1,19 +1,8 @@
 ==================
-top-level items preserve every normal pattern action and special form
+an action accepts an omitted pattern
 ==================
 {}
-ready
-low, high
-active {}
-start,
-stop {}
-from,
-# range continuation
-through {}
-/record/ {}
-total / count {}
-BEGIN {}
-END {}
+
 ---
 
 (program
@@ -21,7 +10,17 @@ END {}
     (item
       (action))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+an expression pattern accepts an omitted action
+==================
+ready
+
+---
+
+(program
+  (item_list
     (item
       (normal_pattern
         (expr
@@ -29,7 +28,17 @@ END {}
             (lvalue
               (name))))))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+a range pattern accepts an omitted action
+==================
+low, high
+
+---
+
+(program
+  (item_list
     (item
       (normal_pattern
         (expr
@@ -41,7 +50,17 @@ END {}
             (lvalue
               (name))))))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+an expression pattern accepts an action
+==================
+active {}
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (normal_pattern
@@ -51,7 +70,18 @@ END {}
                 (name))))))
       (action))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+a range pattern accepts a newline after its separator
+==================
+start,
+stop {}
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (normal_pattern
@@ -67,7 +97,19 @@ END {}
                 (name))))))
       (action))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+a range pattern accepts a comment after its separator
+==================
+from,
+# range continuation
+through {}
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (normal_pattern
@@ -85,7 +127,17 @@ END {}
                 (name))))))
       (action))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+an ERE pattern accepts an action
+==================
+/record/ {}
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (normal_pattern
@@ -119,7 +171,17 @@ END {}
                         (ordinary_character))))))))))
       (action))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+a division expression forms a pattern
+==================
+total / count {}
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (normal_pattern
@@ -134,14 +196,32 @@ END {}
                     (name))))))))
       (action))
     (terminator
-      (newline))
+      (newline))))
+
+==================
+the BEGIN keyword forms a special pattern
+==================
+BEGIN {}
+
+---
+
+(program
+  (item_list
     (item
       (pattern
         (special_pattern
           (begin_keyword)))
       (action))
     (terminator
-      (newline)))
+      (newline))))
+
+==================
+the END keyword forms a special pattern
+==================
+END {}
+---
+
+(program
   (item
     (pattern
       (special_pattern
@@ -193,58 +273,4 @@ BEGIN {}
     (pattern
       (special_pattern
         (begin_keyword)))
-    (action)))
-
-==================
-function definitions distinguish names parameters newlines and continuations
-==================
-function adjacent() {}
-function spaced (first,
-second)
-{
-  return first
-}
-function continued(param,\
-other) {}
----
-
-(program
-  (item_list
-    (item
-      (function_keyword)
-      (func_name)
-      (action))
-    (terminator
-      (newline))
-    (item
-      (function_keyword)
-      (name)
-      (param_list
-        (name)
-        (newline_opt
-          (newline))
-        (name))
-      (newline_opt
-        (newline))
-      (action
-        (newline_opt
-          (newline))
-        (terminated_statement_list
-          (terminated_statement
-            (terminatable_statement
-              (return_keyword)
-              (expr
-                (non_unary_expr
-                  (lvalue
-                    (name)))))
-            (newline)))))
-    (terminator
-      (newline)))
-  (item
-    (function_keyword)
-    (func_name)
-    (param_list
-      (name)
-      (line_continuation)
-      (name))
     (action)))

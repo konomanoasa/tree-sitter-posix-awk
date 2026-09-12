@@ -3,12 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+  workflow_call:
 
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   parser:
-    name: Test parser
+    name: Test parsers (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -18,27 +21,31 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
       - uses: tree-sitter/setup-action/cli@v2
+      - name: Set up check tools
+        if: runner.os == 'macOS'
+        shell: sh
+        run: |
+          brew install llvm ts_query_ls
+          {
+            printf 'CC=%s/bin/clang\n' "$(brew --prefix llvm)"
+            printf 'CFLAGS=-std=c17 -isysroot %s\n' "$(xcrun --sdk macosx --show-sdk-path)"
+          } >>"$GITHUB_ENV"
       - run: npm ci
       - uses: tree-sitter/parser-test-action@v3
         with:
           generate: false
-          test-parser-cmd: npm test
-          test-rust: true
-
-  query:
-    name: Validate queries
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: tree-sitter/setup-action/cli@v2
-      - run: tree-sitter build
-      - name: Set up ts_query_ls
+          test-parser-cmd: ${{ runner.os == 'macOS' && 'npm run check' || 'npm test' }}
+      - name: Build parsers
+        if: runner.os == 'macOS'
+        shell: sh
+        run: |
+          tree-sitter build --output posix_awk.so .
+      - name: Validate queries
+        if: runner.os == 'macOS'
+        shell: sh
         run: >-
-          curl -fL
-          https://github.com/ribru17/ts_query_ls/releases/latest/download/ts_query_ls-x86_64-unknown-linux-gnu.tar.gz
-          | tar -xz
-      - run: >-
-          ./ts_query_ls check -f queries/
-          --config '{"parser_install_directories":["."]}'
+          ts_query_ls check --format queries/
+          --config
+          '{"parser_install_directories":["."],"parser_aliases":{"posix-awk":"posix_awk"}}'

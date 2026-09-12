@@ -25,6 +25,7 @@ jobs:
         with:
           generate: false
           test-parser-cmd: npm test
+          test-rust: true
 
   query:
     name: Validate queries

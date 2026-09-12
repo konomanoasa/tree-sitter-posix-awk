@@ -6,6 +6,8 @@
   "license": "MIT",
   "repository": "git+https://github.com/konomanoasa/tree-sitter-posix-awk.git",
   "files": [
+    "bindings/rust",
+    "Cargo.toml",
     "grammar.js",
     "queries/*.scm",
     "src/*.c",

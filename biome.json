@@ -1,4 +1,7 @@
 {
+  "files": {
+    "includes": ["**", "!!target"]
+  },
   "formatter": {
     "includes": ["**", "!src/grammar.json", "!src/node-types.json"]
   },

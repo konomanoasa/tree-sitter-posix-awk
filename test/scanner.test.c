@@ -333,7 +333,6 @@ static int check_blank_skip_token_ranges(void) {
   } cases[] = {
     {"blanks precede a keyword", "  END", END_WORD, 2, 5},
     {"a tab precedes a number", "\t1.5", NUMBER_FRACTION, 1, 4},
-    {"blanks precede an item boundary", "  name", CLOSED_ITEM_BOUNDARY, 2, 2},
   };
 
   int failed = 0;
@@ -480,541 +479,6 @@ static int check_slash_dispatch(void) {
   return failed;
 }
 
-static int check_closed_item_boundary(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    bool expected_scanned;
-  } cases[] = {
-    {"BEGIN starts an item", "BEGIN", true},
-    {"END starts an item", "END", true},
-    {"function starts an item", "function", true},
-    {"name starts an item", "name", true},
-    {"getline starts an item", "getline", true},
-    {"built-in starts an item", "length", true},
-    {"function call starts an item", "follow(", true},
-    {"built-in call starts an item", "length (", true},
-    {"integer starts an item", "42", true},
-    {"fraction starts an item", ".5", true},
-    {"action starts an item", "{", true},
-    {"string starts an item", "\"", true},
-    {"group starts an item", "(", true},
-    {"field reference starts an item", "$", true},
-    {"unary plus starts an item", "+", true},
-    {"unary minus starts an item", "-", true},
-    {"ERE starts an item", "/", true},
-    {"negation starts an item", "!", true},
-    {"print cannot start a pattern", "print", false},
-    {"if cannot start a pattern", "if", false},
-    {"lone dot is not a number", ".", false},
-    {"close parenthesis does not start an item", ")", false},
-    {"multiplication does not start an item", "*", false},
-    {"newline does not start an item", "\n", false},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[CLOSED_ITEM_BOUNDARY] = true;
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].expected_scanned,
-      CLOSED_ITEM_BOUNDARY,
-      0
-    );
-  }
-  return failed;
-}
-
-static int check_normal_pattern_item_boundary(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    bool expected_scanned;
-  } cases[] = {
-    {"BEGIN is a reserved item start", "BEGIN", true},
-    {"END is a reserved item start", "END", true},
-    {"function is a reserved item start", "function", true},
-    {"name can continue a pattern", "name", false},
-    {"number can continue a pattern", "42", false},
-    {"action belongs to the pattern item", "{", false},
-    {"print is not a top-level start", "print", false},
-    {"BEGIN prefix is a name", "BEGINNING", false},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[NORMAL_PATTERN_ITEM_BOUNDARY] = true;
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].expected_scanned,
-      NORMAL_PATTERN_ITEM_BOUNDARY,
-      0
-    );
-  }
-
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[CLOSED_ITEM_BOUNDARY] = true;
-  valid_symbols[NORMAL_PATTERN_ITEM_BOUNDARY] = true;
-  failed |= expect_scan_result(
-    "closed-item boundary wins when both boundaries are valid",
-    "BEGIN",
-    valid_symbols,
-    true,
-    CLOSED_ITEM_BOUNDARY,
-    0
-  );
-  return failed;
-}
-
-static int check_statement_recovery(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    bool recovering;
-    bool expected_scanned;
-  } cases[] = {
-    {"close brace marks the absent body", "}", false, true},
-    {"EOF marks the absent body", "", false, true},
-    {"continued close brace marks the absent body", "\\\n}", false, true},
-    {"continued EOF marks the absent body", "\\\n", false, true},
-    {"a statement is not absent", "x", false, false},
-    {"a raw newline is layout", "\n}", false, false},
-    {"error mode does not insert a missing statement before a brace",
-      "}",
-      true,
-      false},
-    {"error mode does not insert a missing statement at EOF", "", true, false},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[STATEMENT_RECOVERY] = true;
-    valid_symbols[ERROR_SENTINEL] = cases[i].recovering;
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].expected_scanned,
-      STATEMENT_RECOVERY,
-      0
-    );
-  }
-
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[STATEMENT_RECOVERY] = true;
-  valid_symbols[ACTION_CLOSING] = true;
-  failed |= expect_scan_result_at(
-    "an accepted real action closing precedes missing statement recovery",
-    "}",
-    valid_symbols,
-    LEXICAL_MODE_OUTSIDE,
-    true,
-    ACTION_CLOSING,
-    0,
-    1,
-    LEXICAL_MODE_ACTION_END
-  );
-  return failed;
-}
-
-static int check_action_closing(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    LexicalMode initial_mode;
-    bool closing_valid;
-    bool expected_scanned;
-    size_t expected_token_start;
-    size_t expected_token_end;
-  } cases[] = {
-    {"action closing consumes its real brace",
-      "}",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      true,
-      0,
-      1},
-    {"action closing excludes surrounding blanks",
-      " \t} ",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      true,
-      2,
-      3},
-    {"EOF does not synthesize an action closing",
-      "",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      false,
-      0,
-      0},
-    {"action closing leaves a preceding continuation to the grammar",
-      "\\\n}",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      false,
-      0,
-      0},
-    {"action closing leaves a preceding newline to the grammar",
-      "\n}",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      false,
-      0,
-      0},
-    {"a word is not an action closing",
-      "value",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      false,
-      0,
-      0},
-    {"unavailable action closing preserves outside mode",
-      "}",
-      LEXICAL_MODE_OUTSIDE,
-      false,
-      false,
-      0,
-      0},
-    {"a string brace is not an action closing",
-      "}",
-      LEXICAL_MODE_STRING,
-      true,
-      false,
-      0,
-      0},
-    {"an ERE brace is not an action closing",
-      "}",
-      LEXICAL_MODE_ERE_BODY,
-      true,
-      false,
-      0,
-      0},
-    {"an escaped-delimiter ERE brace is not an action closing",
-      "}",
-      LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
-      true,
-      false,
-      0,
-      0},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[ACTION_CLOSING] = cases[i].closing_valid;
-    failed |= expect_scan_result_at(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].initial_mode,
-      cases[i].expected_scanned,
-      ACTION_CLOSING,
-      cases[i].expected_token_start,
-      cases[i].expected_token_end,
-      cases[i].expected_scanned ? LEXICAL_MODE_ACTION_END
-                                : cases[i].initial_mode
-    );
-  }
-  return failed;
-}
-
-static int check_action_end(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    LexicalMode initial_mode;
-    bool marker_valid;
-    bool recovering;
-    bool expected_scanned;
-  } cases[] = {
-    {"action end precedes blanks and the following item",
-      " \tEND {}",
-      LEXICAL_MODE_ACTION_END,
-      true,
-      false,
-      true},
-    {"action end precedes a comment and newline",
-      "# comment\nEND {}",
-      LEXICAL_MODE_ACTION_END,
-      true,
-      false,
-      true},
-    {"action end precedes a line continuation",
-      "\\\nEND {}",
-      LEXICAL_MODE_ACTION_END,
-      true,
-      false,
-      true},
-    {"action end is emitted at EOF",
-      "",
-      LEXICAL_MODE_ACTION_END,
-      true,
-      false,
-      true},
-    {"action end blocks other tokens until its marker is valid",
-      "END {}",
-      LEXICAL_MODE_ACTION_END,
-      false,
-      false,
-      false},
-    {"action end preserves its state when recovery lacks the marker",
-      "}",
-      LEXICAL_MODE_ACTION_END,
-      false,
-      true,
-      false},
-    {"error mode can complete an action end",
-      " END {}",
-      LEXICAL_MODE_ACTION_END,
-      true,
-      true,
-      true},
-    {"outside mode does not synthesize an action end",
-      "",
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      false,
-      false},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    if (cases[i].initial_mode == LEXICAL_MODE_ACTION_END) {
-      set_all_symbols_valid(valid_symbols);
-    }
-    valid_symbols[ACTION_END] = cases[i].marker_valid;
-    valid_symbols[ERROR_SENTINEL] = cases[i].recovering;
-    MockLexer mock = make_mock_lexer(cases[i].source);
-    ScannerState state = {.mode = cases[i].initial_mode};
-    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-      &state,
-      &mock.lexer,
-      valid_symbols
-    );
-    const LexicalMode expected_mode =
-      cases[i].expected_scanned ? LEXICAL_MODE_OUTSIDE : cases[i].initial_mode;
-    if (
-      scanned ==
-      cases[i].expected_scanned &&
-      state.mode ==
-      expected_mode &&
-      mock.advance_count ==
-      0 &&
-      mock.token_start ==
-      0 &&
-      mock.token_end ==
-      0 &&
-      (!scanned || mock.lexer.result_symbol == ACTION_END)
-    ) {
-      continue;
-    }
-    fprintf(
-      stderr,
-      "%s: scanned=%u symbol=%u start=%zu end=%zu mode=%u advances=%zu\n",
-      cases[i].name,
-      scanned,
-      mock.lexer.result_symbol,
-      mock.token_start,
-      mock.token_end,
-      (unsigned)state.mode,
-      mock.advance_count
-    );
-    failed = 1;
-  }
-  return failed;
-}
-
-static int check_action_closing_in_error_mode(void) {
-  static const struct {
-    const char *name;
-    enum TokenType token;
-    size_t token_start;
-    size_t token_end;
-    LexicalMode mode;
-  } steps[] = {
-    {"error mode consumes the real closing brace",
-      ACTION_CLOSING,
-      0,
-      1,
-      LEXICAL_MODE_ACTION_END},
-    {"error mode completes the action before reading its following blank",
-      ACTION_END,
-      1,
-      1,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode resumes ordinary scanning after the action end",
-      END_WORD,
-      2,
-      5,
-      LEXICAL_MODE_OUTSIDE},
-  };
-  MockLexer mock = make_mock_lexer("} END");
-  ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
-  bool valid_symbols[TOKEN_TYPE_COUNT];
-  set_all_symbols_valid(valid_symbols);
-  for (size_t i = 0; i < ARRAY_LENGTH(steps); i++) {
-    mock.token_start = mock.offset;
-    mock.token_end = mock.offset;
-    mock.content_started = false;
-    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-      &state,
-      &mock.lexer,
-      valid_symbols
-    );
-    if (
-      scanned &&
-      mock.lexer.result_symbol ==
-      steps[i].token &&
-      mock.token_start ==
-      steps[i].token_start &&
-      mock.token_end ==
-      steps[i].token_end &&
-      mock.offset ==
-      steps[i].token_end &&
-      state.mode == steps[i].mode
-    ) {
-      continue;
-    }
-    fprintf(
-      stderr,
-      "%s: scanned=%u symbol=%u start=%zu end=%zu offset=%zu mode=%u\n",
-      steps[i].name,
-      scanned,
-      mock.lexer.result_symbol,
-      mock.token_start,
-      mock.token_end,
-      mock.offset,
-      (unsigned)state.mode
-    );
-    return 1;
-  }
-  return 0;
-}
-
-static int check_required_target_guards(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    enum TokenType guard;
-    bool expected_scanned;
-  } cases[] = {
-    {"expression follows layout",
-      "\n  # comment\n\\\n .5",
-      EXPRESSION_TARGET_GUARD,
-      true},
-    {"print expression follows newline",
-      "\nname",
-      PRINT_EXPRESSION_TARGET_GUARD,
-      true},
-    {"action follows newline", "\n{", ACTION_TARGET_GUARD, true},
-    {"parameter follows newline", "\nparameter", PARAMETER_TARGET_GUARD, true},
-    {"getline is not a print expression",
-      "\ngetline",
-      PRINT_EXPRESSION_TARGET_GUARD,
-      false},
-    {"reserved word is not a parameter",
-      "\nEND",
-      PARAMETER_TARGET_GUARD,
-      false},
-    {"lone dot is not an expression", "\n.", EXPRESSION_TARGET_GUARD, false},
-    {"invalid continuation has no fallback",
-      "\n\\q\nname",
-      EXPRESSION_TARGET_GUARD,
-      false},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[cases[i].guard] = true;
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].expected_scanned,
-      cases[i].guard,
-      0
-    );
-  }
-  return failed;
-}
-
-static int check_action_recovery(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    bool guard_valid;
-    bool expected_scanned;
-    enum TokenType expected_symbol;
-  } cases[] = {
-    {"newline without an action", "\nEND", false, true, ACTION_RECOVERY},
-    {"reserved word without an action", "END", false, true, ACTION_RECOVERY},
-    {"semicolon without an action", ";", false, true, ACTION_RECOVERY},
-    {"EOF without an action", "", false, true, ACTION_RECOVERY},
-    {"action opener is not absent", "{", false, false, ACTION_RECOVERY},
-    {"continued action is not absent", "\\\n{", false, true, LC_BEFORE_ACTION},
-    {"continued reserved word without an action",
-      "\\\nEND",
-      false,
-      true,
-      ACTION_RECOVERY},
-    {"continued EOF without an action", "\\\n", false, true, ACTION_RECOVERY},
-    {"continued header layout leads to an action",
-      "\\\n # c\n{",
-      false,
-      true,
-      LC_BEFORE_NEWLINE},
-    {"continued header layout does not lead to an action",
-      "\\\n # c\nEND",
-      false,
-      true,
-      ACTION_RECOVERY},
-    {"continued header newline reaches EOF",
-      "\\\n\n",
-      false,
-      true,
-      ACTION_RECOVERY},
-    {"action after the header newline",
-      "\n\n  # c\n{",
-      true,
-      true,
-      ACTION_TARGET_GUARD},
-    {"reserved word after the header newline",
-      "\nEND",
-      true,
-      false,
-      ACTION_RECOVERY},
-    {"EOF after the header newline", "\n", true, false, ACTION_RECOVERY},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[ACTION_RECOVERY] = true;
-    valid_symbols[LC_BEFORE_ACTION] = true;
-    valid_symbols[LC_BEFORE_NEWLINE] = true;
-    valid_symbols[ACTION_TARGET_GUARD] = cases[i].guard_valid;
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].expected_scanned,
-      cases[i].expected_symbol,
-      0
-    );
-  }
-  return failed;
-}
-
 static int check_line_continuation_markers(void) {
   static const struct {
     const char *name;
@@ -1084,7 +548,6 @@ static int check_line_continuation_markers(void) {
     );
   }
 
-  // When two markers are valid for one target, the more specific one wins.
   static const struct {
     const char *name;
     const char *source;
@@ -1117,14 +580,6 @@ static int check_line_continuation_markers(void) {
       "\\\nx",
       LC_BEFORE_EXPRESSION,
       LC_BEFORE_SIMPLE_STATEMENT},
-    {"statement recovery before close brace",
-      "\\\n}",
-      LC_BEFORE_CLOSE_BRACE,
-      STATEMENT_RECOVERY},
-    {"statement recovery before EOF",
-      "\\\n",
-      LC_BEFORE_EOF,
-      STATEMENT_RECOVERY},
   };
   for (size_t i = 0; i < ARRAY_LENGTH(priorities); i++) {
     bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
@@ -1316,28 +771,6 @@ static int check_ere_state_transitions(void) {
 
   set_all_symbols_valid(valid_symbols);
   failed |= expect_scan_result_at(
-    "raw newline resets ERE state in error mode",
-    "\nnext",
-    valid_symbols,
-    LEXICAL_MODE_ERE_BODY,
-    true,
-    ERE_LEXICAL_END,
-    0,
-    0,
-    LEXICAL_MODE_OUTSIDE
-  );
-  failed |= expect_scan_result_at(
-    "EOF resets escaped-delimiter state in error mode",
-    "",
-    valid_symbols,
-    LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
-    true,
-    ERE_LEXICAL_END,
-    0,
-    0,
-    LEXICAL_MODE_OUTSIDE
-  );
-  failed |= expect_scan_result_at(
     "error mode suppresses ERE compound guards",
     "[.",
     valid_symbols,
@@ -1502,21 +935,6 @@ static int check_string_and_comment_modes(void) {
   }
 
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[COMMENT] = true;
-  valid_symbols[STATEMENT_RECOVERY] = true;
-  valid_symbols[ACTION_CLOSING] = true;
-  valid_symbols[ACTION_END] = true;
-  valid_symbols[ACTION_RECOVERY] = true;
-  valid_symbols[CLOSED_ITEM_BOUNDARY] = true;
-  failed |= expect_scan_result(
-    "comment precedes every zero-width token",
-    "# c\n}",
-    valid_symbols,
-    true,
-    COMMENT,
-    3
-  );
-
   set_all_symbols_valid(valid_symbols);
   failed |= expect_scan_result_at(
     "raw newline resets string mode in error mode",
@@ -1614,34 +1032,22 @@ static int check_error_mode_real_tokens(void) {
       DIV_ASSIGN_OPERATOR,
       2,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode prefers ERE over division",
+    {"error mode keeps division precedence",
       "/x",
       true,
-      ERE_OPENING_SLASH,
+      DIVISION_SLASH,
       1,
-      LEXICAL_MODE_ERE_BODY},
+      LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses greater guard",
       ">",
       false,
       OUTPUT_GREATER_GUARD,
       0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses target guards",
-      "\nname",
-      false,
-      EXPRESSION_TARGET_GUARD,
-      0,
-      LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses line-continuation markers",
       "\\\nname",
       false,
       LC_BEFORE_EXPRESSION,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses action recovery",
-      ";",
-      false,
-      ACTION_RECOVERY,
       0,
       LEXICAL_MODE_OUTSIDE},
     {"error mode emits no token for unknown punctuation",
@@ -1748,11 +1154,6 @@ static int check_serialization(void) {
     LEXICAL_MODE_STRING,
     SERIALIZED_SCANNER_STATE_SIZE
   );
-  failed |= check_round_trip(
-    "action end mode round trip",
-    LEXICAL_MODE_ACTION_END,
-    SERIALIZED_SCANNER_STATE_SIZE
-  );
 
   char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE] = {
     (char)LEXICAL_MODE_ERE_BODY,
@@ -1778,7 +1179,7 @@ static int check_serialization(void) {
     destination.mode
   );
 
-  buffer[0] = (char)(LEXICAL_MODE_ACTION_END + 1);
+  buffer[0] = (char)(LEXICAL_MODE_STRING + 1);
   destination.mode = LEXICAL_MODE_ERE_BODY;
   tree_sitter_posix_awk_external_scanner_deserialize(
     &destination,
@@ -1801,14 +1202,6 @@ int main(void) {
   failed |= check_blank_skip_token_ranges();
   failed |= check_greater_dispatch();
   failed |= check_slash_dispatch();
-  failed |= check_closed_item_boundary();
-  failed |= check_normal_pattern_item_boundary();
-  failed |= check_statement_recovery();
-  failed |= check_action_closing();
-  failed |= check_action_end();
-  failed |= check_action_closing_in_error_mode();
-  failed |= check_required_target_guards();
-  failed |= check_action_recovery();
   failed |= check_line_continuation_markers();
   failed |= check_linear_line_continuation_lookahead();
   failed |= check_ere_state_transitions();

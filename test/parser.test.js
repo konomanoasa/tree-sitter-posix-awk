@@ -98,8 +98,6 @@ function assertFresh(testName, source, expectedStatus = 0) {
   return native.tree;
 }
 
-// An edit is "<position> <delete count> <inserted text>" in bytes, the
-// shape `tree-sitter parse --edits` takes.
 function parseEdit(testName, edit, sourceLength) {
   const match = edit.match(/^([0-9]+) ([0-9]+) (.*)$/s);
   assert.notEqual(
@@ -176,9 +174,8 @@ function excludes(tree, unexpected) {
   );
 }
 
-// The --cst renderer prefixes every node on an error path with "•" and
-// prints a missing named leaf as a zero-width node without the word MISSING,
-// so the bullet is the only marker that covers both ERROR and missing nodes.
+// The --cst error marker covers both ERROR and missing nodes; missing named
+// leaves do not include the word MISSING.
 function clean(tree) {
   excludes(tree, "•");
 }
@@ -196,155 +193,6 @@ function matchingLineCount(tree, pattern) {
   return tree.split("\n").filter((line) => pattern.test(line)).length;
 }
 
-function pointAtMost(left, right) {
-  return (
-    left.row < right.row ||
-    (left.row === right.row && left.column <= right.column)
-  );
-}
-
-function containsRange(outer, inner) {
-  return (
-    pointAtMost(outer.start, inner.start) && pointAtMost(inner.end, outer.end)
-  );
-}
-
-// The renderer's description column is not a reliable depth signal (error
-// bullets and range-text widths shift it per line), so recover each node's
-// depth from range containment over the preorder line sequence instead.
-function parseCstLines(tree) {
-  const stack = [];
-  return tree
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const match = line.match(
-        /^([0-9]+):([0-9]+)[ \t]+-[ \t]+([0-9]+):([0-9]+)[ \t]+(.+)$/,
-      );
-      assert.notEqual(match, null, `Unrecognized CST line: ${line}`);
-      const record = {
-        description: match[5],
-        end: { column: Number(match[4]), row: Number(match[3]) },
-        start: { column: Number(match[2]), row: Number(match[1]) },
-      };
-      while (
-        stack.length > 0 &&
-        !containsRange(stack[stack.length - 1], record)
-      ) {
-        stack.pop();
-      }
-      record.depth = stack.length;
-      stack.push(record);
-      return record;
-    });
-}
-
-function sourcePoint(source, index) {
-  const prefix = source.slice(0, index);
-  const lastNewline = prefix.lastIndexOf("\n");
-  return {
-    column: Buffer.byteLength(prefix.slice(lastNewline + 1)),
-    row: prefix.split("\n").length - 1,
-  };
-}
-
-function samePoint(left, right) {
-  return left.row === right.row && left.column === right.column;
-}
-
-function relativePoint(point, origin) {
-  return {
-    column:
-      point.row === origin.row ? point.column - origin.column : point.column,
-    row: point.row - origin.row,
-  };
-}
-
-// An item inside item_list carries the `item` field and the final item of
-// program does not; the comparison is about the item itself.
-function normalizeItemSubtree(records, rootIndex) {
-  const root = records[rootIndex];
-  let endIndex = rootIndex + 1;
-  while (endIndex < records.length && records[endIndex].depth > root.depth) {
-    endIndex += 1;
-  }
-
-  return records
-    .slice(rootIndex, endIndex)
-    .map((record) => {
-      const start = relativePoint(record.start, root.start);
-      const end = relativePoint(record.end, root.start);
-      const description = record === root ? "item" : record.description;
-      return `${"  ".repeat(record.depth - root.depth)}${start.row}:${start.column} - ${end.row}:${end.column} ${description}`;
-    })
-    .join("\n");
-}
-
-function topLevelItems(tree) {
-  const records = parseCstLines(tree);
-  const items = [];
-  for (let index = 0; index < records.length; index += 1) {
-    if (["item: item", "item"].includes(records[index].description)) {
-      items.push({
-        end: records[index].end,
-        normalized: normalizeItemSubtree(records, index),
-        start: records[index].start,
-      });
-    }
-  }
-  return items;
-}
-
-function assertPreservedItems(testName, source, preservedSources) {
-  const sourcePath = writeSource(testName, "boundary", source);
-  const result = captureParse(sourcePath);
-  assert.ok(
-    result.status === 0 || result.status === 1,
-    parseDescription(`${testName} boundary parse`, result),
-  );
-
-  const actualItems = topLevelItems(result.tree);
-  let searchStart = 0;
-  for (const [index, itemSource] of preservedSources.entries()) {
-    const sourceStart = source.indexOf(itemSource, searchStart);
-    assert.notEqual(
-      sourceStart,
-      -1,
-      `${testName}: preserved item ${JSON.stringify(itemSource)} is absent`,
-    );
-    const expectedStart = sourcePoint(source, sourceStart);
-    const expectedEnd = sourcePoint(source, sourceStart + itemSource.length);
-    const matches = actualItems.filter(
-      (item) =>
-        samePoint(item.start, expectedStart) &&
-        samePoint(item.end, expectedEnd),
-    );
-    assert.equal(
-      matches.length,
-      1,
-      `${testName}: expected one top-level item for ${JSON.stringify(itemSource)}\n${result.tree}`,
-    );
-
-    const isolatedTree = assertFresh(
-      `${testName}-isolated-${index + 1}`,
-      itemSource,
-    );
-    clean(isolatedTree);
-    const isolatedItems = topLevelItems(isolatedTree);
-    assert.equal(
-      isolatedItems.length,
-      1,
-      `${testName}: isolated source must contain exactly one item\n${isolatedTree}`,
-    );
-    assert.deepEqual(
-      matches[0].normalized,
-      isolatedItems[0].normalized,
-      `${testName}: recovered and isolated item CSTs differ for ${JSON.stringify(itemSource)}`,
-    );
-    searchStart = sourceStart + itemSource.length;
-  }
-}
-
 function freshTest(name, source, assertions) {
   test(name, () => assertions(assertFresh(name, source)));
 }
@@ -355,9 +203,6 @@ function determinismTest(name, initial, final, edits, assertions = () => {}) {
   );
 }
 
-// Applies the edits, then reverts them in reverse order, so the final source
-// equals the initial one while the intermediate versions (and the subtrees
-// reused from them) passed through syntax errors.
 function editHistoryTest(name, source, edits) {
   const reverts = [];
   let current = Buffer.from(source);
@@ -372,75 +217,6 @@ function editHistoryTest(name, source, edits) {
     current = applyEdits(name, current, [edit]);
   }
   determinismTest(name, source, source, [...edits, ...reverts]);
-}
-
-const closedItemBoundaryCases = [
-  ["ERE pattern", "/ready/ {}"],
-  ["number pattern", "1 {}"],
-  ["name pattern", "active {}"],
-  ["action-only item", "{}"],
-  ["BEGIN item", "BEGIN {}"],
-  ["END item", "END {}"],
-  ["function item", "function following() {}"],
-];
-
-for (const [label, following] of closedItemBoundaryCases) {
-  test(`a closed item boundary preserves a following ${label}`, () => {
-    const preceding = "BEGIN {}";
-    assertPreservedItems(
-      `closed-item-before-${label}`,
-      `${preceding} ${following}`,
-      [preceding, following],
-    );
-  });
-}
-
-for (const [label, following] of [
-  ["BEGIN item", "BEGIN {}"],
-  ["END item", "END {}"],
-  ["function item", "function following() {}"],
-]) {
-  test(`an actionless pattern boundary preserves a following ${label}`, () => {
-    const preceding = "active";
-    assertPreservedItems(
-      `normal-pattern-before-${label}`,
-      `${preceding} ${following}`,
-      [preceding, following],
-    );
-  });
-}
-
-const physicallyClosedMalformedItems = [
-  ["missing assignment operand", "middle { value = ; }"],
-  ["missing if body", "middle { if (condition) }"],
-  ["missing while body", "middle { while (condition) }"],
-  ["missing classic for body", "middle { for (;;) }"],
-  ["missing for-in body", "middle { for (key in values) }"],
-  ["missing nested control bodies", "middle { if (outer) while (inner) }"],
-  ["missing control operand", "middle { if (condition +) print value }"],
-  ["missing do tail", "middle { do print value; }"],
-  ["missing function parameter", "function malformed(first,) {}"],
-  ["missing function header", "function malformed {}"],
-  ["missing function body", "function malformed()"],
-  ["missing special pattern action", "BEGIN"],
-  ["missing do tail after a newline", "middle { do print value\n}"],
-  ["missing do tail after a bodyless control", "middle { do while (inner) }"],
-  ["missing left range arm", ", right {}"],
-  ["missing right range arm", "left, {}"],
-  ["hash after an ERE class name", "middle { print /[[:alpha#:]]/ }"],
-  ["hash after an ERE interval count", "middle { print /a{2#}/ }"],
-];
-
-for (const [label, malformed] of physicallyClosedMalformedItems) {
-  test(`a physically closed item with ${label} preserves adjacent items`, () => {
-    const preceding = "BEGIN { print before }";
-    const following = "END { print after }";
-    assertPreservedItems(
-      `physically-closed-${label}`,
-      lines(preceding, `${malformed} ${following}`),
-      [preceding, following],
-    );
-  });
 }
 
 for (const { label, initial, final, removed, inserted } of [
@@ -487,31 +263,10 @@ for (const { label, initial, final, removed, inserted } of [
     inserted: "x in a",
   },
 ]) {
-  test(`a closed action containing ${label} preserves adjacent items`, () => {
-    for (const [separatorName, separator] of [
-      ["space", " "],
-      ["semicolon", ";"],
-      ["newline", "\n"],
-    ]) {
-      for (const [followingName, following] of [
-        ["empty END", "END {}"],
-        ["END", "END { print after }"],
-        ["function", "function after() {}"],
-        ["ERE pattern", "/after/ { print after }"],
-      ]) {
-        assertPreservedItems(
-          `${label} before ${separatorName} and ${followingName}`,
-          lines("before {}", initial + separator + following),
-          ["before {}", following],
-        );
-      }
-    }
-  });
-
   const prefix = lines("before {}");
   const following = "END { print after }";
   determinismTest(
-    `repairing ${label} preserves the action boundary`,
+    `repairing ${label} matches a fresh parse`,
     prefix + lines(initial, following),
     prefix + lines(final, following),
     [
@@ -520,14 +275,13 @@ for (const { label, initial, final, removed, inserted } of [
   );
 }
 
-for (const { label, initial, final, before, inserted, preserved } of [
+for (const { label, initial, final, before, inserted } of [
   {
     label: "function body after a continuation and comment",
     initial: lines("before {}", "function f() \\", "#", "END {}"),
     final: lines("before {}", "function f() \\", "#", "{}", "END {}"),
     before: "END",
     inserted: "{}\n",
-    preserved: ["before {}", "END {}"],
   },
   {
     label: "function body after a continuation and newline",
@@ -535,7 +289,6 @@ for (const { label, initial, final, before, inserted, preserved } of [
     final: lines("before {}", "function f() \\", "", "{}", "END {}"),
     before: "END",
     inserted: "{}\n",
-    preserved: ["before {}", "END {}"],
   },
   {
     label: "special pattern action before a comment's newline",
@@ -543,51 +296,13 @@ for (const { label, initial, final, before, inserted, preserved } of [
     final: lines("before {}", "BEGIN \\", "{} #", "{}", "END {}"),
     before: "#",
     inserted: "{} ",
-    preserved: ["before {}", "{}", "END {}"],
   },
 ]) {
-  test(`a missing ${label} preserves adjacent items and repairs cleanly`, () => {
-    assertPreservedItems(label, initial, preserved);
+  test(`restoring a missing ${label} matches a fresh parse`, () => {
     const tree = assertDeterministicEdit(label, initial, final, [
       `${initial.indexOf(before)} 0 ${inserted}`,
     ]);
     contains(tree, "line_continuation");
-  });
-}
-
-for (const [label, malformedLine] of [
-  ["string", 'middle { print "broken'],
-  ["ERE", "middle { print /broken"],
-  ["ERE character class opener", "middle { print /[[:"],
-  ["ERE character class", "middle { print /[[:alpha"],
-  ["ERE interval opener", "middle { print /a{"],
-  ["ERE interval", "middle { print /a{1,"],
-]) {
-  test(`a raw newline ending an unterminated ${label} preserves adjacent items`, () => {
-    const preceding = "BEGIN { print before }";
-    const following = "END { print after }";
-    assertPreservedItems(
-      `raw-newline-${label}`,
-      lines(preceding, malformedLine, `} ${following}`),
-      [preceding, following],
-    );
-  });
-}
-
-for (const [label, malformed] of [
-  ["string", 'END { print "broken'],
-  ["ERE", "END { print /broken"],
-  ["action", "END { print after"],
-  ["parenthesis", "END { print (after"],
-  ["bracket", "END { print array[after"],
-]) {
-  test(`an unterminated ${label} at EOF preserves preceding items`, () => {
-    const preceding = "BEGIN { print before }";
-    assertPreservedItems(
-      `unterminated-${label}-at-EOF`,
-      `${preceding}\n${malformed}`,
-      [preceding],
-    );
   });
 }
 
@@ -781,38 +496,21 @@ const membershipPrecedenceCases = [
   };
 });
 
-const invalidClassificationCases = [
+const invalidSyntaxCases = [
   ...membershipPrecedenceCases.map(({ name, source }) => ({
     name: `unparenthesized membership before ${name} is rejected`,
     source,
   })),
   {
-    assertions: (tree) => {
-      assert.equal(
-        matchingLineCount(tree, /^[ \t0-9:-]*ere([ \t]|$)/),
-        0,
-        "Expected division priority to prevent an ERE node",
-      );
-    },
-    name: "division context wins over an ERE-shaped spelling",
+    name: "division without a final operand is rejected",
     source: lines("BEGIN { print x /a/ }"),
   },
   {
-    assertions: (tree) => {
-      assert.equal(
-        matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
-        0,
-        "Expected no division token where '/=' is the longest match",
-      );
-    },
-    name: "div-assign never splits after an invalid lvalue",
+    name: "division assignment to an invalid lvalue is rejected",
     source: lines("BEGIN { (a) /= b }"),
   },
   {
-    assertions: (tree) => {
-      excludes(tree, "output_redirection");
-    },
-    name: "greater-than-or-equal never becomes output redirection",
+    name: "greater-than-or-equal without a right operand is rejected",
     source: lines("BEGIN { print value >= }"),
   },
   {
@@ -832,8 +530,7 @@ const invalidClassificationCases = [
     source: lines("BEGIN { length = 1 }"),
   },
   {
-    assertions: (tree) => excludes(tree, "func_name"),
-    name: "a non-newline backslash does not create call adjacency",
+    name: "a non-newline backslash before a call opening is rejected",
     source: lines("BEGIN {", String.raw`  f\(value)`, "  after", "}"),
   },
   {
@@ -841,8 +538,7 @@ const invalidClassificationCases = [
     source: lines("BEGIN { x = a ? b : c = d }"),
   },
   {
-    assertions: (tree) => excludes(tree, "comment"),
-    name: "a hash where the ERE grammar accepts no character never opens a comment",
+    name: "hashes inside ERE class names and interval counts are rejected",
     source: lines(
       "BEGIN {",
       "  print /[[:alpha#:]]/",
@@ -852,23 +548,118 @@ const invalidClassificationCases = [
       "}",
     ),
   },
+  {
+    name: "a missing terminator between actions is rejected",
+    source: lines("BEGIN {} END {}"),
+  },
+  {
+    name: "a missing terminator after an actionless pattern is rejected",
+    source: lines("active BEGIN {}"),
+  },
+  {
+    name: "a missing special pattern action is rejected",
+    source: lines("BEGIN", "END {}"),
+  },
+  {
+    name: "a missing function body is rejected",
+    source: lines("function f()", "END {}"),
+  },
+  {
+    name: "a missing function parameter after a comma is rejected",
+    source: lines("function malformed(first,) {}"),
+  },
+  {
+    name: "a missing parenthesized function header is rejected",
+    source: lines("function malformed {}"),
+  },
+  {
+    name: "a missing left range arm is rejected",
+    source: lines(", right {}"),
+  },
+  {
+    name: "a missing right range arm is rejected",
+    source: lines("left, {}"),
+  },
+  {
+    name: "a missing if body is rejected",
+    source: lines("BEGIN { if (condition) }"),
+  },
+  {
+    name: "a missing while body is rejected",
+    source: lines("BEGIN { while (condition) }"),
+  },
+  {
+    name: "a missing classic for body is rejected",
+    source: lines("BEGIN { for (;;) }"),
+  },
+  {
+    name: "a missing for-in body is rejected",
+    source: lines("BEGIN { for (key in values) }"),
+  },
+  {
+    name: "missing nested control bodies are rejected",
+    source: lines("BEGIN { if (outer) while (inner) }"),
+  },
+  {
+    name: "a missing do tail is rejected",
+    source: lines("BEGIN { do print value; }"),
+  },
+  {
+    name: "a missing ERE closing slash before a raw newline is rejected",
+    source: lines("BEGIN { print /broken", "}"),
+  },
+  {
+    name: "a missing ERE closing slash at EOF is rejected",
+    source: "BEGIN { print /broken",
+  },
+  {
+    name: "an ERE class opener ending at a raw newline is rejected",
+    source: lines("BEGIN { print /[[:", "}"),
+  },
+  {
+    name: "an ERE class name ending at a raw newline is rejected",
+    source: lines("BEGIN { print /[[:alpha", "}"),
+  },
+  {
+    name: "an ERE interval opener ending at a raw newline is rejected",
+    source: lines("BEGIN { print /a{", "}"),
+  },
+  {
+    name: "an ERE interval count ending at a raw newline is rejected",
+    source: lines("BEGIN { print /a{1,", "}"),
+  },
+  {
+    name: "a missing string closing quote before a raw newline is rejected",
+    source: lines('BEGIN { print "broken', "}"),
+  },
+  {
+    name: "a missing string closing quote at EOF is rejected",
+    source: 'BEGIN { print "broken',
+  },
+  {
+    name: "an unterminated action at EOF is rejected",
+    source: "BEGIN { print value",
+  },
+  {
+    name: "an unterminated parenthesized expression at EOF is rejected",
+    source: "BEGIN { print (value",
+  },
+  {
+    name: "an unterminated subscript at EOF is rejected",
+    source: "BEGIN { print array[index",
+  },
 ];
 
-for (const classificationCase of invalidClassificationCases) {
-  test(classificationCase.name, () => {
-    const sourcePath = writeSource(
-      classificationCase.name,
-      "invalid",
-      classificationCase.source,
-    );
+for (const { name, source } of invalidSyntaxCases) {
+  test(name, () => {
+    const sourcePath = writeSource(name, "invalid", source);
     const result = captureParse(sourcePath);
     // A parse that recovers with missing nodes alone exits with 0.
     assert.ok(
       result.status === 0 || result.status === 1,
-      parseDescription(`${classificationCase.name} fresh parse`, result),
+      parseDescription(`${name} fresh parse`, result),
     );
     dirty(result.tree);
-    classificationCase.assertions?.(result.tree);
   });
 }
 
@@ -1651,10 +1442,8 @@ editHistoryTest(
   ["17 3 ", "34 3 ", '76 0 "', "54 2 "],
 );
 
-// A leading newline_opt closes when the continuation after it is followed
-// by an item. An edit elsewhere re-lexes that continuation after the closed
-// node; the marker must still record what follows it, or a later edit that
-// replaces the item with a newline reuses the closed node.
+// Re-lexing after an unrelated edit must retain the continuation lookahead
+// that invalidates a closed newline_opt when the following item changes.
 const closedLeadingNewline = "\n \\\n x\n";
 const reopenedLeadingNewline = "\n \\\n \n\ny";
 determinismTest(

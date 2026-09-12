@@ -123,7 +123,7 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "class_name",
@@ -162,7 +162,7 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "collating_element",
@@ -245,7 +245,7 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "collating_element",
@@ -260,7 +260,7 @@
     "fields": {
       "closing": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "/",
@@ -270,7 +270,7 @@
       },
       "expression": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "extended_reg_exp",

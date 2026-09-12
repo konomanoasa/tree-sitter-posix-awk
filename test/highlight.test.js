@@ -12,8 +12,6 @@ const {
 const fixture = path.join(repositoryDirectory, "test", "highlight", "awk.awk");
 const query = path.join(repositoryDirectory, "queries", "highlights.scm");
 
-// One environment for every command, so the CLI compiles the parser once and
-// every capture name has a distinct theme color for the HTML probe below.
 let environment;
 
 before(() => {
@@ -51,8 +49,7 @@ function assertCommand(args) {
 }
 
 test("highlight query", () => {
-  // Assertions also match nodes inside ERROR subtrees, so an invalid fixture
-  // could keep passing; require an error-free parse first.
+  // Query assertions can pass inside ERROR subtrees; validate the fixture first.
   assertCommand(["parse", "--quiet", fixture]);
   assertCommand([
     "highlight",
@@ -65,10 +62,8 @@ test("highlight query", () => {
   assertCommand(["query", "--test", query, fixture]);
 });
 
-// `query --test` passes when any capture at a position matches, so it cannot
-// see which of several overlapping captures a consumer renders. Resolve the
-// final capture per character from the highlighter's own HTML output: the
-// innermost span wins, exactly as in editors.
+// `query --test` accepts any matching capture. Use rendered HTML to check
+// which overlapping capture actually wins.
 const finalCaptureCases = [
   { column: 9, expected: "function", label: "spaced definition name", row: 0 },
   {

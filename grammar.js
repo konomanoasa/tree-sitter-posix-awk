@@ -12,13 +12,8 @@ const PRECEDENCE = {
   field: 22,
 };
 
-// Every line continuation is preceded by a scanner marker naming what
-// follows it. The marker carries the lookahead that chose the owner, so a
-// reused subtree can never keep a continuation whose target has changed,
-// and the parser never has to guess which construct owns the continuation.
-// Each marker is an external token named after its target, with one hidden
-// rule for the continuations it introduces so that every use of a marker
-// shares the same parse states.
+// Markers record lookahead so edits to a continuation target invalidate
+// reused subtrees. Shared hidden rules keep marker uses in the same parse states.
 const CONTINUATION_TARGETS = [
   "operator",
   "additive_operator",
@@ -58,9 +53,6 @@ const continuationRules = Object.fromEntries(
   ]),
 );
 
-// Keywords the scanner lexes as `_<keyword>_word` and the CST exposes as
-// `<keyword>_keyword`, in the order of the scanner's token enum. `getline`
-// and `in` also have promoted scanner tokens, so their rules are spelled out.
 const KEYWORDS = [
   "begin",
   "end",
@@ -88,8 +80,6 @@ const keywordRules = Object.fromEntries(
   ]),
 );
 
-// POSIX named two-character tokens: the scanner lexes `_<name>_operator` and
-// the CST exposes `<name>`, in the order of the scanner's token enum.
 const TWO_CHARACTER_TOKENS = [
   "div_assign",
   "add_assign",
@@ -141,30 +131,17 @@ const continuedExpressionMember = ($, member) =>
 const continuedExpression = ($, name, expression) =>
   continuedExpressionMember($, field(name, expression));
 
-const requiredAfterOptionalNewline = (
-  $,
-  targetGuard,
-  present,
-  required = present,
-) =>
-  choice(
-    seq(newlineContinuations($), targetGuard, $.newline_opt, present),
-    required,
-  );
+const afterOptionalNewline = ($, present, required = present) =>
+  choice(seq(newlineContinuations($), $.newline_opt, present), required);
 
 const functionBody = ($) =>
-  requiredAfterOptionalNewline(
+  afterOptionalNewline(
     $,
-    $._action_target_guard,
     continuedMember($, "action", field("body", $.action)),
   );
 
 const requiredParameter = ($) =>
-  requiredAfterOptionalNewline(
-    $,
-    $._parameter_target_guard,
-    continuedExpressionMember($, $.name),
-  );
+  afterOptionalNewline($, continuedExpressionMember($, $.name));
 
 const continuedParameter = ($) =>
   seq(continuedMember($, "comma", ","), requiredParameter($));
@@ -172,9 +149,7 @@ const continuedParameter = ($) =>
 const ereEscapeWithCharacter = ($, character) =>
   seq($._ere_escape_start, $._escape_introducer, character);
 
-// A hyphen right before the closing bracket is a distinct token, so a
-// trailing hyphen, a range ending in a hyphen, and a range separator never
-// compete for the same source.
+// A separate closing-hyphen token avoids competing with range separators.
 const ereClosingHyphen = ($) => alias($._ere_closing_hyphen, "-");
 
 const ereBracketListAlternatives = ($, followList) => [
@@ -182,17 +157,12 @@ const ereBracketListAlternatives = ($, followList) => [
   seq(followList, ereClosingHyphen($)),
 ];
 
-// XBD 9.5.2: range_expression : start_range end_range | start_range '-'.
-// The ending hyphen is a literal wherever it stands, not only before the
-// closing bracket ("[%--@]" ranges from '%' to '-' and then lists '@').
 const ereRangeExpressionWith = ($, startRange) =>
   seq(
     startRange,
     choice($.end_range, ereClosingHyphen($), $._ere_bracket_hyphen),
   );
 
-// Bracket expressions whose first element is a literal "]" or "-" repeat the
-// follow_list hierarchy with that element in the first position.
 const initialFollowListRules = (prefix, firstElement) => {
   const name = (part) => `_initial_${prefix}_${part}`;
   return {
@@ -226,15 +196,6 @@ const ereCompoundOpening = ($, punctuation) =>
 const ereCompoundClosing = (guard, punctuation) =>
   seq(guard, token.immediate(punctuation), token.immediate("]"));
 
-// A raw newline or EOF ends a static ERE, or its compound bracket form,
-// lexically; the scanner's zero-width lexical end stands in for the absent
-// closing, so the ERE never owns the source that follows the newline.
-const ereRequiredPayload = ($, payload, closing) =>
-  choice($._ere_lexical_end, seq(payload, choice(closing, $._ere_lexical_end)));
-
-const ereCompound = ($, opening, payload, closing) =>
-  seq(opening, ereRequiredPayload($, payload, closing));
-
 const header = ($, keyword, rest) => seq(keyword, rest, newlineLayout($));
 
 const conditionalHeader = ($, keyword) =>
@@ -253,8 +214,6 @@ const continuedDoTail = ($) => continuedMember($, "do_tail", doWhileTail($));
 const continuedSimpleStatement = ($, name) =>
   continuedMember($, "simple_statement", field(name, $.simple_statement));
 
-// A conditional without else is right associative so that an else binds to
-// the nearest if (POSIX) by shifting instead of closing the inner statement.
 const controlStatements = ($, body) => [
   prec.right(
     seq($._if_header, continuedStatement($, field("consequence", body))),
@@ -268,12 +227,6 @@ const controlStatements = ($, body) => [
   seq($._while_header, continuedStatement($, field("body", body))),
   seq($._for_header, continuedStatement($, field("body", body))),
 ];
-
-// These zero-width tokens prevent recovery from absorbing the next item's
-// action as a missing member of this item.
-const missingStatement = ($) => $._statement_recovery;
-
-const missingAction = ($) => $._action_recovery;
 
 const statementTerminatedBy = ($, target, terminator) =>
   seq(
@@ -321,23 +274,6 @@ const subscript = ($, subscripts) =>
     $._continued_close_bracket,
   );
 
-// Another item follows an item without a terminator: the scanner's
-// zero-width boundary stands in for the absent terminator (see
-// missingStatement), so both items keep their own CST.
-const itemEnd = ($, boundary) =>
-  choice(
-    seq(
-      optional(
-        choice(
-          continuationsBefore($, "newline"),
-          continuationsBefore($, "semicolon"),
-        ),
-      ),
-      field("terminator", $.terminator),
-    ),
-    seq(optionalContinuationsBefore($, "item"), boundary),
-  );
-
 const terminatedStatements = ($) =>
   seq(
     $.terminated_statement,
@@ -372,12 +308,9 @@ const EXPRESSION_CONTEXT = {
 const classTierName = (context, classification, tier) =>
   `_${context.prefix}_${classification}_${tier}_expr`;
 
-// Operand rules are visible but only ever referenced through an alias, so
-// tree-sitter names their symbol after the alias and node-types.json never
-// lists them. Hidden rules would work too, but a hidden child makes the
-// parent inherit the child's fields, and ts_node_child_by_field_name would
-// then descend into the operand instead of returning the parent's own
-// member (an inner `right` for the outer `right`).
+// Hidden operand rules would forward child fields into the parent, making
+// ts_node_child_by_field_name return an inner operand. Visible rules with
+// aliases preserve field ownership without exposing extra node types.
 const classOperandName = (context, classification, tier) =>
   `${context.prefix}_${classification}_${tier}_operand`;
 
@@ -401,9 +334,6 @@ const CLASSIFICATIONS = ["unary", "non_unary"];
 const aliasedAnyTier = ($, context, tier) =>
   alias($[anyTierName(context, tier)], $[context.expression]);
 
-const expressionTargetGuard = ($, context) =>
-  context.input ? $._expression_target_guard : $._print_expression_target_guard;
-
 const nonUnaryAtom = ($, context) => {
   const atoms = [
     $._parenthesized_expression,
@@ -426,8 +356,7 @@ const tieredExpressionRules = (context) => {
   const unary = (tier) => classTierName(context, "unary", tier);
   const nonUnary = (tier) => classTierName(context, "non_unary", tier);
   const any = (tier) => anyTierName(context, tier);
-  // The operand outranks the pass-through to the next tier, so a complete
-  // operand closes as soon as its operator arrives.
+  // Reduce a complete operand before passing through to the next tier.
   const addOperand = (classification, tier) => {
     rules[classOperandName(context, classification, tier)] = ($) =>
       prec(1, classTier($, context, classification, tier));
@@ -553,9 +482,6 @@ const tieredExpressionRules = (context) => {
       ),
     );
 
-  // The alternative is itself a conditional (right associative), so a lower
-  // precedence assignment never nests inside it: "a ? b : c = d" is invalid,
-  // as it is after every other operator.
   addAnyTier("conditional");
   for (const classification of CLASSIFICATIONS) {
     addOperand(classification, "logical_or");
@@ -578,9 +504,8 @@ const tieredExpressionRules = (context) => {
     rules[tail] = ($) =>
       seq(
         operator($),
-        requiredAfterOptionalNewline(
+        afterOptionalNewline(
           $,
-          expressionTargetGuard($, context),
           continuedExpression($, "right", aliasedAnyTier($, context, nextTier)),
           requiredTier($, "right", nextTier),
         ),
@@ -761,24 +686,14 @@ const tieredExpressionRules = (context) => {
 const normalExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.normal);
 const printExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.print);
 
-const continuedListElementWith = ($, targetGuard, element) =>
+const continuedListElement = ($, element) =>
   seq(
     continuedMember($, "comma", ","),
-    requiredAfterOptionalNewline(
-      $,
-      targetGuard,
-      continuedExpressionMember($, element),
-    ),
+    afterOptionalNewline($, continuedExpressionMember($, element)),
   );
-
-const continuedListElement = ($, element) =>
-  continuedListElementWith($, $._expression_target_guard, element);
 
 const continuedPipeGet = ($) =>
   continuedExpressionMember($, field("get", $.simple_get));
-
-const continuedPrintListElement = ($, element) =>
-  continuedListElementWith($, $._print_expression_target_guard, element);
 
 module.exports = grammar({
   name: "posix_awk",
@@ -801,12 +716,6 @@ module.exports = grammar({
     ...TWO_CHARACTER_TOKENS.map((name) => $[`_${name}_operator`]),
     $._output_greater_guard,
     ...CONTINUATION_TARGETS.map((target) => $[`_lc_before_${target}`]),
-    $._closed_item_boundary,
-    $._normal_pattern_item_boundary,
-    $._statement_recovery,
-    $._action_closing,
-    $._action_end,
-    $._action_recovery,
     $._ere_compound_open_guard,
     $._ere_dot_close_guard,
     $._ere_equal_close_guard,
@@ -815,15 +724,10 @@ module.exports = grammar({
     $._ere_escaped_delimiter_start,
     $._ere_escaped_delimiter_end,
     $._ere_closing_hyphen,
-    $._ere_lexical_end,
     $._ere_closing,
     $._string_opening,
     $._string_end,
     $.comment,
-    $._expression_target_guard,
-    $._print_expression_target_guard,
-    $._action_target_guard,
-    $._parameter_target_guard,
     $._error_sentinel,
   ],
 
@@ -914,10 +818,7 @@ module.exports = grammar({
 
     _continued_input_pipe: ($) => continuedMember($, "input_pipe", "|"),
 
-    // POSIX item_list is left recursive with the terminator inside each step,
-    // so the parser never has to close the list before it knows whether the
-    // next item is terminated. Keeping that shape (and hiding the recursion
-    // behind one alias) leaves the grammar LR(1) at every item boundary.
+    // Keeping termination in the recursive step makes item boundaries LR(1).
     _item_list: ($) =>
       choice(
         field("leading", $.newline_opt),
@@ -934,24 +835,19 @@ module.exports = grammar({
       ),
 
     _terminated_item: ($) =>
-      choice(
-        seq(
-          field("item", alias($._closed_item, $.item)),
-          itemEnd($, $._closed_item_boundary),
+      seq(
+        field("item", $._item),
+        optional(
+          choice(
+            continuationsBefore($, "newline"),
+            continuationsBefore($, "semicolon"),
+          ),
         ),
-        seq(
-          field("item", alias($._normal_pattern_item, $.item)),
-          itemEnd($, $._normal_pattern_item_boundary),
-        ),
+        field("terminator", $.terminator),
       ),
 
     _closed_item: ($) =>
-      choice(
-        $._action_item,
-        $._pattern_action_item,
-        $._special_pattern_item,
-        $._function_item,
-      ),
+      choice($._action_item, $._pattern_action_item, $._function_item),
 
     _action_item: ($) => field("action", $.action),
 
@@ -961,20 +857,9 @@ module.exports = grammar({
         continuedMember($, "action", field("action", $.action)),
       ),
 
-    // A special pattern requires an action, while a normal pattern alone is
-    // an item, so only the special pattern's `pattern` stands without one.
-    _special_pattern_item: ($) =>
-      seq(
-        field("pattern", alias($._special_pattern, $.pattern)),
-        missingAction($),
-      ),
-
-    _special_pattern: ($) => $.special_pattern,
-
     _normal_pattern_item: ($) => field("pattern", $.normal_pattern),
 
-    _function_item: ($) =>
-      seq($._function_header, choice(functionBody($), missingAction($))),
+    _function_item: ($) => seq($._function_header, functionBody($)),
 
     _function_header_prefix: ($) =>
       seq(
@@ -1005,11 +890,7 @@ module.exports = grammar({
         seq(
           field("left", $.expr),
           continuedMember($, "comma", field("separator", ",")),
-          requiredAfterOptionalNewline(
-            $,
-            $._expression_target_guard,
-            continuedExpression($, "right", $.expr),
-          ),
+          afterOptionalNewline($, continuedExpression($, "right", $.expr)),
         ),
       ),
 
@@ -1034,8 +915,7 @@ module.exports = grammar({
           ),
         ),
         optionalContinuationsBefore($, "close_brace"),
-        field("closing", alias($._action_closing, "}")),
-        $._action_end,
+        field("closing", "}"),
       ),
 
     terminated_statement_list: ($) => terminatedStatements($),
@@ -1087,9 +967,6 @@ module.exports = grammar({
 
     terminated_statement: ($) =>
       choice(
-        seq($._if_header, missingStatement($)),
-        seq($._while_header, missingStatement($)),
-        seq($._for_header, missingStatement($)),
         seq($.action, newlineLayout($)),
         $._self_terminating_statement,
         seq(field("terminator", ";"), newlineLayout($)),
@@ -1115,7 +992,7 @@ module.exports = grammar({
         seq(
           $._do_header,
           continuedStatement($, field("body", $.terminated_statement)),
-          choice(continuedDoTail($), missingStatement($)),
+          continuedDoTail($),
         ),
       ),
 
@@ -1166,7 +1043,7 @@ module.exports = grammar({
       ),
 
     print_expr_list: ($) =>
-      seq($.print_expr, repeat(continuedPrintListElement($, $.print_expr))),
+      seq($.print_expr, repeat(continuedListElement($, $.print_expr))),
 
     expr_list: ($) => choice($.expr, $.multiple_expr_list),
 
@@ -1199,7 +1076,6 @@ module.exports = grammar({
 
     ...printExpressionRules,
 
-    // Visible only through aliases; see classOperandName.
     normal_field_expr: ($) =>
       choice(
         alias($.normal_unary_field_expr, $.unary_expr),
@@ -1313,16 +1189,8 @@ module.exports = grammar({
     ere: ($) =>
       seq(
         field("opening", alias($._ere_opening_slash, "/")),
-        choice(
-          seq(
-            field("expression", $.extended_reg_exp),
-            field("closing", alias($._ere_closing, "/")),
-          ),
-          seq(
-            optional(field("expression", $.extended_reg_exp)),
-            $._ere_lexical_end,
-          ),
-        ),
+        field("expression", $.extended_reg_exp),
+        field("closing", alias($._ere_closing, "/")),
       ),
 
     extended_reg_exp: ($) =>
@@ -1403,14 +1271,9 @@ module.exports = grammar({
     _ere_interval: ($) =>
       seq(
         token.immediate("{"),
-        ereRequiredPayload(
-          $,
-          seq(
-            $.dup_count,
-            optional(seq(token.immediate(","), optional($.dup_count))),
-          ),
-          $._ere_close_brace,
-        ),
+        $.dup_count,
+        optional(seq(token.immediate(","), optional($.dup_count))),
+        $._ere_close_brace,
       ),
 
     dup_count: ($) => $._number_digit_chunk,
@@ -1443,9 +1306,8 @@ module.exports = grammar({
 
     ...initialFollowListRules("hyphen", ($) => $._ere_initial_hyphen),
 
-    // The alias nearest a token wins, so aliasing this choice inline would
-    // let the closing hyphen's anonymous alias replace the collating_element
-    // wrapper; the hidden rule keeps the wrapper for both hyphen tokens.
+    // Inlining this choice would let the anonymous hyphen alias replace the
+    // collating_element wrapper.
     _ere_initial_hyphen: ($) =>
       choice($._ere_bracket_hyphen, ereClosingHyphen($)),
 
@@ -1472,8 +1334,7 @@ module.exports = grammar({
       ),
 
     collating_symbol: ($) =>
-      ereCompound(
-        $,
+      seq(
         $._ere_open_dot,
         choice(
           alias($._ere_compound_collating_element, $.collating_element),
@@ -1483,8 +1344,7 @@ module.exports = grammar({
       ),
 
     equivalence_class: ($) =>
-      ereCompound(
-        $,
+      seq(
         $._ere_open_equal,
         choice(
           alias($._ere_compound_collating_element, $.collating_element),
@@ -1494,7 +1354,7 @@ module.exports = grammar({
       ),
 
     character_class: ($) =>
-      ereCompound($, $._ere_open_colon, $.class_name, $._ere_colon_close),
+      seq($._ere_open_colon, $.class_name, $._ere_colon_close),
 
     class_name: ($) => $._ere_class_name_spelling,
 
@@ -1561,11 +1421,6 @@ module.exports = grammar({
 
     // Tree-sitter rejects the POSIX bracket spelling for these delimiter
     // characters, so the exclusion sets use its hexadecimal regex escape.
-    // Every ERE token is immediate and the comment is external, so no extra
-    // competes here; a lexical precedence marks the token that wins where two
-    // ERE spellings of one character are valid in the same state: a closing
-    // delimiter over the ordinary character, the negation over the bracket
-    // character, and a defined escape over the undefined one.
     _ordinary_character: () => token.immediate(/[^.\x5B\x5C*^$+?{|}()/\n]/),
 
     _ere_ordinary_close_parenthesis: () => token.immediate(")"),

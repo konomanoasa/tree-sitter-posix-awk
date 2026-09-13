@@ -3,7 +3,9 @@ import { test } from "node:test";
 import {
   applyEdits,
   assertDeterministicEdit,
+  assertStatus,
   captureParse,
+  clean,
   cleanContinuation,
   contains,
   determinismTest,
@@ -11,6 +13,7 @@ import {
   excludes,
   freshTest,
   hasRecovery,
+  hasSplitToken,
   lines,
   matchingLineCount,
   writeSource,
@@ -1219,6 +1222,154 @@ determinismTest(
   [{ byte: 9, deleteBytes: 2, insert: " " }],
 );
 
+function splitTokenHistoryTest(name, initialSource, steps) {
+  test(`posix_awk: ${name}`, () => {
+    const initial = writeSource(name, "initial", initialSource);
+    const edits = [];
+    for (const [index, step] of steps.entries()) {
+      edits.push(...step.edits);
+      const label = `${name}, edit ${index + 1}`;
+      assert.deepEqual(
+        applyEdits(initialSource, edits),
+        Buffer.from(step.source),
+        label,
+      );
+      const fresh = captureParse(writeSource(name, "expected", step.source));
+      const incremental = captureParse(initial, edits);
+      for (const result of [fresh, incremental]) {
+        assert.ok(result.status === 0 || result.status === 1, label);
+        if (step.split) {
+          assert.ok(
+            hasSplitToken(result.tree) || hasRecovery(result.tree),
+            `${label}\n${result.tree}`,
+          );
+        } else {
+          assertStatus(label, result, 0);
+          clean(result.tree);
+        }
+      }
+      if (!step.split) assert.equal(incremental.tree, fresh.tree, label);
+    }
+  });
+}
+
+for (const [name, before, after] of [
+  ["keyword", "BE", "GIN {}\n"],
+  ["name", "BEGIN { print va", "lue }\n"],
+  ["built-in name", "BEGIN { print len", "gth(x) }\n"],
+  ["assignment operator", "BEGIN { x +", "= 1 }\n"],
+  ["exponent", "BEGIN { print 1e+", "2 }\n"],
+  ["number suffix", "BEGIN { print 1.0", "F }\n"],
+  ["string", 'BEGIN { print "a', 'b" }\n'],
+  ["ERE bracket", "BEGIN { print /[a", "-z]/ }\n"],
+]) {
+  const initial = before + after;
+  const split = `${before}\\\n${after}`;
+  const prefix = "# shifted source\n";
+  splitTokenHistoryTest(
+    `${name} splits remain detectable after a prefix edit and disappear after repair`,
+    initial,
+    [
+      {
+        edits: [{ byte: before.length, deleteBytes: 0, insert: "\\\n" }],
+        source: split,
+        split: true,
+      },
+      {
+        edits: [{ byte: 0, deleteBytes: 0, insert: prefix }],
+        source: prefix + split,
+        split: true,
+      },
+      {
+        edits: [
+          { byte: prefix.length + before.length, deleteBytes: 2, insert: "" },
+        ],
+        source: prefix + initial,
+        split: false,
+      },
+      {
+        edits: [{ byte: 0, deleteBytes: prefix.length, insert: "" }],
+        source: initial,
+        split: false,
+      },
+    ],
+  );
+}
+
+splitTokenHistoryTest(
+  "quotes change a safe continuation into a string split and back",
+  lines("{ print a\\", "+b }"),
+  [
+    {
+      edits: [
+        { byte: 13, deleteBytes: 0, insert: '"' },
+        { byte: 8, deleteBytes: 0, insert: '"' },
+      ],
+      source: lines('{ print "a\\', '+b" }'),
+      split: true,
+    },
+    {
+      edits: [
+        { byte: 14, deleteBytes: 1, insert: "" },
+        { byte: 8, deleteBytes: 1, insert: "" },
+      ],
+      source: lines("{ print a\\", "+b }"),
+      split: false,
+    },
+  ],
+);
+
+splitTokenHistoryTest(
+  "a slash changes a division gap into an ERE split and back",
+  lines("{ print x /\\", "a/ + b }"),
+  [
+    {
+      edits: [{ byte: 10, deleteBytes: 0, insert: "~ " }],
+      source: lines("{ print x ~ /\\", "a/ + b }"),
+      split: true,
+    },
+    {
+      edits: [{ byte: 10, deleteBytes: 2, insert: "" }],
+      source: lines("{ print x /\\", "a/ + b }"),
+      split: false,
+    },
+  ],
+);
+
+splitTokenHistoryTest(
+  "a comment marker changes continuation detection without retaining scanner state",
+  lines("{", "# fo\\", "o", "}"),
+  [
+    {
+      edits: [{ byte: 2, deleteBytes: 2, insert: "" }],
+      source: lines("{", "fo\\", "o", "}"),
+      split: true,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 0, insert: "# " }],
+      source: lines("{", "# fo\\", "o", "}"),
+      split: false,
+    },
+  ],
+);
+
+splitTokenHistoryTest(
+  "a blank separates a split word into two tokens and back",
+  lines("{ f\\", "oo(x) }"),
+  [
+    {
+      edits: [{ byte: 3, deleteBytes: 0, insert: " " }],
+      source: lines("{ f \\", "oo(x) }"),
+      split: false,
+    },
+    {
+      edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
+      source: lines("{ f\\", "oo(x) }"),
+      split: true,
+    },
+  ],
+);
+
 function createEditHistoryGenerator() {
   let seed = 1n;
   function next(maximum) {
@@ -1310,7 +1461,12 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
     for (const result of [fresh, incremental]) {
       assert.ok(result.status === 0 || result.status === 1, history.context);
     }
-    if (fresh.status === 0 && !hasRecovery(fresh.tree)) {
+    if (hasSplitToken(fresh.tree)) {
+      assert.ok(
+        hasSplitToken(incremental.tree) || hasRecovery(incremental.tree),
+        history.context,
+      );
+    } else if (fresh.status === 0 && !hasRecovery(fresh.tree)) {
       assert.equal(incremental.status, 0, history.context);
       assert.equal(hasRecovery(incremental.tree), false, history.context);
       assert.equal(incremental.tree, fresh.tree, history.context);

@@ -91,3 +91,32 @@ BEGIN { print 0x10 }
                         (non_unary_print_expr
                           (lvalue
                             (name)))))))))))))))
+
+==================
+an integer followed by a continued name retains both tokens
+==================
+1\
+f
+---
+
+(program
+  (item
+    (normal_pattern
+      (expr
+        (non_unary_expr
+          (non_unary_expr
+            (number))
+          (line_continuation)
+          (non_unary_expr
+            (lvalue
+              (name))))))))
+
+==================
+split decimal digits expose a named marker
+==================
+1\
+2
+---
+
+(program
+  (split_token))

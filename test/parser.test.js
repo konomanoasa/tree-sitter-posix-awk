@@ -15,6 +15,8 @@ import {
   determinismTest,
   dirty,
   freshTest,
+  hasRecovery,
+  hasSplitToken,
   lines,
   nativeLibrary,
   parseDescription,
@@ -202,6 +204,133 @@ test("posix_awk: actions, EREs and strings require one opening and closing token
     }
   }
 });
+
+test("posix_awk: split_token is a named extra leaf without fields", () => {
+  assert.deepEqual(
+    nodeTypes.find((node) => node.type === "split_token"),
+    { type: "split_token", named: true, extra: true },
+  );
+});
+
+for (const [name, source] of [
+  ["name", lines("{ print va\\", "lue }")],
+  ["function name", lines("{ fu\\", "nc(value) }")],
+  ["special pattern", lines("BE\\", "GIN {}")],
+  ["keyword", lines("fun\\", "ction f() {}")],
+  ["built-in name", lines("{ print len\\", "gth(value) }")],
+  ["repeated continuations in a name", lines("{ print va\\", "\\", "lue }")],
+  ["integer digits", lines("{ print 1\\", "2 }")],
+  ["decimal point", lines("{ print 1\\", ".2 }")],
+  ["leading decimal point", lines("{ print .\\", "2 }")],
+  ["fraction digits", lines("{ print 1.\\", "2 }")],
+  ["exponent marker", lines("{ print 1\\", "e2 }")],
+  ["exponent sign", lines("{ print 1e\\", "+2 }")],
+  ["exponent digits", lines("{ print 1e+\\", "2 }")],
+  ["fraction suffix", lines("{ print 1.\\", "f }")],
+  ["exponent suffix", lines("{ print 1e2\\", "L }")],
+  ["name after an incomplete exponent", lines("{ print 1e\\", "foo }")],
+  ["multiple number boundaries", lines("{ print 1\\", ".2e\\", "+\\", "3F }")],
+  ["string content", lines('{ print "a\\', 'b" }')],
+  ["string opening boundary", lines('{ print "\\', 'a" }')],
+  ["string closing boundary", lines('{ print "a\\', '" }')],
+  ["repeated continuations in a string", lines('{ print "a\\', "\\", 'b" }')],
+  ["ERE content", lines("{ print /a\\", "b/ }")],
+  ["ERE opening boundary", lines("{ print /\\", "a/ }")],
+  ["ERE closing boundary", lines("{ print /a\\", "/ }")],
+  ["ERE compound bracket form", lines("{ print /[[:al\\", "pha:]]/ }")],
+  ["ERE bracket range", lines("{ print /[a-\\", "z]/ }")],
+  ["ERE escaped delimiter boundary", lines("{ print /a\\\\", "/b/ }")],
+  ["division assignment", lines("{ x /\\", "= 1 }")],
+  ["addition assignment", lines("{ x +\\", "= 1 }")],
+  ["subtraction assignment", lines("{ x -\\", "= 1 }")],
+  ["multiplication assignment", lines("{ x *\\", "= 1 }")],
+  ["modulus assignment", lines("{ x %\\", "= 1 }")],
+  ["power assignment", lines("{ x ^\\", "= 1 }")],
+  ["logical or", lines("{ print x |\\", "| y }")],
+  ["logical and", lines("{ print x &\\", "& y }")],
+  ["non-match", lines("{ print x !\\", "~ y }")],
+  ["equality", lines("{ print x =\\", "= y }")],
+  ["less or equal", lines("{ print x <\\", "= y }")],
+  ["greater or equal", lines("{ print x >\\", "= y }")],
+  ["inequality", lines("{ print x !\\", "= y }")],
+  ["increment", lines("{ x +\\", "+ }")],
+  ["decrement", lines("{ x -\\", "- }")],
+  ["append", lines("{ print x >\\", "> file }")],
+]) {
+  test(`posix_awk: ${name} splits have a detection marker or recovery`, () => {
+    const result = captureParse(writeSource(name, "split", source));
+    assert.ok(result.status === 0 || result.status === 1, result.stdout);
+    assert.ok(
+      hasSplitToken(result.tree) || hasRecovery(result.tree),
+      result.tree,
+    );
+  });
+}
+
+for (const [name, source, expected] of [
+  ["integer and name", lines("{ print 1\\", "f }"), "number `1`"],
+  ["number and incomplete exponent", lines("{ print 1\\", "e+x }"), "name `e`"],
+  ["incomplete exponent and sign", lines("{ print 1e\\", "+x }"), "name `e`"],
+  [
+    "incomplete exponent sign and name",
+    lines("{ print 1e+\\", "x }"),
+    "name `x`",
+  ],
+  ["number suffix and name", lines("{ print 1.0f\\", "oo }"), "number `1.0f`"],
+  [
+    "repeated function-name gaps",
+    lines("{ f\\", "\\", "(x) }"),
+    "func_name `f`",
+  ],
+  ["spaced function-name gap", lines("{ f \\", "(x) }"), "name `f`"],
+  ["division and operand", lines("{ print x /\\", "y }"), '"/"'],
+  ["adjacent strings", lines('{ print "a"\\', '"b" }'), "string_content `b`"],
+  ["closed ERE and operator", lines("{ print /a/\\", "+ 1 }"), '"+"'],
+]) {
+  freshTest(
+    `a token-boundary continuation preserves ${name}`,
+    source,
+    (tree) => {
+      contains(tree, "line_continuation");
+      contains(tree, expected);
+    },
+  );
+}
+
+freshTest(
+  "comment backslashes do not create split tokens",
+  lines("# name\\", "BEGIN { # += \\", "print 1 }"),
+  (tree) => {
+    assert.equal(tree.includes("line_continuation"), false, tree);
+  },
+);
+
+for (const [name, source] of [
+  ["integer", lines(String.raw`{ print 1\2 }`)],
+  ["fraction", lines(String.raw`{ print 1.\2 }`)],
+  ["exponent", lines(String.raw`{ print 1e\2 }`)],
+  ["assignment", lines(String.raw`{ x +\= 1 }`)],
+  ["division assignment", lines(String.raw`{ x /\= 1 }`)],
+  [
+    "continuation followed by a raw backslash",
+    lines("{ print 1\\", String.raw`\2 }`),
+  ],
+]) {
+  test(`posix_awk: a raw backslash inside ${name} requires recovery`, () => {
+    const result = captureParse(writeSource(name, "raw-backslash", source));
+    assertStatus(name, result, 1);
+    dirty(result.tree);
+  });
+}
+
+freshTest(
+  "an ERE escape after its opening slash is not a continuation",
+  lines(String.raw`{ print /\=/, /\foo/ }`),
+  (tree) => {
+    contains(tree, "escape_sequence");
+    assert.equal(tree.includes("line_continuation"), false, tree);
+  },
+);
 
 test("posix_awk: range patterns expose one optional separator and two optional operands", () => {
   const node = nodeTypes.find(

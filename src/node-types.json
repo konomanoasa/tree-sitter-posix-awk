@@ -2722,6 +2722,11 @@
     "named": true
   },
   {
+    "type": "split_token",
+    "named": true,
+    "extra": true
+  },
+  {
     "type": "string_content",
     "named": true
   },

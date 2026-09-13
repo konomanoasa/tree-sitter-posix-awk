@@ -65,6 +65,7 @@ enum TokenType {
   STRING_OPENING,
   STRING_END,
   COMMENT,
+  SPLIT_TOKEN,
   ERROR_SENTINEL,
   TOKEN_TYPE_COUNT,
 };
@@ -251,20 +252,26 @@ static bool is_word_continue(int32_t character) {
   return is_word_start(character) || is_ascii_digit(character);
 }
 
-static bool advance_line_continuations(TSLexer *lexer) {
-  bool found = false;
+typedef enum {
+  CONTINUATION_NONE,
+  CONTINUATION_PAIRS,
+  CONTINUATION_INVALID,
+} ContinuationResult;
+
+static ContinuationResult advance_line_continuations(TSLexer *lexer) {
+  ContinuationResult result = CONTINUATION_NONE;
 
   while (lexer->lookahead == '\\') {
     lexer->advance(lexer, false);
     if (lexer->lookahead != '\n') {
-      return false;
+      return CONTINUATION_INVALID;
     }
 
     lexer->advance(lexer, false);
-    found = true;
+    result = CONTINUATION_PAIRS;
   }
 
-  return found;
+  return result;
 }
 
 // Skipping during lookahead would move the token start past its marked end.
@@ -295,7 +302,7 @@ static bool advance_boundary_gap_remainder(TSLexer *lexer) {
     if (lexer->lookahead != '\\') {
       return true;
     }
-    if (!advance_line_continuations(lexer)) {
+    if (advance_line_continuations(lexer) == CONTINUATION_INVALID) {
       return false;
     }
   }
@@ -372,9 +379,6 @@ static WordKind
 promote_word_kind(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
   switch (kind) {
   case WORD_KIND_NAME:
-    if (lexer->lookahead == '\\' && !advance_line_continuations(lexer)) {
-      return kind;
-    }
     if (lexer->lookahead == '(') {
       return WORD_KIND_FUNC_NAME;
     }
@@ -431,11 +435,23 @@ static bool word_spelling_is_valid(const bool *valid_symbols, WordKind kind) {
 
 static bool
 scan_word_token(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
+  lexer->mark_end(lexer);
+  const ContinuationResult continuation = advance_line_continuations(lexer);
+  if (continuation == CONTINUATION_INVALID) {
+    return emit_word_kind(lexer, valid_symbols, kind);
+  }
+  if (
+    continuation == CONTINUATION_PAIRS && is_word_continue(lexer->lookahead)
+  ) {
+    if (!valid_symbols[SPLIT_TOKEN]) {
+      return false;
+    }
+    lexer->mark_end(lexer);
+    return emit(lexer, SPLIT_TOKEN);
+  }
   if (!word_spelling_is_valid(valid_symbols, kind)) {
     return false;
   }
-
-  lexer->mark_end(lexer);
   return emit_word_kind(
     lexer,
     valid_symbols,
@@ -463,26 +479,46 @@ static enum TokenType number_kind_token(NumberKind kind) {
   }
 }
 
-static NumberKind accept_number(TSLexer *lexer, NumberKind kind) {
+static bool peek_number_continuations(TSLexer *lexer, bool *crossed) {
+  const ContinuationResult continuation = advance_line_continuations(lexer);
+  if (continuation == CONTINUATION_PAIRS) {
+    *crossed = true;
+  }
+  return continuation != CONTINUATION_INVALID;
+}
+
+static NumberKind
+accept_number(TSLexer *lexer, NumberKind kind, bool crossed, bool *split) {
   lexer->mark_end(lexer);
+  *split = crossed;
   return kind;
 }
 
-static NumberKind scan_number_kind(TSLexer *lexer) {
+static NumberKind scan_number_kind(TSLexer *lexer, bool *split) {
   NumberKind kind = NUMBER_KIND_NONE;
+  bool crossed = false;
 
   while (is_ascii_digit(lexer->lookahead)) {
     lexer->advance(lexer, false);
-    kind = accept_number(lexer, NUMBER_KIND_INTEGER);
+    kind = accept_number(lexer, NUMBER_KIND_INTEGER, crossed, split);
+    if (!peek_number_continuations(lexer, &crossed)) {
+      return kind;
+    }
   }
   if (lexer->lookahead == '.') {
     lexer->advance(lexer, false);
     if (kind != NUMBER_KIND_NONE) {
-      kind = accept_number(lexer, NUMBER_KIND_FRACTION);
+      kind = accept_number(lexer, NUMBER_KIND_FRACTION, crossed, split);
+    }
+    if (!peek_number_continuations(lexer, &crossed)) {
+      return kind;
     }
     while (is_ascii_digit(lexer->lookahead)) {
       lexer->advance(lexer, false);
-      kind = accept_number(lexer, NUMBER_KIND_FRACTION);
+      kind = accept_number(lexer, NUMBER_KIND_FRACTION, crossed, split);
+      if (!peek_number_continuations(lexer, &crossed)) {
+        return kind;
+      }
     }
   }
   if (kind == NUMBER_KIND_NONE) {
@@ -491,15 +527,24 @@ static NumberKind scan_number_kind(TSLexer *lexer) {
 
   if (lexer->lookahead == 'e' || lexer->lookahead == 'E') {
     lexer->advance(lexer, false);
+    if (!peek_number_continuations(lexer, &crossed)) {
+      return kind;
+    }
     if (lexer->lookahead == '+' || lexer->lookahead == '-') {
       lexer->advance(lexer, false);
+      if (!peek_number_continuations(lexer, &crossed)) {
+        return kind;
+      }
     }
     if (!is_ascii_digit(lexer->lookahead)) {
       return kind;
     }
     while (is_ascii_digit(lexer->lookahead)) {
       lexer->advance(lexer, false);
-      kind = accept_number(lexer, NUMBER_KIND_EXPONENT);
+      kind = accept_number(lexer, NUMBER_KIND_EXPONENT, crossed, split);
+      if (!peek_number_continuations(lexer, &crossed)) {
+        return kind;
+      }
     }
   }
   if (
@@ -514,7 +559,7 @@ static NumberKind scan_number_kind(TSLexer *lexer) {
       lexer->lookahead == 'L')
   ) {
     lexer->advance(lexer, false);
-    kind = accept_number(lexer, kind);
+    kind = accept_number(lexer, kind, crossed, split);
   }
   return kind;
 }
@@ -533,7 +578,8 @@ has_valid_composite_operator_start(int32_t first, const bool *valid_symbols) {
     if (
       COMPOSITE_OPERATORS[i].first ==
       first &&
-      valid_symbols[COMPOSITE_OPERATORS[i].token]
+      (valid_symbols[COMPOSITE_OPERATORS[i].token] ||
+        valid_symbols[SPLIT_TOKEN])
     ) {
       return true;
     }
@@ -559,9 +605,24 @@ static bool
 scan_composite_operator_start(TSLexer *lexer, const bool *valid_symbols) {
   const int32_t first = lexer->lookahead;
   lexer->advance(lexer, false);
+  const ContinuationResult continuation = advance_line_continuations(lexer);
+  if (continuation == CONTINUATION_INVALID) {
+    return false;
+  }
   const CompositeOperator *composite =
     find_composite_operator(first, lexer->lookahead);
-  if (composite == NULL || !valid_symbols[composite->token]) {
+  if (composite == NULL) {
+    return false;
+  }
+  if (continuation == CONTINUATION_PAIRS) {
+    if (!valid_symbols[SPLIT_TOKEN]) {
+      return false;
+    }
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit(lexer, SPLIT_TOKEN);
+  }
+  if (!valid_symbols[composite->token]) {
     return false;
   }
 
@@ -572,7 +633,8 @@ scan_composite_operator_start(TSLexer *lexer, const bool *valid_symbols) {
 
 static bool
 has_greater_start(const bool *valid_symbols, bool allow_zero_width_guard) {
-  return valid_symbols[GE_OPERATOR] ||
+  return valid_symbols[SPLIT_TOKEN] ||
+    valid_symbols[GE_OPERATOR] ||
     valid_symbols[APPEND_OPERATOR] ||
     (allow_zero_width_guard && valid_symbols[OUTPUT_GREATER_GUARD]);
 }
@@ -585,7 +647,20 @@ static bool scan_greater_start(
   bool allow_zero_width_guard
 ) {
   lexer->advance(lexer, false);
-  if (lexer->lookahead == '=') {
+  const ContinuationResult continuation = advance_line_continuations(lexer);
+  if (
+    continuation ==
+    CONTINUATION_PAIRS &&
+    (lexer->lookahead == '=' || lexer->lookahead == '>')
+  ) {
+    if (!valid_symbols[SPLIT_TOKEN]) {
+      return false;
+    }
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit(lexer, SPLIT_TOKEN);
+  }
+  if (continuation == CONTINUATION_NONE && lexer->lookahead == '=') {
     if (!valid_symbols[GE_OPERATOR]) {
       return false;
     }
@@ -593,7 +668,13 @@ static bool scan_greater_start(
     lexer->mark_end(lexer);
     return emit(lexer, GE_OPERATOR);
   }
-  if (lexer->lookahead == '>' && valid_symbols[APPEND_OPERATOR]) {
+  if (
+    continuation ==
+    CONTINUATION_NONE &&
+    lexer->lookahead ==
+    '>' &&
+    valid_symbols[APPEND_OPERATOR]
+  ) {
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
     return emit(lexer, APPEND_OPERATOR);
@@ -611,7 +692,19 @@ static bool scan_slash_start(
 ) {
   lexer->advance(lexer, false);
   lexer->mark_end(lexer);
-  if (lexer->lookahead == '=') {
+  const ContinuationResult continuation = advance_line_continuations(lexer);
+  if (
+    continuation ==
+    CONTINUATION_PAIRS &&
+    lexer->lookahead ==
+    '=' &&
+    valid_symbols[SPLIT_TOKEN]
+  ) {
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit(lexer, SPLIT_TOKEN);
+  }
+  if (continuation == CONTINUATION_NONE && lexer->lookahead == '=') {
     if (valid_symbols[DIV_ASSIGN_OPERATOR]) {
       lexer->advance(lexer, false);
       lexer->mark_end(lexer);
@@ -640,6 +733,11 @@ static bool scan_ere_backslash_context(
   }
 
   lexer->advance(lexer, false);
+  if (lexer->lookahead == '\n' && valid_symbols[SPLIT_TOKEN]) {
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit(lexer, SPLIT_TOKEN);
+  }
   if (valid_symbols[ERROR_SENTINEL]) {
     return false;
   }
@@ -785,6 +883,15 @@ static bool scan_string_context(
   const bool *valid_symbols
 ) {
   lexer->mark_end(lexer);
+  if (lexer->lookahead == '\\') {
+    lexer->advance(lexer, false);
+    if (lexer->lookahead == '\n' && valid_symbols[SPLIT_TOKEN]) {
+      lexer->advance(lexer, false);
+      lexer->mark_end(lexer);
+      return emit(lexer, SPLIT_TOKEN);
+    }
+    return false;
+  }
   const bool at_string_end =
     lexer->lookahead == '"' || lexer->lookahead == '\n' || lexer->eof(lexer);
   if (at_string_end && valid_symbols[STRING_END]) {
@@ -841,15 +948,22 @@ bool tree_sitter_posix_awk_external_scanner_scan(
     return scan_string_opening(state, lexer);
   }
 
-  if (is_word_start(lexer->lookahead) && has_word_token(valid_symbols)) {
+  if (
+    is_word_start(lexer->lookahead) &&
+    (has_word_token(valid_symbols) || valid_symbols[SPLIT_TOKEN])
+  ) {
     const WordKind kind = scan_word_spelling(lexer);
     return scan_word_token(lexer, valid_symbols, kind);
   }
   if (
     (is_ascii_digit(lexer->lookahead) || lexer->lookahead == '.') &&
-    has_number_token(valid_symbols)
+    (has_number_token(valid_symbols) || valid_symbols[SPLIT_TOKEN])
   ) {
-    const NumberKind kind = scan_number_kind(lexer);
+    bool split = false;
+    const NumberKind kind = scan_number_kind(lexer, &split);
+    if (split) {
+      return valid_symbols[SPLIT_TOKEN] && emit(lexer, SPLIT_TOKEN);
+    }
     return emit_number_kind(lexer, valid_symbols, kind);
   }
   if (
@@ -857,7 +971,8 @@ bool tree_sitter_posix_awk_external_scanner_scan(
     '/' &&
     (valid_symbols[DIVISION_SLASH] ||
       valid_symbols[ERE_OPENING_SLASH] ||
-      valid_symbols[DIV_ASSIGN_OPERATOR])
+      valid_symbols[DIV_ASSIGN_OPERATOR] ||
+      valid_symbols[SPLIT_TOKEN])
   ) {
     return scan_slash_start(state, lexer, valid_symbols);
   }

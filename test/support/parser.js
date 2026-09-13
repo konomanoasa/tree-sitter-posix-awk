@@ -195,6 +195,7 @@ const recoveryMarker = /^[0-9: \t-]+•/m;
 
 function clean(tree) {
   assert.doesNotMatch(tree, recoveryMarker, tree);
+  assert.equal(hasSplitToken(tree), false, tree);
 }
 
 function cleanContinuation(tree) {
@@ -279,6 +280,10 @@ function hasRecovery(cst) {
   return /^[0-9: \t-]+•/m.test(cst);
 }
 
+function hasSplitToken(cst) {
+  return /^[0-9: -]+split_token( |$)/m.test(cst);
+}
+
 export {
   applyEdits,
   assertDeterministicEdit,
@@ -293,6 +298,7 @@ export {
   excludes,
   freshTest,
   hasRecovery,
+  hasSplitToken,
   lines,
   matchingLineCount,
   nativeLibrary,

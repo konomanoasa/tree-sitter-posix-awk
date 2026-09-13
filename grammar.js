@@ -565,6 +565,7 @@ export default grammar({
     $._string_opening,
     $._string_end,
     $.comment,
+    $.split_token,
     $._error_sentinel,
   ],
 
@@ -572,6 +573,7 @@ export default grammar({
     token(repeat1(choice(" ", "\t"))),
     $.comment,
     $.line_continuation,
+    $.split_token,
   ],
 
   inline: ($) => [

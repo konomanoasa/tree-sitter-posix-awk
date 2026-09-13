@@ -6849,6 +6849,10 @@
     {
       "type": "SYMBOL",
       "name": "line_continuation"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "split_token"
     }
   ],
   "conflicts": [
@@ -7089,6 +7093,10 @@
     {
       "type": "SYMBOL",
       "name": "comment"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "split_token"
     },
     {
       "type": "SYMBOL",

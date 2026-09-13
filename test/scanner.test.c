@@ -298,6 +298,395 @@ static int test_source_token_ranges(void) {
   return failed;
 }
 
+static int test_split_token_boundaries(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    enum TokenType expected_symbol;
+    size_t expected_token_end;
+  } cases[] = {
+    {"split keyword", "BE\\\nGIN", SPLIT_TOKEN, 4},
+    {"split identifier", "value\\\n_tail", SPLIT_TOKEN, 7},
+    {"split builtin with repeated pairs", "len\\\n\\\ngth", SPLIT_TOKEN, 7},
+    {"continued user call stays adjacent", "follow\\\n(", FUNC_NAME_WORD, 6},
+    {"continued builtin call stays adjacent",
+      "length\\\n(",
+      BUILTIN_CALL_WORD,
+      6},
+    {"keyword boundary is not a split", "END\\\n;", END_WORD, 3},
+    {"raw backslash prevents user call promotion", "follow\\(", NAME_WORD, 6},
+    {"raw backslash after pairs prevents user call promotion",
+      "follow\\\n\\(",
+      NAME_WORD,
+      6},
+    {"raw backslash prevents builtin call promotion",
+      "length\\(",
+      BUILTIN_FUNC_NAME_WORD,
+      6},
+    {"raw backslash after pairs prevents builtin call promotion",
+      "length\\\n\\(",
+      BUILTIN_FUNC_NAME_WORD,
+      6},
+    {"split integer digits", "1\\\n2", SPLIT_TOKEN, 4},
+    {"split leading fraction", ".\\\n5", SPLIT_TOKEN, 4},
+    {"split trailing decimal point", "1\\\n.", SPLIT_TOKEN, 4},
+    {"split fractional digits", "1.\\\n5", SPLIT_TOKEN, 5},
+    {"split exponent introducer", "1\\\ne2", SPLIT_TOKEN, 5},
+    {"split exponent digits", "1e\\\n2", SPLIT_TOKEN, 5},
+    {"split exponent sign", "1e\\\n+2", SPLIT_TOKEN, 6},
+    {"split signed exponent digits", "1e+\\\n2", SPLIT_TOKEN, 6},
+    {"split fraction suffix", "1.0\\\nF", SPLIT_TOKEN, 6},
+    {"split exponent suffix", "1e2\\\nl", SPLIT_TOKEN, 6},
+    {"integer boundary before addition", "1\\\n+2", NUMBER_INTEGER, 1},
+    {"integer boundary before suffix-like name", "1\\\nf", NUMBER_INTEGER, 1},
+    {"incomplete continued exponent preserves integer",
+      "1\\\ne",
+      NUMBER_INTEGER,
+      1},
+    {"incomplete continued exponent sign preserves integer",
+      "1\\\ne+f",
+      NUMBER_INTEGER,
+      1},
+    {"incomplete continued exponent preserves fraction",
+      "1.\\\ne+f",
+      NUMBER_FRACTION,
+      2},
+    {"incomplete exponent does not accept suffix",
+      "1.5\\\neL",
+      NUMBER_FRACTION,
+      3},
+    {"completed suffix ends numeric token", "1.0f\\\nF", NUMBER_FRACTION, 4},
+    {"exponent boundary before addition", "1e2\\\n+3", NUMBER_EXPONENT, 3},
+    {"raw backslash does not join integer digits", "1\\2", NUMBER_INTEGER, 1},
+    {"raw backslash does not join fractional digits",
+      "1.\\5",
+      NUMBER_FRACTION,
+      2},
+    {"raw backslash does not complete exponent", "1e\\2", NUMBER_INTEGER, 1},
+    {"raw backslash does not complete signed exponent",
+      "1e+\\2",
+      NUMBER_INTEGER,
+      1},
+    {"raw backslash does not extend exponent", "1e2\\3", NUMBER_EXPONENT, 3},
+    {"raw backslash does not attach numeric suffix",
+      "1.0\\F",
+      NUMBER_FRACTION,
+      3},
+    {"raw backslash after pairs does not join digits",
+      "1\\\n\\2",
+      NUMBER_INTEGER,
+      1},
+    {"raw backslash after continued exponent sign preserves integer",
+      "1e\\\n+\\2",
+      NUMBER_INTEGER,
+      1},
+    {"accepted split survives later invalid lookahead",
+      "1\\\n2\\3",
+      SPLIT_TOKEN,
+      4},
+  };
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
+    [SPLIT_TOKEN] = true,
+    [END_WORD] = true,
+    [NAME_WORD] = true,
+    [FUNC_NAME_WORD] = true,
+    [BUILTIN_FUNC_NAME_WORD] = true,
+    [BUILTIN_CALL_WORD] = true,
+    [NUMBER_INTEGER] = true,
+    [NUMBER_FRACTION] = true,
+    [NUMBER_EXPONENT] = true,
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      true,
+      cases[i].expected_symbol,
+      cases[i].expected_token_end
+    );
+  }
+  failed |= expect_scan_result(
+    "raw backslash cannot complete a leading fraction",
+    ".\\5",
+    valid_symbols,
+    false,
+    NUMBER_FRACTION,
+    0
+  );
+  return failed;
+}
+
+static int test_split_composite_operators(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+  } split_cases[] = {
+    {"split division assignment", "/\\\n="},
+    {"split addition assignment", "+\\\n="},
+    {"split subtraction assignment", "-\\\n="},
+    {"split multiplication assignment", "*\\\n="},
+    {"split remainder assignment", "%\\\n="},
+    {"split exponent assignment", "^\\\n="},
+    {"split logical or", "|\\\n|"},
+    {"split logical and", "&\\\n&"},
+    {"split no-match", "!\\\n~"},
+    {"split equality", "=\\\n="},
+    {"split less-or-equal", "<\\\n="},
+    {"split greater-or-equal", ">\\\n="},
+    {"split inequality", "!\\\n="},
+    {"split increment", "+\\\n+"},
+    {"split decrement", "-\\\n-"},
+    {"split append", ">\\\n>"},
+  };
+  bool valid_symbols[TOKEN_TYPE_COUNT] = {[SPLIT_TOKEN] = true};
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(split_cases); i++) {
+    failed |= expect_scan_result(
+      split_cases[i].name,
+      split_cases[i].source,
+      valid_symbols,
+      true,
+      SPLIT_TOKEN,
+      4
+    );
+  }
+  valid_symbols[ADD_ASSIGN_OPERATOR] = true;
+  failed |= expect_scan_result(
+    "raw backslash cannot create assignment",
+    "+\\=",
+    valid_symbols,
+    false,
+    ADD_ASSIGN_OPERATOR,
+    0
+  );
+  failed |= expect_scan_result(
+    "raw backslash after pairs cannot create assignment",
+    "+\\\n\\=",
+    valid_symbols,
+    false,
+    ADD_ASSIGN_OPERATOR,
+    0
+  );
+  failed |= expect_scan_result(
+    "continued single operator is not split",
+    "+\\\nx",
+    valid_symbols,
+    false,
+    SPLIT_TOKEN,
+    0
+  );
+  failed |= expect_scan_result(
+    "repeated pairs split composite operator",
+    "+\\\n\\\n=",
+    valid_symbols,
+    true,
+    SPLIT_TOKEN,
+    6
+  );
+  valid_symbols[GE_OPERATOR] = true;
+  valid_symbols[OUTPUT_GREATER_GUARD] = true;
+  failed |= expect_scan_result(
+    "raw backslash keeps greater guard",
+    ">\\=",
+    valid_symbols,
+    true,
+    OUTPUT_GREATER_GUARD,
+    0
+  );
+  failed |= expect_scan_result(
+    "raw backslash after pairs keeps greater guard",
+    ">\\\n\\=",
+    valid_symbols,
+    true,
+    OUTPUT_GREATER_GUARD,
+    0
+  );
+  valid_symbols[DIVISION_SLASH] = true;
+  valid_symbols[DIV_ASSIGN_OPERATOR] = true;
+  failed |= expect_scan_result(
+    "raw backslash cannot create division assignment",
+    "/\\=",
+    valid_symbols,
+    true,
+    DIVISION_SLASH,
+    1
+  );
+  failed |= expect_scan_result(
+    "raw backslash after pairs cannot create division assignment",
+    "/\\\n\\=",
+    valid_symbols,
+    true,
+    DIVISION_SLASH,
+    1
+  );
+  return failed;
+}
+
+static int test_split_lexical_modes(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    LexicalMode initial_mode;
+    bool expected_scanned;
+    enum TokenType expected_symbol;
+    size_t expected_token_end;
+    LexicalMode expected_mode;
+  } cases[] = {
+    {"string continuation is split",
+      "\\\n",
+      LEXICAL_MODE_STRING,
+      true,
+      SPLIT_TOKEN,
+      2,
+      LEXICAL_MODE_STRING},
+    {"ERE continuation is split",
+      "\\\n",
+      LEXICAL_MODE_ERE_BODY,
+      true,
+      SPLIT_TOKEN,
+      2,
+      LEXICAL_MODE_ERE_BODY},
+    {"escaped ERE delimiter context detects split",
+      "\\\n",
+      LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
+      true,
+      SPLIT_TOKEN,
+      2,
+      LEXICAL_MODE_ERE_ESCAPED_DELIMITER},
+    {"outside continuation is layout",
+      "\\\n",
+      LEXICAL_MODE_OUTSIDE,
+      false,
+      SPLIT_TOKEN,
+      0,
+      LEXICAL_MODE_OUTSIDE},
+    {"comment backslash remains comment text",
+      "# keep \\\n",
+      LEXICAL_MODE_OUTSIDE,
+      true,
+      COMMENT,
+      8,
+      LEXICAL_MODE_OUTSIDE},
+    {"raw string escape does not end string",
+      "\\\"",
+      LEXICAL_MODE_STRING,
+      false,
+      STRING_END,
+      0,
+      LEXICAL_MODE_STRING},
+    {"raw ERE escape remains valid",
+      "\\=",
+      LEXICAL_MODE_ERE_BODY,
+      true,
+      ERE_ESCAPE_START,
+      0,
+      LEXICAL_MODE_ERE_BODY},
+    {"escaped slash keeps delimiter mode",
+      "\\/",
+      LEXICAL_MODE_ERE_BODY,
+      true,
+      ERE_ESCAPED_DELIMITER_START,
+      0,
+      LEXICAL_MODE_ERE_ESCAPED_DELIMITER},
+    {"ERE opening keeps escaped equals",
+      "/\\=/",
+      LEXICAL_MODE_OUTSIDE,
+      true,
+      ERE_OPENING_SLASH,
+      1,
+      LEXICAL_MODE_ERE_BODY},
+    {"ERE opening keeps escaped slash",
+      "/\\//",
+      LEXICAL_MODE_OUTSIDE,
+      true,
+      ERE_OPENING_SLASH,
+      1,
+      LEXICAL_MODE_ERE_BODY},
+    {"ERE opening keeps AWK escape",
+      "/\\n/",
+      LEXICAL_MODE_OUTSIDE,
+      true,
+      ERE_OPENING_SLASH,
+      1,
+      LEXICAL_MODE_ERE_BODY},
+    {"ERE opening precedes interior continuation",
+      "/\\\na/",
+      LEXICAL_MODE_OUTSIDE,
+      true,
+      ERE_OPENING_SLASH,
+      1,
+      LEXICAL_MODE_ERE_BODY},
+  };
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
+    [SPLIT_TOKEN] = true,
+    [COMMENT] = true,
+    [STRING_END] = true,
+    [ERE_OPENING_SLASH] = true,
+    [DIV_ASSIGN_OPERATOR] = true,
+    [ERE_ESCAPE_START] = true,
+    [ERE_ESCAPED_DELIMITER_START] = true,
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].initial_mode,
+      cases[i].expected_scanned,
+      cases[i].expected_symbol,
+      0,
+      cases[i].expected_token_end,
+      cases[i].expected_mode
+    );
+  }
+  return failed;
+}
+
+static int test_linear_split_number_detection(void) {
+  const size_t continuation_count = 32768;
+  const size_t source_length = continuation_count * 3U + 1U;
+  char *source = malloc(source_length + 1U);
+  if (source == NULL) {
+    return 1;
+  }
+  for (size_t i = 0; i < continuation_count; i++) {
+    memcpy(source + i * 3U, "1\\\n", 3);
+  }
+  source[source_length - 1U] = '2';
+  source[source_length] = '\0';
+  MockLexer mock = make_mock_lexer(source);
+  ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {[SPLIT_TOKEN] = true};
+  const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
+    &state,
+    &mock.lexer,
+    valid_symbols
+  );
+  const bool valid_result = scanned &&
+    mock.lexer.result_symbol ==
+    SPLIT_TOKEN &&
+    mock.token_start ==
+    0 &&
+    mock.token_end ==
+    source_length &&
+    mock.advance_count <= source_length;
+  if (!valid_result) {
+    fprintf(
+      stderr,
+      "linear split number: scanned=%u symbol=%u advances=%zu end=%zu\n",
+      scanned,
+      mock.lexer.result_symbol,
+      mock.advance_count,
+      mock.token_end
+    );
+  }
+  free(source);
+  return valid_result ? 0 : 1;
+}
+
 static int test_blank_skip_token_ranges(void) {
   static const struct {
     const char *name;
@@ -1277,6 +1666,10 @@ int main(void) {
   test_disabled_tokens_preserve_state();
   failed |= test_serialization();
   failed |= test_source_token_ranges();
+  failed |= test_split_token_boundaries();
+  failed |= test_split_composite_operators();
+  failed |= test_split_lexical_modes();
+  failed |= test_linear_split_number_detection();
   failed |= test_blank_skip_token_ranges();
   failed |= test_greater_dispatch();
   failed |= test_slash_dispatch();

@@ -630,7 +630,6 @@ BEGIN {
               (non_unary_expr
                 (lvalue
                   (name))))
-            (line_continuation)
             (simple_statement
               (delete_keyword)
               (name))
@@ -674,7 +673,6 @@ BEGIN {
               (non_unary_expr
                 (lvalue
                   (name))))
-            (line_continuation)
             (simple_statement
               (print_statement
                 (simple_print_statement
@@ -724,7 +722,6 @@ BEGIN {
               (non_unary_expr
                 (lvalue
                   (name))))
-            (line_continuation)
             (simple_statement
               (expr
                 (non_unary_expr

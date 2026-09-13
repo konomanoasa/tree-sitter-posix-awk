@@ -106,13 +106,12 @@ f
         (non_unary_expr
           (non_unary_expr
             (number))
-          (line_continuation)
           (non_unary_expr
             (lvalue
               (name))))))))
 
 ==================
-continued decimal digits remain one number with source fragments
+continued decimal digits remain separate numbers
 ==================
 1\
 2
@@ -123,7 +122,7 @@ continued decimal digits remain one number with source fragments
     (normal_pattern
       (expr
         (non_unary_expr
-          (number
-            (token_content)
-            (line_continuation)
-            (token_content)))))))
+          (non_unary_expr
+            (number))
+          (non_unary_expr
+            (number)))))))

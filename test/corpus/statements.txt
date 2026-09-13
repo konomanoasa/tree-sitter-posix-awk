@@ -379,7 +379,7 @@ BEGIN {
       (newline))))
 
 ==================
-an expression owns a continuation before its statement terminator
+an expression accepts a continuation before its statement terminator
 ==================
 
 BEGIN {
@@ -408,14 +408,13 @@ BEGIN {
                   (non_unary_expr
                     (lvalue
                       (name))))))
-            (line_continuation)
             (newline_opt
               (newline))))))
     (terminator
       (newline))))
 
 ==================
-continuation between terminated statements belongs to the statement list
+continuation between terminated statements preserves their list
 ==================
 BEGIN {
 ;\
@@ -433,7 +432,6 @@ x
         (newline))
       (terminated_statement_list
         (terminated_statement)
-        (line_continuation)
         (terminated_statement
           (terminatable_statement
             (simple_statement

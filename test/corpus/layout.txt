@@ -29,7 +29,7 @@ space and horizontal tab remain unnamed layout
 (program)
 
 ==================
-source boundary continuations belong directly to program
+source boundary continuations preserve the top-level structure
 ==================
 \
 BEGIN {}\
@@ -37,16 +37,14 @@ BEGIN {}\
 ---
 
 (program
-  (line_continuation)
   (item
     (pattern
       (special_pattern
         (begin_keyword)))
-    (action))
-  (line_continuation))
+    (action)))
 
 ==================
-continuation-only logical source retains every physical pair
+continuation-only source adds no named syntax nodes
 ==================
 \
 \
@@ -54,13 +52,10 @@ continuation-only logical source retains every physical pair
  
 ---
 
-(program
-  (line_continuation)
-  (line_continuation)
-  (line_continuation))
+(program)
 
 ==================
-terminator owns continuation before its following raw newline
+a continuation before a raw newline preserves its terminator
 ==================
 BEGIN {};\
 
@@ -75,7 +70,6 @@ BEGIN {}
           (begin_keyword)))
       (action))
     (terminator
-      (line_continuation)
       (newline)))
   (item
     (pattern
@@ -98,7 +92,6 @@ BEGIN {}
         (special_pattern
           (begin_keyword)))
       (action))
-    (line_continuation)
     (terminator
       (newline)))
   (item

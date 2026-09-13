@@ -1,175 +1,59 @@
-(string_content
-  !content) @string
-
-(string_content
-  content: (token_content) @string)
+(string_content) @string
 
 (comment) @comment
 
-(line_continuation) @punctuation.special
+"\\" @punctuation.special
 
 [
-  (number
-    !content)
-  (dup_count
-    !content)
+  (number)
+  (dup_count)
 ] @number
 
-(number
-  content: (token_content) @number)
+(name) @variable
 
-(dup_count
-  content: (token_content) @number)
+(func_name) @function.call
 
-(name
-  !content) @variable
-
-(name
-  content: (token_content) @variable)
-
-(func_name
-  !content) @function.call
-
-(func_name
-  content: (token_content) @function.call)
-
-(builtin_func_name
-  !content) @function.builtin
-
-(builtin_func_name
-  content: (token_content) @function.builtin)
+(builtin_func_name) @function.builtin
 
 [
-  (begin_keyword
-    !content)
-  (break_keyword
-    !content)
-  (continue_keyword
-    !content)
-  (delete_keyword
-    !content)
-  (do_keyword
-    !content)
-  (else_keyword
-    !content)
-  (end_keyword
-    !content)
-  (exit_keyword
-    !content)
-  (for_keyword
-    !content)
-  (function_keyword
-    !content)
-  (getline_keyword
-    !content)
-  (if_keyword
-    !content)
-  (in_keyword
-    !content)
-  (next_keyword
-    !content)
-  (nextfile_keyword
-    !content)
-  (print_keyword
-    !content)
-  (printf_keyword
-    !content)
-  (return_keyword
-    !content)
-  (while_keyword
-    !content)
+  (begin_keyword)
+  (break_keyword)
+  (continue_keyword)
+  (delete_keyword)
+  (do_keyword)
+  (else_keyword)
+  (end_keyword)
+  (exit_keyword)
+  (for_keyword)
+  (function_keyword)
+  (getline_keyword)
+  (if_keyword)
+  (in_keyword)
+  (next_keyword)
+  (nextfile_keyword)
+  (print_keyword)
+  (printf_keyword)
+  (return_keyword)
+  (while_keyword)
 ] @keyword
 
-(begin_keyword
-  content: (token_content) @keyword)
-
-(break_keyword
-  content: (token_content) @keyword)
-
-(continue_keyword
-  content: (token_content) @keyword)
-
-(delete_keyword
-  content: (token_content) @keyword)
-
-(do_keyword
-  content: (token_content) @keyword)
-
-(else_keyword
-  content: (token_content) @keyword)
-
-(end_keyword
-  content: (token_content) @keyword)
-
-(exit_keyword
-  content: (token_content) @keyword)
-
-(for_keyword
-  content: (token_content) @keyword)
-
-(function_keyword
-  content: (token_content) @keyword)
-
-(getline_keyword
-  content: (token_content) @keyword)
-
-(if_keyword
-  content: (token_content) @keyword)
-
-(in_keyword
-  content: (token_content) @keyword)
-
-(next_keyword
-  content: (token_content) @keyword)
-
-(nextfile_keyword
-  content: (token_content) @keyword)
-
-(print_keyword
-  content: (token_content) @keyword)
-
-(printf_keyword
-  content: (token_content) @keyword)
-
-(return_keyword
-  content: (token_content) @keyword)
-
-(while_keyword
-  content: (token_content) @keyword)
-
 [
-  (add_assign
-    !content)
-  (and
-    !content)
-  (append
-    !content)
-  (decr
-    !content)
-  (div_assign
-    !content)
-  (eq
-    !content)
-  (ge
-    !content)
-  (incr
-    !content)
-  (le
-    !content)
-  (mod_assign
-    !content)
-  (mul_assign
-    !content)
-  (ne
-    !content)
-  (no_match
-    !content)
-  (or
-    !content)
-  (pow_assign
-    !content)
-  (sub_assign
-    !content)
+  (add_assign)
+  (and)
+  (append)
+  (decr)
+  (div_assign)
+  (eq)
+  (ge)
+  (incr)
+  (le)
+  (mod_assign)
+  (mul_assign)
+  (ne)
+  (no_match)
+  (or)
+  (pow_assign)
+  (sub_assign)
   (left_anchor)
   (right_anchor)
   "!"
@@ -188,54 +72,6 @@
   "|"
   "~"
 ] @operator
-
-(add_assign
-  content: (token_content) @operator)
-
-(and
-  content: (token_content) @operator)
-
-(append
-  content: (token_content) @operator)
-
-(decr
-  content: (token_content) @operator)
-
-(div_assign
-  content: (token_content) @operator)
-
-(eq
-  content: (token_content) @operator)
-
-(ge
-  content: (token_content) @operator)
-
-(incr
-  content: (token_content) @operator)
-
-(le
-  content: (token_content) @operator)
-
-(mod_assign
-  content: (token_content) @operator)
-
-(mul_assign
-  content: (token_content) @operator)
-
-(ne
-  content: (token_content) @operator)
-
-(no_match
-  content: (token_content) @operator)
-
-(or
-  content: (token_content) @operator)
-
-(pow_assign
-  content: (token_content) @operator)
-
-(sub_assign
-  content: (token_content) @operator)
 
 [
   ","
@@ -272,12 +108,8 @@
 [
   (collating_element_content)
   (meta_character)
-  (class_name
-    !content)
+  (class_name)
 ] @character.special
-
-(class_name
-  content: (token_content) @character.special)
 
 (wildcard
   "." @character.special)
@@ -328,17 +160,9 @@
   "=" @punctuation.delimiter)
 
 [
-  (escaped_delimiter
-    !content)
-  (escape_sequence
-    !content)
+  (escaped_delimiter)
+  (escape_sequence)
 ] @string.escape
-
-(escaped_delimiter
-  content: (token_content) @string.escape)
-
-(escape_sequence
-  content: (token_content) @string.escape)
 
 (ordinary_character
   [
@@ -372,24 +196,9 @@
 
 (item
   name: [
-    (name
-      !content)
-    (func_name
-      !content)
+    (name)
+    (func_name)
   ] @function)
 
-(item
-  name: [
-    (name
-      content: (token_content) @function)
-    (func_name
-      content: (token_content) @function)
-  ])
-
 (param_list
-  (name
-    !content) @variable.parameter)
-
-(param_list
-  (name
-    content: (token_content) @variable.parameter))
+  (name) @variable.parameter)

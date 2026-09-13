@@ -1079,7 +1079,7 @@ BEGIN {
       (newline))))
 
 ==================
-continuation between names belongs to their concatenation
+continuation between names preserves their concatenation
 ==================
 BEGIN { print x \
 y }
@@ -1104,13 +1104,12 @@ y }
                         (non_unary_print_expr
                           (lvalue
                             (name)))
-                        (line_continuation)
                         (non_unary_print_expr
                           (lvalue
                             (name)))))))))))))))
 
 ==================
-a print argument owns a continuation before the separating comma
+a print argument accepts a continuation before the separating comma
 ==================
 
 BEGIN {
@@ -1143,7 +1142,6 @@ BEGIN {
                         (non_unary_print_expr
                           (lvalue
                             (name))))
-                      (line_continuation)
                       (print_expr
                         (non_unary_print_expr
                           (lvalue
@@ -1193,7 +1191,6 @@ BEGIN {
                         (non_unary_print_expr
                           (lvalue
                             (name))))
-                      (line_continuation)
                       (print_expr
                         (non_unary_print_expr
                           (lvalue
@@ -1203,7 +1200,7 @@ BEGIN {
       (newline))))
 
 ==================
-continuations before and after append redirection keep their owners
+continuations before and after append redirection preserve its structure
 ==================
 
 BEGIN {
@@ -1237,10 +1234,8 @@ destination
                         (non_unary_print_expr
                           (lvalue
                             (name))))))
-                  (line_continuation)
                   (output_redirection
                     (append)
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue

@@ -61,7 +61,6 @@ mod tests {
     source: &'static str,
     kind: &'static str,
     range: Range<usize>,
-    leaves: &'static [(&'static str, usize, usize)],
   }
 
   const LEAF_CASES: &[LeafCase] = &[
@@ -70,138 +69,84 @@ mod tests {
       source: "foo\n",
       kind: "name",
       range: 0..3,
-      leaves: &[("name", 0, 3)],
     },
     LeafCase {
-      name: "a split name owns consecutive continuations separately",
+      name: "the name before consecutive continuations remains separate",
       source: "fo\\\n\\\no\n",
       kind: "name",
-      range: 0..7,
-      leaves: &[
-        ("token_content", 0, 2),
-        ("line_continuation", 2, 4),
-        ("line_continuation", 4, 6),
-        ("token_content", 6, 7),
-      ],
+      range: 0..2,
     },
     LeafCase {
-      name: "a split keyword retains its complete physical range",
-      source: "BE\\\nGIN {}\n",
+      name: "the name after consecutive continuations remains separate",
+      source: "fo\\\n\\\no\n",
+      kind: "name",
+      range: 6..7,
+    },
+    LeafCase {
+      name: "a keyword excludes its following continuation",
+      source: "BEGIN\\\n{}\n",
       kind: "begin_keyword",
-      range: 0..7,
-      leaves: &[
-        ("token_content", 0, 2),
-        ("line_continuation", 2, 4),
-        ("token_content", 4, 7),
-      ],
+      range: 0..5,
     },
     LeafCase {
-      name: "a split builtin excludes its following parenthesis",
-      source: "{len\\\ngth(x)}\n",
+      name: "a builtin excludes its following continuation",
+      source: "{length\\\n(x)}\n",
       kind: "builtin_func_name",
-      range: 1..9,
-      leaves: &[
-        ("token_content", 1, 4),
-        ("line_continuation", 4, 6),
-        ("token_content", 6, 9),
-      ],
+      range: 1..7,
     },
     LeafCase {
-      name: "a split function name excludes its following continuation",
-      source: "{f\\\noo\\\n(x)}\n",
+      name: "a function name excludes its adjacent parenthesis",
+      source: "{foo(x)}\n",
       kind: "func_name",
-      range: 1..6,
-      leaves: &[
-        ("token_content", 1, 2),
-        ("line_continuation", 2, 4),
-        ("token_content", 4, 6),
-      ],
+      range: 1..4,
     },
     LeafCase {
-      name: "a split number retains decimal exponent and suffix fragments",
-      source: "1\\\n.2e\\\n+3F\n",
+      name: "a continuation before the parenthesis makes a variable name",
+      source: "{foo\\\n(x)}\n",
+      kind: "name",
+      range: 1..4,
+    },
+    LeafCase {
+      name: "a decimal constant includes its exponent and suffix",
+      source: "1.2e+3F\n",
       kind: "number",
-      range: 0..11,
-      leaves: &[
-        ("token_content", 0, 1),
-        ("line_continuation", 1, 3),
-        ("token_content", 3, 6),
-        ("line_continuation", 6, 8),
-        ("token_content", 8, 11),
-      ],
+      range: 0..7,
     },
     LeafCase {
-      name: "a split logical operator retains one operator parent",
-      source: "a|\\\n|b\n",
+      name: "a logical operator excludes its following continuation",
+      source: "a||\\\nb\n",
       kind: "or",
-      range: 1..5,
-      leaves: &[
-        ("token_content", 1, 2),
-        ("line_continuation", 2, 4),
-        ("token_content", 4, 5),
-      ],
+      range: 1..3,
     },
     LeafCase {
-      name: "complete Unicode string content remains one leaf",
+      name: "Unicode string content remains one leaf",
       source: "\"é😀\"\n",
       kind: "string_content",
       range: 1..7,
-      leaves: &[("string_content", 1, 7)],
     },
     LeafCase {
-      name: "split Unicode string content retains byte ranges",
-      source: "\"é\\\n😀\"\n",
-      kind: "string_content",
-      range: 1..9,
-      leaves: &[
-        ("token_content", 1, 3),
-        ("line_continuation", 3, 5),
-        ("token_content", 5, 9),
-      ],
-    },
-    LeafCase {
-      name: "a split octal escape excludes the following string character",
-      source: "\"\\1\\\n23x\"\n",
+      name: "an octal escape excludes the following string character",
+      source: "\"\\123x\"\n",
       kind: "escape_sequence",
-      range: 1..7,
-      leaves: &[
-        ("token_content", 1, 3),
-        ("line_continuation", 3, 5),
-        ("token_content", 5, 7),
-      ],
-    },
-    LeafCase {
-      name: "a split escaped slash keeps the escape introducer separate",
-      source: "/\\\\\n//\n",
-      kind: "escaped_delimiter",
       range: 1..5,
-      leaves: &[
-        ("token_content", 1, 2),
-        ("line_continuation", 2, 4),
-        ("token_content", 4, 5),
-      ],
     },
     LeafCase {
-      name: "a split ERE class name excludes compound delimiters",
-      source: "/[[:al\\\npha:]]/\n",
+      name: "an escaped slash excludes the closing delimiter",
+      source: "/\\//\n",
+      kind: "escaped_delimiter",
+      range: 1..3,
+    },
+    LeafCase {
+      name: "an ERE class name excludes compound delimiters",
+      source: "/[[:alpha:]]/\n",
       kind: "class_name",
-      range: 4..11,
-      leaves: &[
-        ("token_content", 4, 6),
-        ("line_continuation", 6, 8),
-        ("token_content", 8, 11),
-      ],
+      range: 4..9,
     },
     LeafCase {
-      name: "a split ERE repetition count remains one count",
-      source: "/a{1\\\n2}/\n",
+      name: "an ERE repetition count remains one leaf",
+      source: "/a{12}/\n",
       kind: "dup_count",
-      range: 3..7,
-      leaves: &[
-        ("token_content", 3, 4),
-        ("line_continuation", 4, 6),
-        ("token_content", 6, 7),
-      ],
+      range: 3..5,
     },
   ];
 
@@ -415,8 +360,8 @@ mod tests {
       ("leading newline", "\n{}\n"),
       ("terminated and unterminated items", "BEGIN {}\nEND {}"),
       (
-        "split function name and parameter",
-        "func\\\ntion f\\\n(a\\\nb,b) {}",
+        "function name and parameter boundaries",
+        "function f\\\n(a,\\\nb) {}",
       ),
       (
         "nested statements and expressions",
@@ -426,10 +371,16 @@ mod tests {
         "shared direct input and pipe aliases",
         "{print $-getline target < (a | getline); ($+$a=b) | getline target}\n",
       ),
+      ("nested field after arithmetic unary", "{$+$a}"),
+      ("nested field after logical unary in print", "{print $!$a}"),
+      (
+        "postfix field and getline target aliases",
+        "{$-x++; $(-x)++; $$x++; $getline x++; $getline $-x++; $getline $(x)++}\n",
+      ),
       ("group alternation", "/(a|b)c/"),
       ("group concatenation", "/(ab)c/"),
       ("nested group repetition", "/((a|b)+?c)d/"),
-      ("group continuation", "/(a\\\n|b)\\\nc/"),
+      ("ERE boundary continuation", "/(a|b)/\\\n&& /c/"),
       ("ungrouped expression", "/a|bc+/"),
     ] {
       let tree = parse(source, name);
@@ -459,9 +410,9 @@ mod tests {
       ("right associative exponentiation", "$-a^b^c", "-a^b^c"),
       ("nested field reference", "$+$a", "+$a"),
       ("postfix update inside unary operand", "$+a++", "+a++"),
-      ("split name", "$-na\\\nme", "-na\\\nme"),
+      ("unary operand boundary", "$-\\\nname", "-\\\nname"),
     ] {
-      for operator in ["=", "+=", "-=", "*=", "/=", "%=", "^=", "+\\\n="] {
+      for operator in ["=", "+=", "-=", "*=", "/=", "%=", "^="] {
         for (prefix, kind) in
           [("{", "non_unary_expr"), ("{print ", "non_unary_print_expr")]
         {
@@ -549,7 +500,6 @@ mod tests {
     for (name, atom, operator, right) in [
       ("name", "a", "=", "b"),
       ("number", "1", "+=", "b=c"),
-      ("split name and assignment", "na\\\nme", "+\\\n=", "b"),
       ("parenthesized pipe", "(cmd | getline)", "=", "b"),
       ("call argument pipe", "f(cmd | getline)", "=", "b"),
       ("subscript pipe", "a[cmd | getline]", "=", "b"),
@@ -645,7 +595,7 @@ mod tests {
   }
 
   #[test]
-  fn split_leaves_partition_source_and_own_only_their_internal_continuations() {
+  fn lexical_tokens_keep_complete_leaf_ranges() {
     for case in LEAF_CASES {
       let tree = parse(case.source, case.name);
       let node = tree
@@ -654,262 +604,97 @@ mod tests {
         .expect("lexical node must span the expected range");
       assert_eq!(node.kind(), case.kind, "{}", case.name);
       assert_eq!(node.byte_range(), case.range, "{}", case.name);
-      assert_leaf_partition(node, case.leaves, case.name);
-      let mut cursor = node.walk();
-      if cursor.goto_first_child() {
-        loop {
-          let child = cursor.node();
-          assert_eq!(child.child_count(), 0, "{}", case.name);
-          match child.kind() {
-            "token_content" => {
-              assert_eq!(cursor.field_name(), Some("content"), "{}", case.name);
-            }
-            "line_continuation" => {
-              assert_eq!(cursor.field_name(), None, "{}", case.name);
-              assert_eq!(
-                child.utf8_text(case.source.as_bytes()).unwrap(),
-                "\\\n",
-                "{}",
-                case.name,
-              );
-            }
-            kind => panic!("{}: unexpected lexical child {kind}", case.name),
-          }
-          if !cursor.goto_next_sibling() {
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  #[derive(Debug, PartialEq, Eq)]
-  struct LogicalNode {
-    kind: String,
-    field: Option<String>,
-    range: Range<usize>,
-    spelling: Option<String>,
-    children: Vec<LogicalNode>,
-  }
-
-  fn logical_node(
-    node: Node<'_>,
-    field: Option<&str>,
-    source: &str,
-    continuations: &[Range<usize>],
-  ) -> Option<LogicalNode> {
-    if node.kind() == "line_continuation" {
-      return None;
-    }
-    let split = node.child_by_field_name("content").is_some();
-    let spelling = (split || node.child_count() == 0).then(|| {
-      let text = node.utf8_text(source.as_bytes()).unwrap();
-      if split {
-        text.replace("\\\n", "")
-      } else {
-        text.to_owned()
-      }
-    });
-    let mut children = Vec::new();
-    let mut cursor = node.walk();
-    if cursor.goto_first_child() {
-      loop {
-        let child = cursor.node();
-        if split {
-          assert!(
-            matches!(child.kind(), "token_content" | "line_continuation"),
-            "{} {:?} unexpectedly owns {} {:?}",
-            node.kind(),
-            node.byte_range(),
-            child.kind(),
-            child.byte_range()
-          );
-        } else if let Some(child) =
-          logical_node(child, cursor.field_name(), source, continuations)
-        {
-          children.push(child);
-        }
-        if !cursor.goto_next_sibling() {
-          break;
-        }
-      }
-    }
-    let logical_offset = |offset| {
-      offset
-        - continuations
-          .iter()
-          .take_while(|range| range.end <= offset)
-          .map(Range::len)
-          .sum::<usize>()
-    };
-    Some(LogicalNode {
-      kind: node.kind().to_owned(),
-      field: field.map(str::to_owned),
-      range: logical_offset(node.start_byte())..logical_offset(node.end_byte()),
-      spelling,
-      children,
-    })
-  }
-
-  fn logical_tree(tree: &Tree, source: &str) -> Option<LogicalNode> {
-    let mut leaves = Vec::new();
-    collect_leaves(tree.root_node(), &mut leaves);
-    let continuations: Vec<_> = leaves
-      .into_iter()
-      .filter(|node| node.kind() == "line_continuation")
-      .map(|node| node.byte_range())
-      .collect();
-    logical_node(tree.root_node(), None, source, &continuations)
-  }
-
-  #[test]
-  fn continued_sources_preserve_logical_cst_fields_classification_and_spelling()
-  {
-    for (name, plain, continued) in [
-      (
-        "function declarations, parameters, calls and keywords",
-        "function foo(param) { return length(param) }\n",
-        "fun\\\nction f\\\noo(pa\\\nram) { re\\\nturn len\\\ngth(pa\\\nram) }\n",
-      ),
-      (
-        "function adjacency across repeated boundary continuations",
-        "{foo(x); foo (x)}\n",
-        "{fo\\\no\\\n\\\n(x); fo\\\no \\\n(x)}\n",
-      ),
-      (
-        "for-in lookahead and reserved words",
-        "BEGIN { for (key in array) print key }\n",
-        "BE\\\nGIN { f\\\nor (k\\\ney i\\\nn arr\\\nay) pr\\\nint k\\\ney }\n",
-      ),
-      (
-        "decimal fraction, exponent, sign and suffix",
-        "1.2e+3F\n",
-        "1\\\n.2e\\\n+3F\n",
-      ),
-      (
-        "Unicode content, octal escape and escaped quote",
-        "\"é😀\\123x\\\"\"\n",
-        "\"é\\\n😀\\1\\\n23x\\\\\n\"\"\n",
-      ),
-      (
-        "literal boundary continuations do not create empty content",
-        "{print \"\";print /a/}\n",
-        "{print \"\\\n\";print /\\\na\\\n/}\n",
-      ),
-      (
-        "ERE ordinary characters, alternation and repetition modifier",
-        "/(ab|c)+?/\n",
-        "/(a\\\nb|\\\nc)\\\n+\\\n?/\n",
-      ),
-      (
-        "ERE compound delimiters, class name and repetition count",
-        "/[[:alpha:][.ch.][=a=]]{12}/\n",
-        "/[[\\\n:al\\\npha:\\\n][\\\n.ch.\\\n][\\\n=a=\\\n]]{1\\\n2}/\n",
-      ),
-      (
-        "ERE named, octal, quoted and delimiter escapes",
-        "/\\n\\123\\.\\//\n",
-        "/\\\\\nn\\1\\\n23\\\\\n.\\\\\n//\n",
-      ),
-      (
-        "assignment and update operators",
-        "{x+=1;x-=2;x*=3;x/=4;x%=5;x^=6;x++;x--}\n",
-        "{x+\\\n=1;x-\\\n=2;x*\\\n=3;x/\\\n=4;x%\\\n=5;x^\\\n=6;x+\\\n+;x-\\\n-}\n",
-      ),
-      (
-        "logical, comparison, match and output operators",
-        "{print a&&b||c;print (a==b),(a!=b),(a<=b),(a>=b),(a!~b);print x>>f}\n",
-        "{print a&\\\n&b|\\\n|c;print (a=\\\n=b),(a!\\\n=b),(a<\\\n=b),(a>\\\n=b),(a!\\\n~b);print x>\\\n>f}\n",
-      ),
-      (
-        "comment backslashes remain raw comment text",
-        "BEGIN { print 1 # keep \\\n}\n",
-        "BE\\\nGIN { print 1 # keep \\\n}\n",
-      ),
-    ] {
-      let plain_tree = parse(plain, name);
-      let continued_tree = parse(continued, name);
-      assert_eq!(
-        logical_tree(&continued_tree, continued),
-        logical_tree(&plain_tree, plain),
-        "{name}",
-      );
+      assert_eq!(node.child_count(), 0, "{}", case.name);
     }
   }
 
   #[test]
-  fn line_continuations_keep_exact_ranges_and_owners() {
+  fn continuation_markers_are_anonymous_and_exclude_newlines() {
     struct Case {
       name: &'static str,
       source: &'static str,
-      owners: &'static [(usize, usize, &'static str, usize, usize)],
+      markers: &'static [(usize, usize)],
     }
+    assert!(!super::NODE_TYPES.contains("\"line_continuation\""));
     let query = Query::new(&super::LANGUAGE.into(), super::HIGHLIGHTS_QUERY)
       .expect("highlight query must compile");
     for case in [
       Case {
+        name: "a continuation alone creates no newline token",
+        source: "\\\n",
+        markers: &[(0, 1)],
+      },
+      Case {
         name: "source and AWK expression boundaries",
-        source: "\\\nBEGIN { print f\\\n(x) \\\n+ \\\ny }\\\n",
-        owners: &[
-          (0, 2, "program", 0, 34),
-          (17, 19, "non_unary_print_expr", 16, 22),
-          (23, 25, "non_unary_print_expr", 16, 30),
-          (27, 29, "non_unary_print_expr", 16, 30),
-          (32, 34, "program", 0, 34),
-        ],
+        source: "\\\n{a +\\\nb}\\\n",
+        markers: &[(0, 1), (6, 7), (10, 11)],
       },
       Case {
-        name: "ERE concatenation boundary",
-        source: "/a\\\nb/\n",
-        owners: &[(2, 4, "ere_branch", 1, 5)],
+        name: "consecutive continuations separate two names",
+        source: "fo\\\n\\\no\n",
+        markers: &[(2, 3), (4, 5)],
       },
       Case {
-        name: "ERE opening and closing boundaries",
-        source: "/\\\na\\\n/\n",
-        owners: &[(1, 3, "ere", 0, 7), (4, 6, "ere", 0, 7)],
+        name: "a continuation separates two numbers",
+        source: "1\\\n2\n",
+        markers: &[(1, 2)],
       },
       Case {
-        name: "string opening and closing boundaries",
-        source: "\"\\\na\\\n\"\n",
-        owners: &[(1, 3, "string", 0, 7), (4, 6, "string", 0, 7)],
+        name: "a continuation separates a definition name and parenthesis",
+        source: "function f\\\n(){}",
+        markers: &[(10, 11)],
       },
       Case {
-        name: "compound class delimiter boundaries",
-        source: "/[[\\\n:a:\\\n]]/\n",
-        owners: &[
-          (3, 5, "character_class", 2, 11),
-          (8, 10, "character_class", 2, 11),
-        ],
+        name: "a continuation follows a parameter separator",
+        source: "function f(a,\\\nb){}",
+        markers: &[(13, 14)],
       },
       Case {
-        name: "a trailing hyphen excludes its following continuation",
-        source: "/[-\\\n]/\n",
-        owners: &[(3, 5, "bracket_expression", 1, 6)],
+        name: "a continuation separates complete string constants",
+        source: "\"a\"\\\n\"b\"\n",
+        markers: &[(3, 4)],
+      },
+      Case {
+        name: "a continuation follows a complete static ERE",
+        source: "/a/\\\n&& /b/\n",
+        markers: &[(3, 4)],
+      },
+      Case {
+        name: "string and ERE escapes remain distinct from continuations",
+        source: "\"\\n\"\\\n&& /\\n/\n",
+        markers: &[(4, 5)],
+      },
+      Case {
+        name: "a comment backslash does not become a continuation marker",
+        source: "# \\\n/a/\\\n&& /b/\n",
+        markers: &[(7, 8)],
       },
     ] {
       let tree = parse(case.source, case.name);
       let mut leaves = Vec::new();
       collect_leaves(tree.root_node(), &mut leaves);
       let actual: Vec<_> = leaves
-        .into_iter()
-        .filter(|node| node.kind() == "line_continuation")
+        .iter()
+        .filter(|node| node.kind() == "\\")
         .map(|node| {
-          assert_eq!(node.utf8_text(case.source.as_bytes()).unwrap(), "\\\n");
-          let owner = node.parent().expect("continuation must have an owner");
-          (
-            node.start_byte(),
-            node.end_byte(),
-            owner.kind(),
-            owner.start_byte(),
-            owner.end_byte(),
-          )
+          assert!(!node.is_named(), "{}", case.name);
+          assert_eq!(node.utf8_text(case.source.as_bytes()).unwrap(), "\\");
+          (node.start_byte(), node.end_byte())
         })
         .collect();
-      assert_eq!(actual, case.owners, "{}", case.name);
+      assert_eq!(actual, case.markers, "{}", case.name);
+      for (_, end) in case.markers {
+        assert_eq!(case.source.as_bytes()[*end], b'\n');
+        assert!(
+          leaves.iter().all(|leaf| !leaf.byte_range().contains(end)),
+          "{}: a continuation newline must have no leaf",
+          case.name,
+        );
+      }
       assert_leaf_highlights(
         case.source,
         &tree,
-        case.owners.iter().map(|(start, end, ..)| *start..*end),
+        case.markers.iter().map(|(start, end)| *start..*end),
         case.name,
         &query,
       );

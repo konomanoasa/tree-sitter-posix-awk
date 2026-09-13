@@ -411,12 +411,11 @@ other) {}
     (func_name)
     (param_list
       (name)
-      (line_continuation)
       (name))
     (action)))
 
 ==================
-a continued user function name remains adjacent to its call parenthesis
+a continuation separates a name from a parenthesized expression
 ==================
 
 BEGIN {
@@ -443,9 +442,10 @@ BEGIN {
               (simple_statement
                 (expr
                   (non_unary_expr
-                    (func_name)
-                    (line_continuation)
-                    (expr_list
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (non_unary_expr
                       (expr
                         (non_unary_expr
                           (lvalue
@@ -455,7 +455,7 @@ BEGIN {
       (newline))))
 
 ==================
-a built-in function name owns a continuation before its call parenthesis
+a built-in call accepts a continuation before its opening parenthesis
 ==================
 
 BEGIN {
@@ -483,7 +483,6 @@ BEGIN {
                 (expr
                   (non_unary_expr
                     (builtin_func_name)
-                    (line_continuation)
                     (expr_list
                       (expr
                         (non_unary_expr
@@ -494,7 +493,7 @@ BEGIN {
       (newline))))
 
 ==================
-continuation after a bare builtin name belongs to its concatenation
+continuation after a bare builtin name preserves concatenation
 ==================
 BEGIN { x = length \
 y }
@@ -518,13 +517,12 @@ y }
                     (non_unary_expr
                       (non_unary_expr
                         (builtin_func_name))
-                      (line_continuation)
                       (non_unary_expr
                         (lvalue
                           (name))))))))))))))
 
 ==================
-a call argument owns a continuation before the closing parenthesis
+a call argument accepts a continuation before the closing parenthesis
 ==================
 
 BEGIN {
@@ -556,8 +554,22 @@ BEGIN {
                       (expr
                         (non_unary_expr
                           (lvalue
-                            (name)))))
-                    (line_continuation)))))
+                            (name)))))))))
             (newline)))))
     (terminator
       (newline))))
+
+==================
+a function definition accepts a name separated from its header by a continuation
+==================
+function call\
+(value) {}
+---
+
+(program
+  (item
+    (function_keyword)
+    (name)
+    (param_list
+      (name))
+    (action)))

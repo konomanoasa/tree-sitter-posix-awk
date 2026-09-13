@@ -180,7 +180,6 @@ BEGIN { print x \
                         (non_unary_print_expr
                           (lvalue
                             (name)))
-                        (line_continuation)
                         (non_unary_print_expr
                           (string
                             (string_content)))))))))))))))

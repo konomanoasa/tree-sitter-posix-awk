@@ -260,7 +260,6 @@ BEGIN {
               (non_unary_expr
                 (lvalue
                   (name))))
-            (line_continuation)
             (terminated_statement
               (terminatable_statement
                 (simple_statement
@@ -273,7 +272,7 @@ BEGIN {
       (newline))))
 
 ==================
-else owns a continuation before its alternative
+else accepts a continuation before its alternative
 ==================
 
 BEGIN {
@@ -315,7 +314,6 @@ BEGIN {
               (newline_opt
                 (newline)))
             (else_keyword)
-            (line_continuation)
             (terminated_statement
               (terminatable_statement
                 (simple_statement

@@ -8,6 +8,8 @@ import {
   clean,
   cleanContinuation,
   contains,
+  continuationMarker,
+  continuationRanges,
   determinismTest,
   editHistoryTest,
   excludes,
@@ -105,7 +107,7 @@ for (const { label, initial, final, before, inserted } of [
     const tree = assertDeterministicEdit(label, initial, final, [
       { byte: initial.indexOf(before), deleteBytes: 0, insert: inserted },
     ]);
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   });
 }
 
@@ -554,14 +556,11 @@ for (const [kind, marker] of [
   ["equivalence class", "="],
 ]) {
   determinismTest(
-    `inserting a split escape repairs an empty ${kind}`,
+    `inserting an escape repairs an empty ${kind}`,
     `/[[${marker}${marker}]]/`,
-    `/[[${marker}\\\\\nn${marker}]]/`,
-    [{ byte: 4, deleteBytes: 0, insert: "\\\\\nn" }],
-    (tree) => {
-      contains(tree, "escape_sequence");
-      contains(tree, "line_continuation");
-    },
+    `/[[${marker}\\n${marker}]]/`,
+    [{ byte: 4, deleteBytes: 0, insert: String.raw`\n` }],
+    (tree) => contains(tree, "escape_sequence"),
   );
 }
 
@@ -576,28 +575,26 @@ determinismTest(
   (tree) => contains(tree, "class_name `alpha`"),
 );
 
-for (const [operator, continuation, suffix, kind] of [
-  ["+", "\\\n", "=5}", "add_assign"],
-  ["-", "\\\n", "=5}", "sub_assign"],
-  ["*", "\\\n", "=5}", "mul_assign"],
-  ["%", "\\\n", "=5}", "mod_assign"],
-  ["^", "\\\n", "=5}", "pow_assign"],
-  ["|", "\\\n", "|5}", "or"],
-  ["+", "\\\n\\\n", "+}", "incr"],
-  ["-", "\\\n\\\n", "-}", "decr"],
+for (const [first, second, operand, kind] of [
+  ["/", "=", "5", "div_assign"],
+  ["+", "=", "5", "add_assign"],
+  ["-", "=", "5", "sub_assign"],
+  ["*", "=", "5", "mul_assign"],
+  ["%", "=", "5", "mod_assign"],
+  ["^", "=", "5", "pow_assign"],
+  ["|", "|", "5", "or"],
+  ["&", "&", "5", "and"],
+  ["+", "+", "", "incr"],
+  ["-", "-", "", "decr"],
 ]) {
-  const prefix = `{x${operator}${continuation}`;
   determinismTest(
-    `${kind} is reclassified after repairing its second character`,
-    `${prefix}/\\x`,
-    prefix + suffix,
-    [
-      { byte: prefix.length + 2, deleteBytes: 1, insert: "" },
-      { byte: prefix.length, deleteBytes: 2, insert: suffix },
-    ],
+    `removing a continuation joins ${kind} characters into one token`,
+    `{x${first}\\\n${second}${operand}}`,
+    `{x${first}${second}${operand}}`,
+    [{ byte: 3, deleteBytes: 2, insert: "" }],
     (tree) => {
       contains(tree, `operator: ${kind}`);
-      contains(tree, "line_continuation");
+      excludes(tree, continuationMarker);
     },
   );
 }
@@ -607,16 +604,13 @@ for (const [marker, kind] of [
   [".", "collating_symbol"],
 ]) {
   determinismTest(
-    `a ${kind} closer is reclassified after repairing a continuation`,
-    `/[[${marker}a${marker}\\))`,
+    `removing an internal continuation repairs a ${kind} closer`,
     `/[[${marker}a${marker}\\\n]]/`,
-    [
-      { byte: 8, deleteBytes: 1, insert: "" },
-      { byte: 7, deleteBytes: 1, insert: "\n]]/" },
-    ],
+    `/[[${marker}a${marker}]]/`,
+    [{ byte: 6, deleteBytes: 2, insert: "" }],
     (tree) => {
       contains(tree, kind);
-      contains(tree, "line_continuation");
+      excludes(tree, continuationMarker);
     },
   );
 }
@@ -714,7 +708,7 @@ determinismTest(
   (tree) => {
     contains(tree, "redirection: output_redirection");
     contains(tree, "append");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -823,13 +817,14 @@ const blankCall = lines("BEGIN { f (value) }");
 const continuedCall = lines("BEGIN { f\\", "(value) }");
 
 determinismTest(
-  "blank to line continuation call",
+  "blank to line continuation preserves concatenation",
   blankCall,
   continuedCall,
   [{ byte: 9, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
-    assert.match(tree, /^[ \t0-9:-]*func_name[ \t]/m);
-    contains(tree, "line_continuation");
+    contains(tree, "name `f`");
+    excludes(tree, "func_name");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -844,7 +839,7 @@ determinismTest(
   [{ byte: 14, deleteBytes: 0, insert: "\\\n" }],
   (tree) => {
     contains(tree, "add_assign");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -859,7 +854,7 @@ determinismTest(
   [{ byte: 12, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
     contains(tree, '"+"');
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -874,7 +869,7 @@ determinismTest(
   [{ byte: 12, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
     contains(tree, '"<"');
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -902,7 +897,7 @@ determinismTest(
   (tree) => {
     contains(tree, "operator: le");
     excludes(tree, "source: expr");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -917,7 +912,7 @@ determinismTest(
   [{ byte: 23, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
     contains(tree, "alternative: expr");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -932,7 +927,7 @@ determinismTest(
   [{ byte: 12, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
     contains(tree, "and");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -947,7 +942,7 @@ determinismTest(
   [{ byte: 14, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
     contains(tree, "non_unary_input_function");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -1093,7 +1088,7 @@ determinismTest(
   (tree) => {
     assert.match(tree, /^[ \t0-9:-]*name:[ \t]+name[ \t]+`compute`$/m);
     excludes(tree, "func_name");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -1104,7 +1099,7 @@ determinismTest(
   [{ byte: 16, deleteBytes: 3, insert: "" }],
   (tree) => {
     assert.match(tree, /^[ \t0-9:-]*name:[ \t]+func_name[ \t]+`compute`$/m);
-    excludes(tree, "line_continuation");
+    excludes(tree, continuationMarker);
   },
 );
 
@@ -1165,7 +1160,7 @@ determinismTest(
   [{ byte: 18, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
     contains(tree, "builtin_func_name");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -1282,7 +1277,7 @@ determinismTest(
       1,
       "Expected one leading newline_opt",
     );
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -1296,7 +1291,7 @@ determinismTest(
   continuedEmptyStatement,
   [{ byte: 9, deleteBytes: 1, insert: "\\\n" }],
   (tree) => {
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
   },
 );
 
@@ -1312,7 +1307,7 @@ determinismTest(
   lines("function f(first,", "second) {}"),
   lines("function f(first,\\", "second) {}"),
   [{ byte: 17, deleteBytes: 0, insert: "\\" }],
-  (tree) => contains(tree, "line_continuation"),
+  (tree) => contains(tree, continuationMarker),
 );
 
 determinismTest(
@@ -1338,50 +1333,159 @@ function continuationHistoryTest(name, initialSource, steps) {
       const fresh = captureParse(writeSource(name, "expected", step.source));
       const incremental = captureParse(initial, edits);
       for (const result of [fresh, incremental]) {
-        assertStatus(label, result, 0);
-        clean(result.tree);
+        if (step.valid === false) {
+          assert.ok(result.status === 0 || result.status === 1, label);
+          assert.equal(hasRecovery(result.tree), true, label);
+        } else {
+          assertStatus(label, result, 0);
+          clean(result.tree);
+          if (step.ranges !== undefined)
+            assert.deepEqual(
+              continuationRanges(result.tree),
+              step.ranges,
+              label,
+            );
+          if (step.newlines !== undefined)
+            assert.equal(
+              matchingLineCount(result.tree, /[ \t]newline$/),
+              step.newlines,
+              label,
+            );
+        }
       }
-      assert.equal(incremental.tree, fresh.tree, label);
+      if (step.valid !== false)
+        assert.equal(incremental.tree, fresh.tree, label);
     }
   });
 }
 
-for (const [name, before, after] of [
-  ["keyword", "BE", "GIN {}\n"],
-  ["name", "BEGIN { print va", "lue }\n"],
-  ["built-in name", "BEGIN { print len", "gth(x) }\n"],
-  ["assignment operator", "BEGIN { x +", "= 1 }\n"],
-  ["unary field assignment name", "BEGIN { $-na", "me = value }\n"],
+continuationHistoryTest(
+  "editing each byte of repeated continuations at EOF preserves layout",
+  "{}\\",
+  [
+    {
+      edits: [{ byte: 3, deleteBytes: 0, insert: "\n" }],
+      source: "{}\\\n",
+      ranges: [[0, 2, 0, 3]],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 4, deleteBytes: 0, insert: "\\\n" }],
+      source: "{}\\\n\\\n",
+      ranges: [
+        [0, 2, 0, 3],
+        [1, 0, 1, 1],
+      ],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 1, insert: "" }],
+      source: "{}\n\\\n",
+      ranges: [[1, 0, 1, 1]],
+      newlines: 1,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 0, insert: "\\" }],
+      source: "{}\\\n\\\n",
+      ranges: [
+        [0, 2, 0, 3],
+        [1, 0, 1, 1],
+      ],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
+      source: "{}\\\\\n",
+      valid: false,
+    },
+    {
+      edits: [{ byte: 3, deleteBytes: 0, insert: "\n" }],
+      source: "{}\\\n\\\n",
+      ranges: [
+        [0, 2, 0, 3],
+        [1, 0, 1, 1],
+      ],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 4, insert: "" }],
+      source: "{}",
+      ranges: [],
+      newlines: 0,
+    },
+  ],
+);
+
+continuationHistoryTest(
+  "Unicode edits before a continuation preserve byte ranges and newline ownership",
+  '{ print "あ"\\\n x }',
+  [
+    {
+      edits: [{ byte: 12, deleteBytes: 0, insert: "界" }],
+      source: '{ print "あ界"\\\n x }',
+      ranges: [[0, 16, 0, 17]],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 16, deleteBytes: 1, insert: "" }],
+      source: '{ print "あ界"\n x }',
+      ranges: [],
+      newlines: 1,
+    },
+    {
+      edits: [{ byte: 16, deleteBytes: 0, insert: "\\" }],
+      source: '{ print "あ界"\\\n x }',
+      ranges: [[0, 16, 0, 17]],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 12, deleteBytes: 3, insert: "" }],
+      source: '{ print "あ"\\\n x }',
+      ranges: [[0, 13, 0, 14]],
+      newlines: 0,
+    },
+  ],
+);
+
+for (const [name, before, after, valid] of [
+  ["keyword", "BE", "GIN {}\n", true],
+  ["name", "BEGIN { print va", "lue }\n", true],
+  ["built-in name", "BEGIN { print len", "gth(x) }\n", true],
+  ["assignment operator", "BEGIN { x +", "= 1 }\n", false],
+  ["unary field assignment name", "BEGIN { $-na", "me = value }\n", false],
   [
     "unary field assignment operator",
     "BEGIN { print $!array[index] +",
     "= value }\n",
+    false,
   ],
-  ["exponent", "BEGIN { print 1e+", "2 }\n"],
-  ["number suffix", "BEGIN { print 1.0", "F }\n"],
-  ["string", 'BEGIN { print "a', 'b" }\n'],
-  ["ERE bracket", "BEGIN { print /[a", "-z]/ }\n"],
-  ["string escape", 'BEGIN { print "\\', 'n" }\n'],
-  ["octal escape", 'BEGIN { print "\\1', '23" }\n'],
-  ["ERE escaped delimiter", "BEGIN { print /a\\", "/b/ }\n"],
-  ["ERE class name", "BEGIN { print /[[:al", "pha:]]/ }\n"],
-  ["ERE duplication count", "BEGIN { print /a{1", "2}/ }\n"],
-  ["ERE compound delimiter", "BEGIN { print /[[", ":alpha:]]/ }\n"],
+  ["exponent", "BEGIN { print 1e+", "2 }\n", true],
+  ["number suffix", "BEGIN { print 1.0", "F }\n", true],
+  ["string", 'BEGIN { print "a', 'b" }\n', false],
+  ["ERE bracket", "BEGIN { print /[a", "-z]/ }\n", false],
+  ["string escape", 'BEGIN { print "\\', 'n" }\n', false],
+  ["octal escape", 'BEGIN { print "\\1', '23" }\n', false],
+  ["ERE escaped delimiter", "BEGIN { print /a\\", "/b/ }\n", false],
+  ["ERE class name", "BEGIN { print /[[:al", "pha:]]/ }\n", false],
+  ["ERE duplication count", "BEGIN { print /a{1", "2}/ }\n", false],
+  ["ERE compound delimiter", "BEGIN { print /[[", ":alpha:]]/ }\n", false],
 ]) {
   const initial = before + after;
   const split = `${before}\\\n${after}`;
   const prefix = "# shifted source\n";
   continuationHistoryTest(
-    `${name} continuations remain deterministic through prefix edits and removal`,
+    `${name} token boundaries recover through continuation insertion and removal`,
     initial,
     [
       {
         edits: [{ byte: before.length, deleteBytes: 0, insert: "\\\n" }],
         source: split,
+        valid,
       },
       {
         edits: [{ byte: 0, deleteBytes: 0, insert: prefix }],
         source: prefix + split,
+        valid,
       },
       {
         edits: [
@@ -1407,6 +1511,7 @@ continuationHistoryTest(
         { byte: 8, deleteBytes: 0, insert: '"' },
       ],
       source: lines('{ print "a\\', '+b" }'),
+      valid: false,
     },
     {
       edits: [
@@ -1425,6 +1530,7 @@ continuationHistoryTest(
     {
       edits: [{ byte: 10, deleteBytes: 0, insert: "~ " }],
       source: lines("{ print x ~ /\\", "a/ + b }"),
+      valid: false,
     },
     {
       edits: [{ byte: 10, deleteBytes: 2, insert: "" }],
@@ -1449,7 +1555,7 @@ continuationHistoryTest(
 );
 
 continuationHistoryTest(
-  "a blank separates a split word into two tokens and back",
+  "a blank preserves two tokens separated by a continuation",
   lines("{ f\\", "oo(x) }"),
   [
     {
@@ -1465,7 +1571,7 @@ continuationHistoryTest(
 
 for (const { name, initial, changed, removed, inserted, expected } of [
   {
-    name: "a keyword becomes a name after a continued prefix",
+    name: "editing a name after a continuation keeps the preceding name separate",
     initial: lines("BE\\", "GIN { print 1 }"),
     changed: lines("BE\\", "GUN { print 1 }"),
     removed: "GIN",
@@ -1473,7 +1579,7 @@ for (const { name, initial, changed, removed, inserted, expected } of [
     expected: "name",
   },
   {
-    name: "a builtin becomes a user function after a continued prefix",
+    name: "editing a call name after a continuation keeps the preceding name separate",
     initial: lines("BEGIN { print len\\", "gth(x) }"),
     changed: lines("BEGIN { print len\\", "gtx(x) }"),
     removed: "gth",
@@ -1481,7 +1587,7 @@ for (const { name, initial, changed, removed, inserted, expected } of [
     expected: "func_name",
   },
   {
-    name: "an exponent edit moves a continuation out of its number",
+    name: "editing a name after a number keeps the continuation outside the number",
     initial: lines("BEGIN { print 1\\", "e+2 }"),
     changed: lines("BEGIN { print 1\\", "e+x }"),
     removed: "e+2",

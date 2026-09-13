@@ -14,6 +14,8 @@ const nativeLibrary = path.join(
 
 let sourceSequence = 0;
 
+const continuationMarker = JSON.stringify("\\");
+
 before(() => {
   const result = runtime.run(
     ["build", "--output", nativeLibrary, path.join(root, grammar.path)],
@@ -119,11 +121,14 @@ function captureParse(sourcePath, edits = []) {
   }
   const tree = normalizeParseTree(result.stdout, sourcePath);
   const end = /^[0-9]+:[0-9]+ +- +([0-9]+:[0-9]+)/.exec(tree)?.[1];
+  const source = applyEdits(fs.readFileSync(sourcePath), edits);
   assert.equal(
     end,
-    sourceEndPoint(applyEdits(fs.readFileSync(sourcePath), edits)),
+    sourceEndPoint(source),
     "root must reach the edited source end",
   );
+  if (result.status === 0 && !hasRecovery(tree))
+    assertContinuationRanges(tree, source);
   return {
     status: result.status,
     stderr: result.stderr,
@@ -197,8 +202,50 @@ function clean(tree) {
   assert.doesNotMatch(tree, recoveryMarker, tree);
 }
 
+function continuationRanges(tree) {
+  const ranges = [];
+  for (const line of tree.split("\n")) {
+    const match = /^([0-9]+):([0-9]+) +- +([0-9]+):([0-9]+) +(.+)$/.exec(line);
+    if (match?.[5] === continuationMarker)
+      ranges.push(match.slice(1, 5).map(Number));
+  }
+  return ranges;
+}
+
+function assertContinuationRanges(tree, source) {
+  const lineStarts = [0];
+  for (let byte = 0; byte < source.length; byte++) {
+    if (source[byte] === 10) lineStarts.push(byte + 1);
+  }
+  for (const [startRow, startColumn, endRow, endColumn] of continuationRanges(
+    tree,
+  )) {
+    assert.equal(
+      endRow,
+      startRow,
+      "a continuation marker must exclude its newline",
+    );
+    assert.equal(
+      endColumn,
+      startColumn + 1,
+      "a continuation marker must span one byte",
+    );
+    const byte = lineStarts[startRow] + startColumn;
+    assert.deepEqual(
+      source.subarray(byte, byte + 2),
+      Buffer.from("\\\n"),
+      "a continuation marker must span its backslash before a newline",
+    );
+    assert.equal(
+      lineStarts[startRow + 1],
+      byte + 2,
+      "a continuation marker must end its physical source line",
+    );
+  }
+}
+
 function cleanContinuation(tree) {
-  contains(tree, "line_continuation");
+  contains(tree, continuationMarker);
   clean(tree);
 }
 
@@ -287,6 +334,8 @@ export {
   clean,
   cleanContinuation,
   contains,
+  continuationMarker,
+  continuationRanges,
   determinismTest,
   dirty,
   editHistoryTest,

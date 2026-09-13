@@ -12,6 +12,8 @@ import {
   captureParse,
   clean,
   contains,
+  continuationMarker,
+  continuationRanges,
   determinismTest,
   dirty,
   freshTest,
@@ -203,18 +205,14 @@ test("posix_awk: actions, EREs and strings require one opening and closing token
   }
 });
 
-test("posix_awk: continued tokens expose content fields and no rejection marker", () => {
-  assert.equal(
-    nodeTypes.some((node) => node.type === "split_token"),
-    false,
-  );
-  assert.deepEqual(
-    nodeTypes.find((node) => node.type === "token_content"),
-    {
-      type: "token_content",
-      named: true,
-    },
-  );
+test("posix_awk: lexical tokens expose contiguous leaves", () => {
+  for (const removed of ["split_token", "token_content", "line_continuation"]) {
+    assert.equal(
+      nodeTypes.some((node) => node.type === removed),
+      false,
+      removed,
+    );
+  }
   for (const kind of [
     "name",
     "func_name",
@@ -230,65 +228,144 @@ test("posix_awk: continued tokens expose content fields and no rejection marker"
     "dup_count",
   ]) {
     const node = nodeTypes.find((node) => node.type === kind);
-    assert.deepEqual(
-      node.fields.content,
-      {
-        multiple: true,
-        required: false,
-        types: [{ type: "token_content", named: true }],
-      },
-      kind,
-    );
+    assert.ok(node, kind);
+    assert.deepEqual(node.fields ?? {}, {}, kind);
+    assert.equal(node.children, undefined, kind);
   }
 });
 
-for (const [name, source] of [
-  ["name", lines("{ print va\\", "lue }")],
-  ["function name", lines("{ fu\\", "nc(value) }")],
-  ["special pattern", lines("BE\\", "GIN {}")],
-  ["keyword", lines("fun\\", "ction f() {}")],
-  ["built-in name", lines("{ print len\\", "gth(value) }")],
-  ["repeated continuations in a name", lines("{ print va\\", "\\", "lue }")],
-  ["integer digits", lines("{ print 1\\", "2 }")],
-  ["decimal point", lines("{ print 1\\", ".2 }")],
-  ["leading decimal point", lines("{ print .\\", "2 }")],
-  ["fraction digits", lines("{ print 1.\\", "2 }")],
-  ["exponent marker", lines("{ print 1\\", "e2 }")],
-  ["exponent sign", lines("{ print 1e\\", "+2 }")],
-  ["exponent digits", lines("{ print 1e+\\", "2 }")],
-  ["fraction suffix", lines("{ print 1.\\", "f }")],
-  ["exponent suffix", lines("{ print 1e2\\", "L }")],
-  ["name after an incomplete exponent", lines("{ print 1e\\", "foo }")],
-  ["multiple number boundaries", lines("{ print 1\\", ".2e\\", "+\\", "3F }")],
-  ["string content", lines('{ print "a\\', 'b" }')],
-  ["string opening boundary", lines('{ print "\\', 'a" }')],
-  ["string closing boundary", lines('{ print "a\\', '" }')],
-  ["repeated continuations in a string", lines('{ print "a\\', "\\", 'b" }')],
-  ["ERE content", lines("{ print /a\\", "b/ }")],
-  ["ERE opening boundary", lines("{ print /\\", "a/ }")],
-  ["ERE closing boundary", lines("{ print /a\\", "/ }")],
-  ["ERE compound bracket form", lines("{ print /[[:al\\", "pha:]]/ }")],
-  ["ERE bracket range", lines("{ print /[a-\\", "z]/ }")],
-  ["ERE escaped delimiter boundary", lines("{ print /a\\\\", "/b/ }")],
-  ["division assignment", lines("{ x /\\", "= 1 }")],
-  ["addition assignment", lines("{ x +\\", "= 1 }")],
-  ["subtraction assignment", lines("{ x -\\", "= 1 }")],
-  ["multiplication assignment", lines("{ x *\\", "= 1 }")],
-  ["modulus assignment", lines("{ x %\\", "= 1 }")],
-  ["power assignment", lines("{ x ^\\", "= 1 }")],
-  ["logical or", lines("{ print x |\\", "| y }")],
-  ["logical and", lines("{ print x &\\", "& y }")],
-  ["non-match", lines("{ print x !\\", "~ y }")],
-  ["equality", lines("{ print (x =\\", "= y) }")],
-  ["less or equal", lines("{ print (x <\\", "= y) }")],
-  ["greater or equal", lines("{ print (x >\\", "= y) }")],
-  ["inequality", lines("{ print (x !\\", "= y) }")],
-  ["increment", lines("{ x +\\", "+ }")],
-  ["decrement", lines("{ x -\\", "- }")],
-  ["append", lines("{ print x >\\", "> file }")],
+test("posix_awk: continuation markers are anonymous leaves", () => {
+  const node = nodeTypes.find((node) => node.type === "\\");
+  assert.ok(node);
+  assert.equal(node.named, false);
+  assert.equal(node.children, undefined);
+});
+
+for (const [name, source, ranges] of [
+  ["only a continuation", "\\\n", [[0, 0, 0, 1]]],
+  [
+    "repeated continuations",
+    "\\\n\\\n",
+    [
+      [0, 0, 0, 1],
+      [1, 0, 1, 1],
+    ],
+  ],
+  ["leading continuation", "\\\n{}", [[0, 0, 0, 1]]],
+  ["trailing continuation at EOF", "{}\\\n", [[0, 2, 0, 3]]],
+  ["expression boundary", "{ x\\\ny }", [[0, 3, 0, 4]]],
+  ["parameter boundary", "function f(a,\\\nb) {}", [[0, 13, 0, 14]]],
+  ["Unicode before a boundary", '{ "日本語"\\\nx }', [[0, 13, 0, 14]]],
 ]) {
-  freshTest(`${name} continuations preserve normal parsing`, source, (tree) => {
-    contains(tree, "line_continuation");
+  freshTest(`${name} exposes only its backslash bytes`, source, (tree) => {
+    assert.deepEqual(continuationRanges(tree), ranges, tree);
+    assert.doesNotMatch(tree, /[ \t]newline$/m, tree);
+    assert.equal(tree.includes("line_continuation"), false, tree);
+  });
+}
+
+for (const [name, source, expected, absent] of [
+  [
+    "name",
+    lines("{ print va\\", "lue }"),
+    ["name `va`", "name `lue`"],
+    "name `value`",
+  ],
+  [
+    "function name",
+    lines("{ fu\\", "nc(value) }"),
+    ["name `fu`", "func_name `nc`"],
+    "func_name `func`",
+  ],
+  [
+    "special pattern",
+    lines("BE\\", "GIN {}"),
+    ["name `BE`", "name `GIN`"],
+    "begin_keyword",
+  ],
+  [
+    "keyword",
+    lines("fun\\", "ction f() {}"),
+    ["name `fun`", "name `ction`"],
+    "function_keyword",
+  ],
+  [
+    "built-in name",
+    lines("{ print len\\", "gth(value) }"),
+    ["name `len`", "func_name `gth`"],
+    "builtin_func_name",
+  ],
+  [
+    "repeated gaps",
+    lines("{ print va\\", "\\", "lue }"),
+    ["name `va`", "name `lue`"],
+    "name `value`",
+  ],
+  [
+    "integer digits",
+    lines("{ print 1\\", "2*3 }"),
+    ["number `1`", "number `2`", "number `3`"],
+    "number `12`",
+  ],
+  [
+    "decimal point",
+    lines("{ print 1\\", ".2 }"),
+    ["number `1`", "number `.2`"],
+    "number `1.2`",
+  ],
+  [
+    "fraction digits",
+    lines("{ print 1.\\", "2 }"),
+    ["number `1.`", "number `2`"],
+    "number `1.2`",
+  ],
+  [
+    "exponent marker",
+    lines("{ print 1\\", "e2 }"),
+    ["number `1`", "name `e2`"],
+    "number `1e2`",
+  ],
+  [
+    "exponent sign",
+    lines("{ print 1e\\", "+2 }"),
+    ["number `1`", "name `e`", "number `2`"],
+    "number `1e+2`",
+  ],
+  [
+    "exponent digits",
+    lines("{ print 1e+\\", "2 }"),
+    ["number `1`", "name `e`", "number `2`"],
+    "number `1e+2`",
+  ],
+  [
+    "fraction suffix",
+    lines("{ print 1.\\", "f }"),
+    ["number `1.`", "name `f`"],
+    "number `1.f`",
+  ],
+  [
+    "exponent suffix",
+    lines("{ print 1e2\\", "L }"),
+    ["number `1e2`", "name `L`"],
+    "number `1e2L`",
+  ],
+  [
+    "plus operators",
+    lines("{ print x +\\", "+ y }"),
+    ['"+"', "name `y`"],
+    "incr",
+  ],
+  [
+    "minus operators",
+    lines("{ print x -\\", "- y }"),
+    ['"-"', "name `y`"],
+    "decr",
+  ],
+]) {
+  freshTest(`${name} stay separate across a continuation`, source, (tree) => {
+    contains(tree, continuationMarker);
+    for (const token of expected) contains(tree, token);
+    assert.equal(tree.includes(absent), false, tree);
   });
 }
 
@@ -302,11 +379,7 @@ for (const [name, source, expected] of [
     "name `x`",
   ],
   ["number suffix and name", lines("{ print 1.0f\\", "oo }"), "number `1.0f`"],
-  [
-    "repeated function-name gaps",
-    lines("{ f\\", "\\", "(x) }"),
-    "func_name `f`",
-  ],
+  ["repeated function-name gaps", lines("{ f\\", "\\", "(x) }"), "name `f`"],
   ["spaced function-name gap", lines("{ f \\", "(x) }"), "name `f`"],
   ["division and operand", lines("{ print x /\\", "y }"), '"/"'],
   ["adjacent strings", lines('{ print "a"\\', '"b" }'), "string_content `b`"],
@@ -316,7 +389,7 @@ for (const [name, source, expected] of [
     `a token-boundary continuation preserves ${name}`,
     source,
     (tree) => {
-      contains(tree, "line_continuation");
+      contains(tree, continuationMarker);
       contains(tree, expected);
     },
   );
@@ -326,7 +399,7 @@ freshTest(
   "comment backslashes remain comment text",
   lines("# name\\", "BEGIN { # += \\", "print 1 }"),
   (tree) => {
-    assert.equal(tree.includes("line_continuation"), false, tree);
+    assert.equal(tree.includes(continuationMarker), false, tree);
   },
 );
 
@@ -353,18 +426,7 @@ freshTest(
   lines(String.raw`{ print /\=/, /\foo/ }`),
   (tree) => {
     contains(tree, "escape_sequence");
-    assert.equal(tree.includes("line_continuation"), false, tree);
-  },
-);
-
-freshTest(
-  "continuations between string quotes preserve an empty string",
-  lines('BEGIN { print "\\', "\\", '" }'),
-  (tree) => {
-    contains(tree, "string");
-    contains(tree, "line_continuation");
-    assert.equal(tree.includes("string_content"), false, tree);
-    assert.equal(tree.includes("token_content"), false, tree);
+    assert.equal(tree.includes(continuationMarker), false, tree);
   },
 );
 
@@ -374,7 +436,7 @@ freshTest(
   (tree) => {
     contains(tree, "name `va`");
     contains(tree, "name `lue`");
-    contains(tree, "line_continuation");
+    contains(tree, continuationMarker);
     assert.equal(tree.includes("token_content"), false, tree);
   },
 );
@@ -419,8 +481,8 @@ for (const [name, source, kind] of [
     "equivalence_class",
   ],
   [
-    "a continued colon closing sequence stays inside a collating symbol",
-    lines("/[[.:\\", "].]]/"),
+    "a colon closing sequence stays inside a collating symbol",
+    "/[[.:].]]/",
     "collating_symbol",
   ],
 ]) {
@@ -492,12 +554,66 @@ for (const { name, source } of membershipPrecedenceCases) {
 
 const invalidSyntaxCases = [
   {
-    name: "a continued comparison still requires parentheses in print arguments",
-    source: lines("BEGIN { print x =\\", "= y }"),
+    name: "a backslash at EOF cannot form a continuation",
+    source: "{}\\",
   },
   {
-    name: "a continued comparison cannot become an output redirection",
-    source: lines("BEGIN { print x >\\", "= y }"),
+    name: "a blank before the newline cannot complete a continuation",
+    source: "{}\\ \n",
+  },
+  {
+    name: "a function definition cannot join two name tokens",
+    source: lines("function l\\", "iterals() {}"),
+  },
+  {
+    name: "a leading decimal point cannot join following digits",
+    source: lines("{ print .\\", "2 }"),
+  },
+  ...[
+    ["string content", lines('{ print "a\\', 'b" }')],
+    ["string opening boundary", lines('{ print "\\', 'a" }')],
+    ["string closing boundary", lines('{ print "a\\', '" }')],
+    ["empty string", lines('{ print "\\', "\\", '" }')],
+    ["string escape", lines('{ print "\\\\', 'n" }')],
+    ["string octal escape", lines('{ print "\\1\\', '23" }')],
+    ["ERE content", lines("{ print /a\\", "b/ }")],
+    ["ERE opening boundary", lines("{ print /\\", "a/ }")],
+    ["ERE closing boundary", lines("{ print /a\\", "/ }")],
+    ["ERE compound bracket form", lines("{ print /[[:al\\", "pha:]]/ }")],
+    ["ERE bracket range", lines("{ print /[a-\\", "z]/ }")],
+    ["ERE duplication count", lines("{ print /a{1\\", "2}/ }")],
+    ["ERE escaped delimiter", lines("{ print /a\\\\", "/b/ }")],
+  ].map(([name, source]) => ({
+    name: `${name} rejects an internal physical newline`,
+    source,
+  })),
+  ...[
+    ["division assignment", "/", "="],
+    ["addition assignment", "+", "="],
+    ["subtraction assignment", "-", "="],
+    ["multiplication assignment", "*", "="],
+    ["modulus assignment", "%", "="],
+    ["power assignment", "^", "="],
+    ["logical or", "|", "|"],
+    ["logical and", "&", "&"],
+    ["non-match", "!", "~"],
+    ["less or equal", "<", "="],
+    ["inequality", "!", "="],
+    ["append", ">", ">"],
+  ].map(([name, first, second]) => ({
+    name: `separated ${name} characters cannot form one operator`,
+    source: lines(
+      `{ ${name === "append" ? "print " : ""}x ${first}\\`,
+      `${second} y }`,
+    ),
+  })),
+  {
+    name: "separated equality characters do not form a comparison",
+    source: lines("BEGIN { print (x =\\", "= y) }"),
+  },
+  {
+    name: "separated greater-than and equals do not form a comparison",
+    source: lines("BEGIN { print (x >\\", "= y) }"),
   },
   {
     name: "continuations cannot supply the expression in an empty ERE",
@@ -540,8 +656,48 @@ const invalidSyntaxCases = [
     source: lines("BEGIN { $a^b = c }"),
   },
   {
-    name: "a split second postfix update still requires an lvalue",
-    source: lines("BEGIN { print $a++-\\", "- }"),
+    name: "a second postfix update after a continuation still requires an lvalue",
+    source: lines("BEGIN { print $a++\\", "-- }"),
+  },
+  {
+    name: "a field cannot absorb a postfix update on a unary numeric operand",
+    source: lines("BEGIN { $-1++ }"),
+  },
+  {
+    name: "a field cannot absorb a postfix update on an exponent operand",
+    source: lines("BEGIN { $-x^2++ }"),
+  },
+  {
+    name: "a field cannot absorb a postfix update after a prefix update",
+    source: lines("BEGIN { $++x++ }"),
+  },
+  {
+    name: "a field cannot absorb a second postfix update through unary negation",
+    source: lines("BEGIN { $!x++-- }"),
+  },
+  {
+    name: "nested fields cannot bypass postfix operand precedence",
+    source: lines("BEGIN { $$-x^2++ }"),
+  },
+  {
+    name: "a print field argument preserves postfix operand precedence",
+    source: lines("BEGIN { print $-x^2++ }"),
+  },
+  {
+    name: "a printf field argument preserves postfix operand precedence",
+    source: lines("BEGIN { printf $++x++ }"),
+  },
+  {
+    name: "a continuation before a postfix token cannot bypass field operand precedence",
+    source: lines("BEGIN { $-x^2\\", "++ }"),
+  },
+  {
+    name: "a getline field target cannot bypass postfix operand precedence",
+    source: lines("BEGIN { $getline $-x^2++ }"),
+  },
+  {
+    name: "nested getline field targets cannot bypass postfix operand precedence",
+    source: lines("BEGIN { $getline $getline $++x++ }"),
   },
   {
     name: "greater-than-or-equal without a right operand is rejected",
@@ -743,16 +899,16 @@ test("posix_awk: large tokens, statement lists and nested blocks parse through E
   for (const [name, source] of [
     ["long string", `BEGIN { print "${"x".repeat(80_000)}" }\n`],
     [
-      "many continuations in a name",
+      "many names separated by continuations",
       `BEGIN { print ${"x\\\n".repeat(16_000)}x }\n`,
     ],
     [
-      "many continuations in a number",
+      "many numbers separated by continuations",
       `BEGIN { print ${"1\\\n".repeat(16_000)}1 }\n`,
     ],
     [
-      "many continuations in string content",
-      `BEGIN { print "${"x\\\n".repeat(16_000)}x" }\n`,
+      "many string escapes",
+      `BEGIN { print "${String.raw`\n`.repeat(16_000)}x" }\n`,
     ],
     ["wide statement list", `BEGIN { ${"x++;".repeat(16_000)} }\n`],
     ["deep blocks", `BEGIN ${"{".repeat(2000)}print 1;${"}".repeat(2000)}\n`],

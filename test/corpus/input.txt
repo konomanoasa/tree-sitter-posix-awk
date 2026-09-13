@@ -264,7 +264,7 @@ getline followed by a postfix update remains a concatenation
                     (incr)))))))))))
 
 ==================
-a getline target owns a continuation before a comparison operator
+a getline target accepts a continuation before a comparison operator
 ==================
 
 BEGIN {
@@ -297,7 +297,6 @@ BEGIN {
                           (getline_keyword)
                           (lvalue
                             (name)))))
-                    (line_continuation)
                     (le)
                     (expr
                       (non_unary_expr
@@ -308,7 +307,7 @@ BEGIN {
       (newline))))
 
 ==================
-a getline target owns a continuation before input redirection
+a getline target accepts a continuation before input redirection
 ==================
 
 BEGIN {
@@ -340,11 +339,43 @@ BEGIN {
                         (getline_keyword)
                         (lvalue
                           (name)))
-                      (line_continuation)
                       (expr
                         (non_unary_expr
                           (lvalue
                             (name)))))))))
             (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a postfix update stays inside a getline target unary field operand
+==================
+
+$getline $-x++
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (normal_pattern
+        (expr
+          (non_unary_expr
+            (lvalue
+              (expr
+                (non_unary_expr
+                  (non_unary_input_function
+                    (simple_get
+                      (getline_keyword)
+                      (lvalue
+                        (expr
+                          (unary_expr
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))
+                                (incr)))))))))))))))
     (terminator
       (newline))))

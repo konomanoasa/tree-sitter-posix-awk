@@ -8,7 +8,6 @@ const PRECEDENCE = {
   concatenation: 14,
   additive: 16,
   multiplicative: 18,
-  postfixUpdate: 20,
   field: 22,
 };
 
@@ -31,16 +30,6 @@ const KEYWORDS = [
   "return",
   "while",
 ];
-
-const classifiedToken = ($, classification) =>
-  seq(classification, $._token_payload);
-
-const keywordRules = Object.fromEntries(
-  KEYWORDS.map((keyword) => [
-    `${keyword}_keyword`,
-    ($) => classifiedToken($, $[`_${keyword}_word`]),
-  ]),
-);
 
 const TWO_CHARACTER_TOKENS = [
   "div_assign",
@@ -75,20 +64,10 @@ const SINGLE_CHARACTER_OPERATORS = {
 };
 
 const singleOperator = ($, character) =>
-  alias($[`_${SINGLE_CHARACTER_OPERATORS[character]}`], character);
-
-const singleCharacterTokenRules = Object.fromEntries(
-  Object.values(SINGLE_CHARACTER_OPERATORS).map((name) => [
-    `_${name}`,
-    ($) => seq($[`_${name}_operator`], $._token_whole),
-  ]),
-);
+  alias($[`_${SINGLE_CHARACTER_OPERATORS[character]}_operator`], character);
 
 const twoCharacterTokenRules = Object.fromEntries(
-  TWO_CHARACTER_TOKENS.map((name) => [
-    name,
-    ($) => classifiedToken($, $[`_${name}_operator`]),
-  ]),
+  TWO_CHARACTER_TOKENS.map((name) => [name, ($) => $[`_${name}_operator`]]),
 );
 
 const newlineLayout = ($) => optional($.newline_opt);
@@ -241,6 +220,28 @@ const callArguments = ($) => parenthesized(optional($.expr_list));
 
 const subscript = (subscripts) => seq("[", subscripts, "]");
 
+const lvalueWithFieldOperand = ($, operand) =>
+  choice(
+    $.name,
+    seq($.name, subscript($.expr_list)),
+    seq(field("operator", "$"), field("operand", operand)),
+  );
+
+const directInputFunction = ($, get) =>
+  choice(
+    field("get", get),
+    prec.right(
+      PRECEDENCE.field,
+      seq(field("get", get), singleOperator($, "<"), field("source", $.expr)),
+    ),
+  );
+
+const simpleGet = ($, target) =>
+  choice(
+    $.getline_keyword,
+    prec.dynamic(1, seq($.getline_keyword, field("target", target))),
+  );
+
 const terminatedStatements = ($) => repeat1($.terminated_statement);
 
 const statementListWithTail = ($, tail) =>
@@ -307,12 +308,12 @@ const CLASSIFICATIONS = ["unary", "non_unary"];
 const aliasedAnyTier = ($, context, tier) =>
   alias($[anyTierName(context, tier)], $[context.expression]);
 
-const nonUnaryAtom = ($, context) => {
+const nonUnaryAtom = ($, context, lvalue = $.lvalue) => {
   const atoms = [
     $._parenthesized_expression,
     $.number,
     $.string,
-    $.lvalue,
+    lvalue,
     $._user_function_call,
     $._builtin_function_call,
     $.builtin_func_name,
@@ -394,12 +395,9 @@ const unaryExpressionRules = (context) => {
     choice(
       $[nonUnary("atom")],
       $._prefix_update_expr,
-      prec.left(
-        PRECEDENCE.postfixUpdate,
-        seq(
-          field("operand", $.lvalue),
-          field("operator", choice($.incr, $.decr)),
-        ),
+      seq(
+        field("operand", alias($.postfix_lvalue, $.lvalue)),
+        field("operator", choice($.incr, $.decr)),
       ),
     );
 
@@ -649,7 +647,7 @@ export default grammar({
   name: "posix_awk",
 
   externals: ($) => [
-    ...KEYWORDS.map((keyword) => $[`_${keyword}_word`]),
+    ...KEYWORDS.map((keyword) => $[`${keyword}_keyword`]),
     $._name_word,
     $._for_in_variable_word,
     $._getline_word,
@@ -657,16 +655,14 @@ export default grammar({
     $._builtin_func_name_word,
     $._builtin_call_word,
     $._func_name_word,
-    $._number_integer,
-    $._number_fraction,
-    $._number_exponent,
-    $._division_slash_guard,
-    $._ere_opening_slash_guard,
+    $._number,
+    $._division_slash,
+    $._ere_opening_slash,
     ...TWO_CHARACTER_TOKENS.map((name) => $[`_${name}_operator`]),
     ...Object.values(SINGLE_CHARACTER_OPERATORS).map(
       (name) => $[`_${name}_operator`],
     ),
-    $._output_greater_guard,
+    $._output_greater,
     $._ere_compound_opening,
     $._ere_dot_closing,
     $._ere_equal_closing,
@@ -676,33 +672,35 @@ export default grammar({
     $._ere_closing_hyphen,
     $._ere_closing,
     $._string_opening,
-    $._string_end,
-    $._string_content_guard,
-    $._string_escape_guard,
-    $._ere_named_escape_guard,
-    $._ere_quoted_escape_guard,
-    $._ere_octal_escape_guard,
-    $._ere_undefined_escape_guard,
-    $._ere_escaped_delimiter_guard,
-    $._ere_class_name_guard,
-    $._ere_dup_count_guard,
-    $._token_whole,
-    $._token_content,
-    $._token_final_content,
-    $._token_line_continuation,
+    $._string_closing,
+    $._string_content,
+    $._string_escape,
+    $._ere_named_escape,
+    $._ere_quoted_escape,
+    $._ere_octal_escape,
+    $._ere_undefined_escape,
+    $._ere_escaped_delimiter,
+    $._ere_class_name,
+    $._ere_dup_count,
     $.comment,
-    $.line_continuation,
+    $._continuation_backslash,
+    $._continuation_newline,
     $._error_sentinel,
   ],
 
   extras: ($) => [
     token(repeat1(choice(" ", "\t"))),
     $.comment,
-    $.line_continuation,
+    $._continuation_marker,
+    $._continuation_newline,
   ],
 
   inline: ($) => [
     $._item,
+    // Unit-reduction merging must not inherit update fields through atom children.
+    $._normal_non_unary_update_expr,
+    $._print_non_unary_update_expr,
+    $._field_non_unary_update_expr,
     $._normal_unary_assignment_expr,
     $._normal_unary_update_expr,
     $._print_unary_assignment_expr,
@@ -710,6 +708,9 @@ export default grammar({
 
   conflicts: ($) => [
     [$.simple_get],
+    [$.simple_get, $.postfix_simple_get],
+    [$.lvalue, $.postfix_lvalue],
+    [$._normal_non_unary_field_atom_expr, $.postfix_non_unary_field_expr],
     // The final item joins item_list only after its terminator is known.
     [$.item_list, $._item_list],
   ],
@@ -717,25 +718,8 @@ export default grammar({
   rules: {
     program: ($) => seq(optional($.item_list), optional($._item)),
 
-    _token_payload: ($) =>
-      choice(
-        $._token_whole,
-        seq(
-          repeat1(
-            choice(
-              field("content", alias($._token_content, $.token_content)),
-              alias($._token_line_continuation, $.line_continuation),
-            ),
-          ),
-          field("content", alias($._token_final_content, $.token_content)),
-        ),
-      ),
-
-    _division_slash: ($) => seq($._division_slash_guard, $._token_whole),
-
-    _ere_opening_slash: ($) => seq($._ere_opening_slash_guard, $._token_whole),
-
-    ...singleCharacterTokenRules,
+    // A literal extra would let the generated lexer accept raw backslashes.
+    _continuation_marker: ($) => alias($._continuation_backslash, "\\"),
 
     _additive_operator: ($) =>
       field("operator", choice(singleOperator($, "+"), singleOperator($, "-"))),
@@ -828,8 +812,6 @@ export default grammar({
 
     special_pattern: ($) => choice($.begin_keyword, $.end_keyword),
 
-    ...keywordRules,
-
     action: ($) =>
       seq(
         field("opening", "{"),
@@ -874,7 +856,7 @@ export default grammar({
         field("array", $.name),
       ),
 
-    for_in_variable: ($) => classifiedToken($, $._for_in_variable_word),
+    for_in_variable: ($) => $._for_in_variable_word,
 
     _for_header: ($) =>
       header(
@@ -944,13 +926,7 @@ export default grammar({
 
     output_redirection: ($) =>
       seq(
-        choice(
-          seq(
-            $._output_greater_guard,
-            choice(singleOperator($, ">"), $.append),
-          ),
-          singleOperator($, "|"),
-        ),
+        choice(alias($._output_greater, ">"), $.append, singleOperator($, "|")),
         $.expr,
       ),
 
@@ -1020,30 +996,38 @@ export default grammar({
     _builtin_function_call: ($) =>
       seq(alias($.builtin_call_name, $.builtin_func_name), callArguments($)),
 
-    builtin_call_name: ($) => classifiedToken($, $._builtin_call_word),
+    builtin_call_name: ($) => $._builtin_call_word,
 
     lvalue: ($) =>
-      choice(
-        $.name,
-        seq($.name, subscript($.expr_list)),
-        seq(
-          field("operator", "$"),
-          field("operand", alias($.normal_field_expr, $.expr)),
+      lvalueWithFieldOperand($, alias($.normal_field_expr, $.expr)),
+
+    postfix_lvalue: ($) =>
+      lvalueWithFieldOperand($, alias($.postfix_field_expr, $.expr)),
+
+    postfix_field_expr: ($) =>
+      alias($.postfix_non_unary_field_expr, $.non_unary_expr),
+
+    postfix_non_unary_field_expr: ($) =>
+      prec(
+        PRECEDENCE.field,
+        nonUnaryAtom(
+          $,
+          {
+            ...EXPRESSION_CONTEXT.field,
+            input: ($) =>
+              alias(
+                $.postfix_direct_input_function,
+                $.non_unary_input_function,
+              ),
+          },
+          alias($.postfix_lvalue, $.lvalue),
         ),
       ),
 
-    direct_input_function: ($) =>
-      choice(
-        field("get", $.simple_get),
-        prec.right(
-          PRECEDENCE.field,
-          seq(
-            field("get", $.simple_get),
-            singleOperator($, "<"),
-            field("source", $.expr),
-          ),
-        ),
-      ),
+    direct_input_function: ($) => directInputFunction($, $.simple_get),
+
+    postfix_direct_input_function: ($) =>
+      directInputFunction($, alias($.postfix_simple_get, $.simple_get)),
 
     piped_input_function: ($) =>
       prec.right(
@@ -1065,39 +1049,32 @@ export default grammar({
         ),
       ),
 
-    simple_get: ($) =>
-      choice(
-        $.getline_keyword,
-        prec.dynamic(1, seq($.getline_keyword, field("target", $.lvalue))),
-      ),
+    simple_get: ($) => simpleGet($, $.lvalue),
 
-    getline_keyword: ($) => classifiedToken($, $._getline_word),
+    postfix_simple_get: ($) => simpleGet($, alias($.postfix_lvalue, $.lvalue)),
 
-    in_keyword: ($) => classifiedToken($, $._in_word),
+    getline_keyword: ($) => $._getline_word,
 
-    func_name: ($) => classifiedToken($, $._func_name_word),
+    in_keyword: ($) => $._in_word,
 
-    builtin_func_name: ($) => classifiedToken($, $._builtin_func_name_word),
+    func_name: ($) => $._func_name_word,
 
-    name: ($) => classifiedToken($, $._name_word),
+    builtin_func_name: ($) => $._builtin_func_name_word,
 
-    number: ($) =>
-      classifiedToken(
-        $,
-        choice($._number_integer, $._number_fraction, $._number_exponent),
-      ),
+    name: ($) => $._name_word,
+
+    number: ($) => $._number,
 
     string: ($) =>
       seq(
         field("opening", alias($._string_opening, '"')),
         repeat(choice($.string_content, $.escape_sequence)),
-        $._string_end,
-        field("closing", token.immediate('"')),
+        field("closing", alias($._string_closing, '"')),
       ),
 
-    string_content: ($) => classifiedToken($, $._string_content_guard),
+    string_content: ($) => $._string_content,
 
-    escape_sequence: ($) => classifiedToken($, $._string_escape_guard),
+    escape_sequence: ($) => $._string_escape,
 
     ...twoCharacterTokenRules,
 
@@ -1143,7 +1120,7 @@ export default grammar({
         $._ere_close_brace,
       ),
 
-    dup_count: ($) => classifiedToken($, $._ere_dup_count_guard),
+    dup_count: ($) => $._ere_dup_count,
 
     bracket_expression: ($) =>
       seq(
@@ -1223,7 +1200,7 @@ export default grammar({
     character_class: ($) =>
       seq($._ere_open_colon, $.class_name, $._ere_colon_close),
 
-    class_name: ($) => classifiedToken($, $._ere_class_name_guard),
+    class_name: ($) => $._ere_class_name,
 
     meta_character: ($) => $._ere_compound_meta_character,
 
@@ -1263,30 +1240,22 @@ export default grammar({
 
     _ere_colon_close: ($) => ereCompoundClosing($._ere_colon_closing, ":"),
 
-    escaped_delimiter: ($) =>
-      classifiedToken($, $._ere_escaped_delimiter_guard),
+    escaped_delimiter: ($) => $._ere_escaped_delimiter,
 
-    ere_named_escape_sequence: ($) =>
-      classifiedToken($, $._ere_named_escape_guard),
+    ere_named_escape_sequence: ($) => $._ere_named_escape,
 
-    ere_quoted_escape_sequence: ($) =>
-      classifiedToken($, $._ere_quoted_escape_guard),
+    ere_quoted_escape_sequence: ($) => $._ere_quoted_escape,
 
-    ere_octal_escape_sequence: ($) =>
-      classifiedToken($, $._ere_octal_escape_guard),
+    ere_octal_escape_sequence: ($) => $._ere_octal_escape,
 
-    ere_undefined_escape_sequence: ($) =>
-      classifiedToken($, $._ere_undefined_escape_guard),
+    ere_undefined_escape_sequence: ($) => $._ere_undefined_escape,
 
     ere_bracket_escape_sequence: ($) =>
-      classifiedToken(
-        $,
-        choice(
-          $._ere_named_escape_guard,
-          $._ere_quoted_escape_guard,
-          $._ere_octal_escape_guard,
-          $._ere_undefined_escape_guard,
-        ),
+      choice(
+        $._ere_named_escape,
+        $._ere_quoted_escape,
+        $._ere_octal_escape,
+        $._ere_undefined_escape,
       ),
 
     // Tree-sitter rejects the POSIX bracket spelling for these delimiter

@@ -1386,7 +1386,7 @@ BEGIN {
       (newline))))
 
 ==================
-an addition operand owns a following continuation
+an addition operand accepts a following continuation
 ==================
 
 BEGIN {
@@ -1416,7 +1416,6 @@ BEGIN {
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1426,7 +1425,7 @@ BEGIN {
       (newline))))
 
 ==================
-a multiplication operand owns a following continuation
+a multiplication operand accepts a following continuation
 ==================
 
 BEGIN {
@@ -1456,7 +1455,6 @@ BEGIN {
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1466,7 +1464,7 @@ BEGIN {
       (newline))))
 
 ==================
-an exponentiation operand owns a following continuation
+an exponentiation operand accepts a following continuation
 ==================
 
 BEGIN {
@@ -1496,7 +1494,6 @@ BEGIN {
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1506,7 +1503,7 @@ BEGIN {
       (newline))))
 
 ==================
-a match operand owns a following continuation
+a match operand accepts a following continuation
 ==================
 
 BEGIN {
@@ -1536,7 +1533,6 @@ BEGIN {
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1546,7 +1542,7 @@ BEGIN {
       (newline))))
 
 ==================
-a membership key owns a following continuation
+a membership key accepts a following continuation
 ==================
 
 BEGIN {
@@ -1576,7 +1572,6 @@ in table
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (in_keyword)
                     (name)))))
             (newline)))))
@@ -1584,7 +1579,7 @@ in table
       (newline))))
 
 ==================
-a logical-or operand owns a following continuation
+a logical-or operand accepts a following continuation
 ==================
 
 BEGIN {
@@ -1614,7 +1609,6 @@ BEGIN {
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (or)
                     (expr
                       (non_unary_expr
@@ -1625,7 +1619,7 @@ BEGIN {
       (newline))))
 
 ==================
-a conditional operand owns a following continuation
+a conditional operand accepts a following continuation
 ==================
 
 BEGIN {
@@ -1655,7 +1649,6 @@ BEGIN {
                     (non_unary_expr
                       (lvalue
                         (name)))
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1669,7 +1662,7 @@ BEGIN {
       (newline))))
 
 ==================
-an assignment target owns a following continuation
+an assignment target accepts a following continuation
 ==================
 
 BEGIN {
@@ -1698,7 +1691,6 @@ BEGIN {
                   (non_unary_expr
                     (lvalue
                       (name))
-                    (line_continuation)
                     (expr
                       (non_unary_expr
                         (lvalue
@@ -1708,7 +1700,7 @@ BEGIN {
       (newline))))
 
 ==================
-an update target owns a following continuation
+an update target accepts a following continuation
 ==================
 
 BEGIN {
@@ -1737,14 +1729,13 @@ BEGIN {
                   (non_unary_expr
                     (lvalue
                       (name))
-                    (line_continuation)
                     (incr)))))
             (newline)))))
     (terminator
       (newline))))
 
 ==================
-an array name owns a continuation before its subscript
+an array name accepts a continuation before its subscript
 ==================
 
 BEGIN {
@@ -1773,7 +1764,6 @@ BEGIN {
                   (non_unary_expr
                     (lvalue
                       (name)
-                      (line_continuation)
                       (expr_list
                         (expr
                           (non_unary_expr
@@ -1784,7 +1774,7 @@ BEGIN {
       (newline))))
 
 ==================
-an array subscript owns a continuation before its closing bracket
+an array subscript accepts a continuation before its closing bracket
 ==================
 
 BEGIN {
@@ -1817,14 +1807,13 @@ BEGIN {
                         (expr
                           (non_unary_expr
                             (lvalue
-                              (name)))))
-                      (line_continuation))))))
+                              (name))))))))))
             (newline)))))
     (terminator
       (newline))))
 
 ==================
-a parenthesized expression owns a continuation before its closing parenthesis
+a parenthesized expression accepts a continuation before its closing parenthesis
 ==================
 
 BEGIN {
@@ -1854,8 +1843,102 @@ BEGIN {
                     (expr
                       (non_unary_expr
                         (lvalue
-                          (name))))
-                    (line_continuation)))))
+                          (name))))))))
             (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a postfix update stays inside a unary field operand
+==================
+
+$-x++
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (normal_pattern
+        (expr
+          (non_unary_expr
+            (lvalue
+              (expr
+                (unary_expr
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))
+                      (incr))))))))))
+    (terminator
+      (newline))))
+
+==================
+a postfix update stays in the exponent of a unary field operand
+==================
+
+$-x^y++
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (normal_pattern
+        (expr
+          (non_unary_expr
+            (lvalue
+              (expr
+                (unary_expr
+                  (expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (name)))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))
+                          (incr))))))))))))
+    (terminator
+      (newline))))
+
+==================
+parentheses close a unary operand before a nested field postfix update
+==================
+
+$$(-x^2)++
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (normal_pattern
+        (expr
+          (non_unary_expr
+            (lvalue
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (expr
+                          (unary_expr
+                            (expr
+                              (non_unary_expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))
+                                (expr
+                                  (non_unary_expr
+                                    (number)))))))))))))
+            (incr)))))
     (terminator
       (newline))))

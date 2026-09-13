@@ -94,6 +94,75 @@ static MockLexer make_mock_lexer(const char *source) {
   };
 }
 
+static void resume_mock_lexer(MockLexer *mock) {
+  mock->offset = mock->token_end;
+  mock->token_start = mock->token_end;
+  mock->content_started = false;
+  mock->lexer.lookahead =
+    mock->offset < mock->length ? (unsigned char)mock->source[mock->offset] : 0;
+}
+
+static bool is_payload_guard(enum TokenType token) {
+  if (token <= PIPE_OPERATOR)
+    return true;
+  switch (token) {
+  case STRING_CONTENT_GUARD:
+  case STRING_ESCAPE_GUARD:
+  case ERE_NAMED_ESCAPE_GUARD:
+  case ERE_QUOTED_ESCAPE_GUARD:
+  case ERE_OCTAL_ESCAPE_GUARD:
+  case ERE_UNDEFINED_ESCAPE_GUARD:
+  case ERE_ESCAPED_DELIMITER_GUARD:
+  case ERE_CLASS_NAME_GUARD:
+  case ERE_DUP_COUNT_GUARD:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static void round_trip_state(ScannerState *state) {
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+  const unsigned length =
+    tree_sitter_posix_awk_external_scanner_serialize(state, buffer);
+  ScannerState restored = {0};
+  tree_sitter_posix_awk_external_scanner_deserialize(&restored, buffer, length);
+  assert(restored.mode == state->mode);
+  assert(restored.payload == state->payload);
+  assert(restored.remaining == state->remaining);
+  *state = restored;
+}
+
+static bool
+finish_payload(MockLexer *mock, ScannerState *state, size_t expected_end) {
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
+    [TOKEN_WHOLE] = true,
+    [TOKEN_CONTENT] = true,
+    [TOKEN_FINAL_CONTENT] = true,
+    [TOKEN_LINE_CONTINUATION] = true,
+  };
+  while (state->payload != PAYLOAD_NONE) {
+    round_trip_state(state);
+    const size_t previous_end = mock->token_end;
+    resume_mock_lexer(mock);
+    if (!tree_sitter_posix_awk_external_scanner_scan(
+          state,
+          &mock->lexer,
+          valid_symbols
+        ))
+      return false;
+    if (
+      mock->token_start !=
+      previous_end ||
+      mock->token_end <=
+      previous_end ||
+      mock->token_end > expected_end
+    )
+      return false;
+  }
+  return mock->token_end == expected_end && state->remaining == 0;
+}
+
 static int expect_scan_result_at(
   const char *test_name,
   const char *source,
@@ -112,18 +181,28 @@ static int expect_scan_result_at(
     &mock.lexer,
     valid_symbols
   );
-  if (
-    scanned ==
-    expected_scanned &&
-    state.mode ==
-    expected_mode &&
-    (!scanned ||
-      (mock.lexer.result_symbol ==
-        expected_symbol &&
-        mock.token_start ==
+  const bool payload_guard = is_payload_guard(expected_symbol);
+  const size_t expected_guard_end =
+    payload_guard ? expected_token_start : expected_token_end;
+  bool valid = scanned == expected_scanned && state.mode == expected_mode;
+  if (scanned) {
+    valid = valid &&
+      mock.lexer.result_symbol ==
+      expected_symbol &&
+      mock.token_start ==
+      expected_token_start &&
+      mock.token_end == expected_guard_end;
+    if (valid && payload_guard) {
+      valid = state.remaining ==
+        expected_token_end -
         expected_token_start &&
-        mock.token_end == expected_token_end))
-  ) {
+        finish_payload(&mock, &state, expected_token_end) &&
+        state.mode == expected_mode;
+    }
+  } else {
+    valid = valid && state.payload == PAYLOAD_NONE && state.remaining == 0;
+  }
+  if (valid) {
     return 0;
   }
 
@@ -228,6 +307,31 @@ static int test_source_token_ranges(void) {
       2},
     {"addition assignment spelling", "+=", ADD_ASSIGN_OPERATOR, 2},
     {"logical-or spelling", "||", OR_OPERATOR, 2},
+    {"single plus excludes following continuation", "+\\\nx", PLUS_OPERATOR, 1},
+    {"single minus excludes following continuation",
+      "-\\\nx",
+      MINUS_OPERATOR,
+      1},
+    {"single star excludes following continuation", "*\\\nx", STAR_OPERATOR, 1},
+    {"single percent excludes following continuation",
+      "%\\\nx",
+      PERCENT_OPERATOR,
+      1},
+    {"single caret excludes following continuation",
+      "^\\\nx",
+      CARET_OPERATOR,
+      1},
+    {"single bang excludes following continuation", "!\\\nx", BANG_OPERATOR, 1},
+    {"single less excludes following continuation", "<\\\nx", LESS_OPERATOR, 1},
+    {"single greater excludes following continuation",
+      ">\\\nx",
+      GREATER_OPERATOR,
+      1},
+    {"single equal excludes following continuation",
+      "=\\\nx",
+      EQUAL_OPERATOR,
+      1},
+    {"single pipe excludes following continuation", "|\\\nx", PIPE_OPERATOR, 1},
   };
 
   int failed = 0;
@@ -298,16 +402,19 @@ static int test_source_token_ranges(void) {
   return failed;
 }
 
-static int test_split_token_boundaries(void) {
+static int test_continued_token_boundaries(void) {
   static const struct {
     const char *name;
     const char *source;
     enum TokenType expected_symbol;
     size_t expected_token_end;
   } cases[] = {
-    {"split keyword", "BE\\\nGIN", SPLIT_TOKEN, 4},
-    {"split identifier", "value\\\n_tail", SPLIT_TOKEN, 7},
-    {"split builtin with repeated pairs", "len\\\n\\\ngth", SPLIT_TOKEN, 7},
+    {"split keyword", "BE\\\nGIN", BEGIN_WORD, 7},
+    {"split identifier", "value\\\n_tail", NAME_WORD, 12},
+    {"split builtin with repeated pairs",
+      "len\\\n\\\ngth",
+      BUILTIN_FUNC_NAME_WORD,
+      10},
     {"continued user call stays adjacent", "follow\\\n(", FUNC_NAME_WORD, 6},
     {"continued builtin call stays adjacent",
       "length\\\n(",
@@ -327,16 +434,16 @@ static int test_split_token_boundaries(void) {
       "length\\\n\\(",
       BUILTIN_FUNC_NAME_WORD,
       6},
-    {"split integer digits", "1\\\n2", SPLIT_TOKEN, 4},
-    {"split leading fraction", ".\\\n5", SPLIT_TOKEN, 4},
-    {"split trailing decimal point", "1\\\n.", SPLIT_TOKEN, 4},
-    {"split fractional digits", "1.\\\n5", SPLIT_TOKEN, 5},
-    {"split exponent introducer", "1\\\ne2", SPLIT_TOKEN, 5},
-    {"split exponent digits", "1e\\\n2", SPLIT_TOKEN, 5},
-    {"split exponent sign", "1e\\\n+2", SPLIT_TOKEN, 6},
-    {"split signed exponent digits", "1e+\\\n2", SPLIT_TOKEN, 6},
-    {"split fraction suffix", "1.0\\\nF", SPLIT_TOKEN, 6},
-    {"split exponent suffix", "1e2\\\nl", SPLIT_TOKEN, 6},
+    {"split integer digits", "1\\\n2", NUMBER_INTEGER, 4},
+    {"split leading fraction", ".\\\n5", NUMBER_FRACTION, 4},
+    {"split trailing decimal point", "1\\\n.", NUMBER_FRACTION, 4},
+    {"split fractional digits", "1.\\\n5", NUMBER_FRACTION, 5},
+    {"split exponent introducer", "1\\\ne2", NUMBER_EXPONENT, 5},
+    {"split exponent digits", "1e\\\n2", NUMBER_EXPONENT, 5},
+    {"split exponent sign", "1e\\\n+2", NUMBER_EXPONENT, 6},
+    {"split signed exponent digits", "1e+\\\n2", NUMBER_EXPONENT, 6},
+    {"split fraction suffix", "1.0\\\nF", NUMBER_FRACTION, 6},
+    {"split exponent suffix", "1e2\\\nl", NUMBER_EXPONENT, 6},
     {"integer boundary before addition", "1\\\n+2", NUMBER_INTEGER, 1},
     {"integer boundary before suffix-like name", "1\\\nf", NUMBER_INTEGER, 1},
     {"incomplete continued exponent preserves integer",
@@ -382,11 +489,11 @@ static int test_split_token_boundaries(void) {
       1},
     {"accepted split survives later invalid lookahead",
       "1\\\n2\\3",
-      SPLIT_TOKEN,
+      NUMBER_INTEGER,
       4},
   };
   const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [SPLIT_TOKEN] = true,
+    [BEGIN_WORD] = true,
     [END_WORD] = true,
     [NAME_WORD] = true,
     [FUNC_NAME_WORD] = true,
@@ -422,35 +529,38 @@ static int test_split_composite_operators(void) {
   static const struct {
     const char *name;
     const char *source;
+    enum TokenType guard;
   } split_cases[] = {
-    {"split division assignment", "/\\\n="},
-    {"split addition assignment", "+\\\n="},
-    {"split subtraction assignment", "-\\\n="},
-    {"split multiplication assignment", "*\\\n="},
-    {"split remainder assignment", "%\\\n="},
-    {"split exponent assignment", "^\\\n="},
-    {"split logical or", "|\\\n|"},
-    {"split logical and", "&\\\n&"},
-    {"split no-match", "!\\\n~"},
-    {"split equality", "=\\\n="},
-    {"split less-or-equal", "<\\\n="},
-    {"split greater-or-equal", ">\\\n="},
-    {"split inequality", "!\\\n="},
-    {"split increment", "+\\\n+"},
-    {"split decrement", "-\\\n-"},
-    {"split append", ">\\\n>"},
+    {"split division assignment", "/\\\n=", DIV_ASSIGN_OPERATOR},
+    {"split addition assignment", "+\\\n=", ADD_ASSIGN_OPERATOR},
+    {"split subtraction assignment", "-\\\n=", SUB_ASSIGN_OPERATOR},
+    {"split multiplication assignment", "*\\\n=", MUL_ASSIGN_OPERATOR},
+    {"split remainder assignment", "%\\\n=", MOD_ASSIGN_OPERATOR},
+    {"split exponent assignment", "^\\\n=", POW_ASSIGN_OPERATOR},
+    {"split logical or", "|\\\n|", OR_OPERATOR},
+    {"split logical and", "&\\\n&", AND_OPERATOR},
+    {"split no-match", "!\\\n~", NO_MATCH_OPERATOR},
+    {"split equality", "=\\\n=", EQ_OPERATOR},
+    {"split less-or-equal", "<\\\n=", LE_OPERATOR},
+    {"split greater-or-equal", ">\\\n=", GE_OPERATOR},
+    {"split inequality", "!\\\n=", NE_OPERATOR},
+    {"split increment", "+\\\n+", INCR_OPERATOR},
+    {"split decrement", "-\\\n-", DECR_OPERATOR},
+    {"split append", ">\\\n>", APPEND_OPERATOR},
   };
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {[SPLIT_TOKEN] = true};
+  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(split_cases); i++) {
+    valid_symbols[split_cases[i].guard] = true;
     failed |= expect_scan_result(
       split_cases[i].name,
       split_cases[i].source,
       valid_symbols,
       true,
-      SPLIT_TOKEN,
+      split_cases[i].guard,
       4
     );
+    valid_symbols[split_cases[i].guard] = false;
   }
   valid_symbols[ADD_ASSIGN_OPERATOR] = true;
   failed |= expect_scan_result(
@@ -474,7 +584,7 @@ static int test_split_composite_operators(void) {
     "+\\\nx",
     valid_symbols,
     false,
-    SPLIT_TOKEN,
+    ADD_ASSIGN_OPERATOR,
     0
   );
   failed |= expect_scan_result(
@@ -482,7 +592,7 @@ static int test_split_composite_operators(void) {
     "+\\\n\\\n=",
     valid_symbols,
     true,
-    SPLIT_TOKEN,
+    ADD_ASSIGN_OPERATOR,
     6
   );
   valid_symbols[GE_OPERATOR] = true;
@@ -503,14 +613,14 @@ static int test_split_composite_operators(void) {
     OUTPUT_GREATER_GUARD,
     0
   );
-  valid_symbols[DIVISION_SLASH] = true;
+  valid_symbols[DIVISION_SLASH_GUARD] = true;
   valid_symbols[DIV_ASSIGN_OPERATOR] = true;
   failed |= expect_scan_result(
     "raw backslash cannot create division assignment",
     "/\\=",
     valid_symbols,
     true,
-    DIVISION_SLASH,
+    DIVISION_SLASH_GUARD,
     1
   );
   failed |= expect_scan_result(
@@ -518,13 +628,13 @@ static int test_split_composite_operators(void) {
     "/\\\n\\=",
     valid_symbols,
     true,
-    DIVISION_SLASH,
+    DIVISION_SLASH_GUARD,
     1
   );
   return failed;
 }
 
-static int test_split_lexical_modes(void) {
+static int test_continuation_lexical_modes(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -534,33 +644,33 @@ static int test_split_lexical_modes(void) {
     size_t expected_token_end;
     LexicalMode expected_mode;
   } cases[] = {
-    {"string continuation is split",
+    {"string continuation retains string mode",
       "\\\n",
       LEXICAL_MODE_STRING,
       true,
-      SPLIT_TOKEN,
+      LINE_CONTINUATION,
       2,
       LEXICAL_MODE_STRING},
-    {"ERE continuation is split",
+    {"ERE continuation retains body mode",
       "\\\n",
       LEXICAL_MODE_ERE_BODY,
       true,
-      SPLIT_TOKEN,
+      LINE_CONTINUATION,
       2,
       LEXICAL_MODE_ERE_BODY},
-    {"escaped ERE delimiter context detects split",
-      "\\\n",
-      LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
+    {"repeated ERE continuations remain individual pairs",
+      "\\\n\\\n",
+      LEXICAL_MODE_ERE_BODY,
       true,
-      SPLIT_TOKEN,
+      LINE_CONTINUATION,
       2,
-      LEXICAL_MODE_ERE_ESCAPED_DELIMITER},
+      LEXICAL_MODE_ERE_BODY},
     {"outside continuation is layout",
       "\\\n",
       LEXICAL_MODE_OUTSIDE,
-      false,
-      SPLIT_TOKEN,
-      0,
+      true,
+      LINE_CONTINUATION,
+      2,
       LEXICAL_MODE_OUTSIDE},
     {"comment backslash remains comment text",
       "# keep \\\n",
@@ -580,53 +690,53 @@ static int test_split_lexical_modes(void) {
       "\\=",
       LEXICAL_MODE_ERE_BODY,
       true,
-      ERE_ESCAPE_START,
-      0,
+      ERE_UNDEFINED_ESCAPE_GUARD,
+      2,
       LEXICAL_MODE_ERE_BODY},
-    {"escaped slash keeps delimiter mode",
+    {"escaped slash keeps ERE body mode",
       "\\/",
       LEXICAL_MODE_ERE_BODY,
       true,
-      ERE_ESCAPED_DELIMITER_START,
-      0,
-      LEXICAL_MODE_ERE_ESCAPED_DELIMITER},
+      ERE_ESCAPED_DELIMITER_GUARD,
+      2,
+      LEXICAL_MODE_ERE_BODY},
     {"ERE opening keeps escaped equals",
       "/\\=/",
       LEXICAL_MODE_OUTSIDE,
       true,
-      ERE_OPENING_SLASH,
+      ERE_OPENING_SLASH_GUARD,
       1,
       LEXICAL_MODE_ERE_BODY},
     {"ERE opening keeps escaped slash",
       "/\\//",
       LEXICAL_MODE_OUTSIDE,
       true,
-      ERE_OPENING_SLASH,
+      ERE_OPENING_SLASH_GUARD,
       1,
       LEXICAL_MODE_ERE_BODY},
     {"ERE opening keeps AWK escape",
       "/\\n/",
       LEXICAL_MODE_OUTSIDE,
       true,
-      ERE_OPENING_SLASH,
+      ERE_OPENING_SLASH_GUARD,
       1,
       LEXICAL_MODE_ERE_BODY},
     {"ERE opening precedes interior continuation",
       "/\\\na/",
       LEXICAL_MODE_OUTSIDE,
       true,
-      ERE_OPENING_SLASH,
+      ERE_OPENING_SLASH_GUARD,
       1,
       LEXICAL_MODE_ERE_BODY},
   };
   const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [SPLIT_TOKEN] = true,
+    [LINE_CONTINUATION] = true,
     [COMMENT] = true,
     [STRING_END] = true,
-    [ERE_OPENING_SLASH] = true,
+    [ERE_OPENING_SLASH_GUARD] = true,
     [DIV_ASSIGN_OPERATOR] = true,
-    [ERE_ESCAPE_START] = true,
-    [ERE_ESCAPED_DELIMITER_START] = true,
+    [ERE_UNDEFINED_ESCAPE_GUARD] = true,
+    [ERE_ESCAPED_DELIMITER_GUARD] = true,
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
@@ -645,46 +755,460 @@ static int test_split_lexical_modes(void) {
   return failed;
 }
 
-static int test_linear_split_number_detection(void) {
-  const size_t continuation_count = 32768;
-  const size_t source_length = continuation_count * 3U + 1U;
-  char *source = malloc(source_length + 1U);
-  if (source == NULL) {
-    return 1;
-  }
-  for (size_t i = 0; i < continuation_count; i++) {
-    memcpy(source + i * 3U, "1\\\n", 3);
-  }
-  source[source_length - 1U] = '2';
-  source[source_length] = '\0';
-  MockLexer mock = make_mock_lexer(source);
-  ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
-  const bool valid_symbols[TOKEN_TYPE_COUNT] = {[SPLIT_TOKEN] = true};
-  const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-    &state,
-    &mock.lexer,
-    valid_symbols
-  );
-  const bool valid_result = scanned &&
-    mock.lexer.result_symbol ==
-    SPLIT_TOKEN &&
-    mock.token_start ==
-    0 &&
-    mock.token_end ==
-    source_length &&
-    mock.advance_count <= source_length;
-  if (!valid_result) {
-    fprintf(
-      stderr,
-      "linear split number: scanned=%u symbol=%u advances=%zu end=%zu\n",
-      scanned,
-      mock.lexer.result_symbol,
-      mock.advance_count,
-      mock.token_end
+static int test_literal_classification(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    LexicalMode mode;
+    enum TokenType guard;
+    size_t end;
+    bool accepted;
+  } cases[] = {
+    {"named ERE escape",
+      "\\n",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_NAMED_ESCAPE_GUARD,
+      2,
+      true},
+    {"quoted ERE escape",
+      "\\+",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_QUOTED_ESCAPE_GUARD,
+      2,
+      true},
+    {"undefined ERE escape",
+      "\\q",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_UNDEFINED_ESCAPE_GUARD,
+      2,
+      true},
+    {"ERE escaped backslash",
+      "\\\\",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_QUOTED_ESCAPE_GUARD,
+      2,
+      true},
+    {"ERE octal escape stops after three digits",
+      "\\1417",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_OCTAL_ESCAPE_GUARD,
+      4,
+      true},
+    {"ERE octal escape stops before nonoctal digit",
+      "\\178",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_OCTAL_ESCAPE_GUARD,
+      3,
+      true},
+    {"continued named ERE escape",
+      "\\\\\nn",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_NAMED_ESCAPE_GUARD,
+      4,
+      true},
+    {"continued quoted ERE escape",
+      "\\\\\n+",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_QUOTED_ESCAPE_GUARD,
+      4,
+      true},
+    {"continued undefined ERE escape",
+      "\\\\\nq",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_UNDEFINED_ESCAPE_GUARD,
+      4,
+      true},
+    {"named escape is not reclassified as undefined",
+      "\\n",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_UNDEFINED_ESCAPE_GUARD,
+      0,
+      false},
+    {"escaped delimiter is not reclassified as quoted",
+      "\\/",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_QUOTED_ESCAPE_GUARD,
+      0,
+      false},
+    {"string escape retains unspecified spelling",
+      "\\q",
+      LEXICAL_MODE_STRING,
+      STRING_ESCAPE_GUARD,
+      2,
+      true},
+    {"string octal escape stops before nonoctal digit",
+      "\\178",
+      LEXICAL_MODE_STRING,
+      STRING_ESCAPE_GUARD,
+      3,
+      true},
+    {"class name includes digits after its initial letter",
+      "al1:",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_CLASS_NAME_GUARD,
+      3,
+      true},
+    {"class name cannot begin with a digit",
+      "1alpha:",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_CLASS_NAME_GUARD,
+      0,
+      false},
+    {"ERE count stops before continuation and comma",
+      "12\\\n,",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_DUP_COUNT_GUARD,
+      2,
+      true},
+    {"incomplete string escape stays incomplete",
+      "\\",
+      LEXICAL_MODE_STRING,
+      STRING_ESCAPE_GUARD,
+      0,
+      false},
+    {"incomplete ERE escape stays incomplete",
+      "\\",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_NAMED_ESCAPE_GUARD,
+      0,
+      false},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].guard] = true;
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].mode,
+      cases[i].accepted,
+      cases[i].guard,
+      0,
+      cases[i].end,
+      cases[i].mode
     );
   }
-  free(source);
-  return valid_result ? 0 : 1;
+  return failed;
+}
+
+static int test_payload_pieces_keep_exact_ranges(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    LexicalMode mode;
+    enum TokenType guard;
+    size_t piece_count;
+    struct {
+      enum TokenType token;
+      size_t start;
+      size_t end;
+    } pieces[5];
+  } cases[] = {
+    {"whole keyword",
+      "END;",
+      LEXICAL_MODE_OUTSIDE,
+      END_WORD,
+      1,
+      {{TOKEN_WHOLE, 0, 3}}},
+    {"keyword with internal continuation",
+      "BE\\\nGIN",
+      LEXICAL_MODE_OUTSIDE,
+      BEGIN_WORD,
+      3,
+      {{TOKEN_CONTENT, 0, 2},
+        {TOKEN_LINE_CONTINUATION, 2, 4},
+        {TOKEN_FINAL_CONTENT, 4, 7}}},
+    {"name with repeated internal continuations",
+      "f\\\n\\\noo",
+      LEXICAL_MODE_OUTSIDE,
+      NAME_WORD,
+      4,
+      {{TOKEN_CONTENT, 0, 1},
+        {TOKEN_LINE_CONTINUATION, 1, 3},
+        {TOKEN_LINE_CONTINUATION, 3, 5},
+        {TOKEN_FINAL_CONTENT, 5, 7}}},
+    {"integer before invalid exponent keeps whole payload",
+      "1e\\\n+x",
+      LEXICAL_MODE_OUTSIDE,
+      NUMBER_INTEGER,
+      1,
+      {{TOKEN_WHOLE, 0, 1}}},
+    {"split integer excludes incomplete exponent",
+      "1\\\n2e+\\\nx",
+      LEXICAL_MODE_OUTSIDE,
+      NUMBER_INTEGER,
+      3,
+      {{TOKEN_CONTENT, 0, 1},
+        {TOKEN_LINE_CONTINUATION, 1, 3},
+        {TOKEN_FINAL_CONTENT, 3, 4}}},
+    {"logical operator retains separate punctuation fragments",
+      "|\\\n|",
+      LEXICAL_MODE_OUTSIDE,
+      OR_OPERATOR,
+      3,
+      {{TOKEN_CONTENT, 0, 1},
+        {TOKEN_LINE_CONTINUATION, 1, 3},
+        {TOKEN_FINAL_CONTENT, 3, 4}}},
+    {"string content excludes continuation before closing quote",
+      "ab\\\ncd\\\n\"",
+      LEXICAL_MODE_STRING,
+      STRING_CONTENT_GUARD,
+      3,
+      {{TOKEN_CONTENT, 0, 2},
+        {TOKEN_LINE_CONTINUATION, 2, 4},
+        {TOKEN_FINAL_CONTENT, 4, 6}}},
+    {"string escape joins across continuation",
+      "\\\\\nn",
+      LEXICAL_MODE_STRING,
+      STRING_ESCAPE_GUARD,
+      3,
+      {{TOKEN_CONTENT, 0, 1},
+        {TOKEN_LINE_CONTINUATION, 1, 3},
+        {TOKEN_FINAL_CONTENT, 3, 4}}},
+    {"string octal escape ends after three logical digits",
+      "\\1\\\n4\\\n18",
+      LEXICAL_MODE_STRING,
+      STRING_ESCAPE_GUARD,
+      5,
+      {{TOKEN_CONTENT, 0, 2},
+        {TOKEN_LINE_CONTINUATION, 2, 4},
+        {TOKEN_CONTENT, 4, 5},
+        {TOKEN_LINE_CONTINUATION, 5, 7},
+        {TOKEN_FINAL_CONTENT, 7, 8}}},
+    {"ERE escaped delimiter joins across continuation",
+      "\\\\\n/",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_ESCAPED_DELIMITER_GUARD,
+      3,
+      {{TOKEN_CONTENT, 0, 1},
+        {TOKEN_LINE_CONTINUATION, 1, 3},
+        {TOKEN_FINAL_CONTENT, 3, 4}}},
+    {"ERE class name excludes closing colon",
+      "al\\\npha:",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_CLASS_NAME_GUARD,
+      3,
+      {{TOKEN_CONTENT, 0, 2},
+        {TOKEN_LINE_CONTINUATION, 2, 4},
+        {TOKEN_FINAL_CONTENT, 4, 7}}},
+    {"ERE count excludes interval comma",
+      "1\\\n2,3",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_DUP_COUNT_GUARD,
+      3,
+      {{TOKEN_CONTENT, 0, 1},
+        {TOKEN_LINE_CONTINUATION, 1, 3},
+        {TOKEN_FINAL_CONTENT, 3, 4}}},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    MockLexer mock = make_mock_lexer(cases[i].source);
+    ScannerState state = {.mode = cases[i].mode};
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].guard] = true;
+    bool valid = tree_sitter_posix_awk_external_scanner_scan(
+                   &state,
+                   &mock.lexer,
+                   valid_symbols
+                 ) &&
+      mock.lexer.result_symbol ==
+      cases[i].guard &&
+      mock.token_start ==
+      0 &&
+      mock.token_end ==
+      0 &&
+      state.mode ==
+      cases[i].mode &&
+      state.payload ==
+      (cases[i].piece_count == 1 ? PAYLOAD_WHOLE : PAYLOAD_SPLIT) &&
+      state.remaining == cases[i].pieces[cases[i].piece_count - 1].end;
+    valid_symbols[cases[i].guard] = false;
+    valid_symbols[TOKEN_WHOLE] = true;
+    valid_symbols[TOKEN_CONTENT] = true;
+    valid_symbols[TOKEN_FINAL_CONTENT] = true;
+    valid_symbols[TOKEN_LINE_CONTINUATION] = true;
+    for (size_t part = 0; valid && part < cases[i].piece_count; part++) {
+      round_trip_state(&state);
+      resume_mock_lexer(&mock);
+      valid = tree_sitter_posix_awk_external_scanner_scan(
+                &state,
+                &mock.lexer,
+                valid_symbols
+              ) &&
+        mock.lexer.result_symbol ==
+        cases[i].pieces[part].token &&
+        mock.token_start ==
+        cases[i].pieces[part].start &&
+        mock.token_end ==
+        cases[i].pieces[part].end &&
+        state.mode == cases[i].mode;
+    }
+    if (!valid || state.payload != PAYLOAD_NONE || state.remaining != 0) {
+      fprintf(
+        stderr,
+        "%s: symbol=%u range=%zu:%zu mode=%u payload=%u remaining=%u\n",
+        cases[i].name,
+        mock.lexer.result_symbol,
+        mock.token_start,
+        mock.token_end,
+        (unsigned)state.mode,
+        (unsigned)state.payload,
+        state.remaining
+      );
+      failed = 1;
+    }
+  }
+  return failed;
+}
+
+static int test_linear_whole_and_split_payloads(void) {
+  static const struct {
+    const char *name;
+    const char *prefix;
+    const char *fragment;
+    const char *suffix;
+    enum TokenType guard;
+    LexicalMode mode;
+    size_t unaccepted_suffix;
+  } cases[] = {
+    {"whole name", "", "x", "y", NAME_WORD, LEXICAL_MODE_OUTSIDE, 0},
+    {"split name", "", "x\\\n", "y", NAME_WORD, LEXICAL_MODE_OUTSIDE, 0},
+    {"whole integer", "", "1", "2", NUMBER_INTEGER, LEXICAL_MODE_OUTSIDE, 0},
+    {"split integer",
+      "",
+      "1\\\n",
+      "2",
+      NUMBER_INTEGER,
+      LEXICAL_MODE_OUTSIDE,
+      0},
+    {"split integer before incomplete exponent",
+      "",
+      "1\\\n",
+      "2e+\\\nx",
+      NUMBER_INTEGER,
+      LEXICAL_MODE_OUTSIDE,
+      5},
+    {"whole string content",
+      "",
+      "x",
+      "y",
+      STRING_CONTENT_GUARD,
+      LEXICAL_MODE_STRING,
+      0},
+    {"split string content",
+      "",
+      "x\\\n",
+      "y",
+      STRING_CONTENT_GUARD,
+      LEXICAL_MODE_STRING,
+      0},
+    {"split string octal escape",
+      "\\1",
+      "\\\n",
+      "41",
+      STRING_ESCAPE_GUARD,
+      LEXICAL_MODE_STRING,
+      0},
+    {"whole ERE class name",
+      "",
+      "x",
+      "y",
+      ERE_CLASS_NAME_GUARD,
+      LEXICAL_MODE_ERE_BODY,
+      0},
+    {"split ERE class name",
+      "",
+      "x\\\n",
+      "y",
+      ERE_CLASS_NAME_GUARD,
+      LEXICAL_MODE_ERE_BODY,
+      0},
+    {"whole ERE count",
+      "",
+      "1",
+      "2",
+      ERE_DUP_COUNT_GUARD,
+      LEXICAL_MODE_ERE_BODY,
+      0},
+    {"split ERE count",
+      "",
+      "1\\\n",
+      "2",
+      ERE_DUP_COUNT_GUARD,
+      LEXICAL_MODE_ERE_BODY,
+      0},
+    {"split ERE octal escape",
+      "\\1",
+      "\\\n",
+      "41",
+      ERE_OCTAL_ESCAPE_GUARD,
+      LEXICAL_MODE_ERE_BODY,
+      0},
+  };
+  const size_t repeat_count = 32768;
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    const size_t prefix_length = strlen(cases[i].prefix);
+    const size_t fragment_length = strlen(cases[i].fragment);
+    const size_t suffix_length = strlen(cases[i].suffix);
+    const size_t source_length =
+      prefix_length + repeat_count * fragment_length + suffix_length;
+    char *source = malloc(source_length + 1U);
+    assert(source != NULL);
+    memcpy(source, cases[i].prefix, prefix_length);
+    for (size_t part = 0; part < repeat_count; part++) {
+      memcpy(
+        source + prefix_length + part * fragment_length,
+        cases[i].fragment,
+        fragment_length
+      );
+    }
+    memcpy(
+      source + prefix_length + repeat_count * fragment_length,
+      cases[i].suffix,
+      suffix_length + 1U
+    );
+    MockLexer mock = make_mock_lexer(source);
+    ScannerState state = {.mode = cases[i].mode};
+    const size_t expected_end = source_length - cases[i].unaccepted_suffix;
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].guard] = true;
+    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
+      &state,
+      &mock.lexer,
+      valid_symbols
+    );
+    const bool valid_result = scanned &&
+      mock.lexer.result_symbol ==
+      cases[i].guard &&
+      mock.token_start ==
+      0 &&
+      mock.token_end ==
+      0 &&
+      state.remaining ==
+      expected_end &&
+      finish_payload(&mock, &state, expected_end) &&
+      mock.advance_count <=
+      source_length *
+      3U +
+      8U;
+    if (!valid_result) {
+      fprintf(
+        stderr,
+        "%s: scanned=%u symbol=%u advances=%zu end=%zu remaining=%u\n",
+        cases[i].name,
+        scanned,
+        mock.lexer.result_symbol,
+        mock.advance_count,
+        mock.token_end,
+        state.remaining
+      );
+      failed = 1;
+    }
+    free(source);
+  }
+  return failed;
 }
 
 static int test_blank_skip_token_ranges(void) {
@@ -793,34 +1317,34 @@ static int test_greater_dispatch(void) {
 static int test_slash_dispatch(void) {
   int failed = 0;
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[DIVISION_SLASH] = true;
-  valid_symbols[ERE_OPENING_SLASH] = true;
+  valid_symbols[DIVISION_SLASH_GUARD] = true;
+  valid_symbols[ERE_OPENING_SLASH_GUARD] = true;
   failed |= expect_scan_result_at(
     "division precedes ERE in normal parsing",
     "/x",
     valid_symbols,
     LEXICAL_MODE_OUTSIDE,
     true,
-    DIVISION_SLASH,
+    DIVISION_SLASH_GUARD,
     0,
     1,
     LEXICAL_MODE_OUTSIDE
   );
 
-  valid_symbols[DIVISION_SLASH] = false;
+  valid_symbols[DIVISION_SLASH_GUARD] = false;
   failed |= expect_scan_result_at(
     "ERE opens without a division context",
     "/x",
     valid_symbols,
     LEXICAL_MODE_OUTSIDE,
     true,
-    ERE_OPENING_SLASH,
+    ERE_OPENING_SLASH_GUARD,
     0,
     1,
     LEXICAL_MODE_ERE_BODY
   );
 
-  valid_symbols[DIVISION_SLASH] = true;
+  valid_symbols[DIVISION_SLASH_GUARD] = true;
   valid_symbols[DIV_ASSIGN_OPERATOR] = true;
   failed |= expect_scan_result(
     "division assignment is the longest match",
@@ -837,7 +1361,7 @@ static int test_slash_dispatch(void) {
     "/=x",
     valid_symbols,
     false,
-    DIVISION_SLASH,
+    DIVISION_SLASH_GUARD,
     0
   );
   return failed;
@@ -992,8 +1516,13 @@ static int test_linear_word_boundary_lookahead(void) {
       mock.token_start ==
       0 &&
       mock.token_end ==
+      0 &&
+      state.remaining ==
       cases[i].expected_token_end &&
-      mock.advance_count <= source_length;
+      finish_payload(&mock, &state, cases[i].expected_token_end) &&
+      mock.advance_count <=
+      source_length +
+      cases[i].expected_token_end;
     if (!valid_result) {
       fprintf(
         stderr,
@@ -1015,20 +1544,20 @@ static int test_linear_word_boundary_lookahead(void) {
 static int test_ere_state_transitions(void) {
   int failed = 0;
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[ERE_OPENING_SLASH] = true;
+  valid_symbols[ERE_OPENING_SLASH_GUARD] = true;
   failed |= expect_scan_result_at(
     "ERE opening enters body mode",
     "/a",
     valid_symbols,
     LEXICAL_MODE_OUTSIDE,
     true,
-    ERE_OPENING_SLASH,
+    ERE_OPENING_SLASH_GUARD,
     0,
     1,
     LEXICAL_MODE_ERE_BODY
   );
 
-  valid_symbols[ERE_OPENING_SLASH] = false;
+  valid_symbols[ERE_OPENING_SLASH_GUARD] = false;
   valid_symbols[ERE_CLOSING] = true;
   failed |= expect_scan_result_at(
     "ERE closing exits body mode",
@@ -1043,62 +1572,48 @@ static int test_ere_state_transitions(void) {
   );
 
   valid_symbols[ERE_CLOSING] = false;
-  valid_symbols[ERE_ESCAPE_START] = true;
+  valid_symbols[ERE_NAMED_ESCAPE_GUARD] = true;
   failed |= expect_scan_result_at(
     "ERE escape guard keeps body mode",
     "\\n",
     valid_symbols,
     LEXICAL_MODE_ERE_BODY,
     true,
-    ERE_ESCAPE_START,
+    ERE_NAMED_ESCAPE_GUARD,
     0,
-    0,
+    2,
     LEXICAL_MODE_ERE_BODY
   );
 
-  valid_symbols[ERE_ESCAPE_START] = false;
-  valid_symbols[ERE_ESCAPED_DELIMITER_START] = true;
+  valid_symbols[ERE_NAMED_ESCAPE_GUARD] = false;
+  valid_symbols[ERE_ESCAPED_DELIMITER_GUARD] = true;
   failed |= expect_scan_result_at(
-    "escaped delimiter guard enters delimiter mode",
+    "escaped delimiter payload retains body mode",
     "\\/",
     valid_symbols,
     LEXICAL_MODE_ERE_BODY,
     true,
-    ERE_ESCAPED_DELIMITER_START,
+    ERE_ESCAPED_DELIMITER_GUARD,
     0,
-    0,
-    LEXICAL_MODE_ERE_ESCAPED_DELIMITER
+    2,
+    LEXICAL_MODE_ERE_BODY
   );
 
-  valid_symbols[ERE_ESCAPED_DELIMITER_START] = false;
-  valid_symbols[ERE_ESCAPED_DELIMITER_END] = true;
+  valid_symbols[ERE_ESCAPED_DELIMITER_GUARD] = false;
+  valid_symbols[ERE_COMPOUND_OPENING] = true;
   failed |= expect_scan_result_at(
-    "escaped delimiter token returns to body mode",
-    "/",
+    "compound opener consumes its first character",
+    "[.",
     valid_symbols,
-    LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
+    LEXICAL_MODE_ERE_BODY,
     true,
-    ERE_ESCAPED_DELIMITER_END,
+    ERE_COMPOUND_OPENING,
     0,
     1,
     LEXICAL_MODE_ERE_BODY
   );
 
-  valid_symbols[ERE_ESCAPED_DELIMITER_END] = false;
-  valid_symbols[ERE_COMPOUND_OPEN_GUARD] = true;
-  failed |= expect_scan_result_at(
-    "compound opener guard is zero width",
-    "[.",
-    valid_symbols,
-    LEXICAL_MODE_ERE_BODY,
-    true,
-    ERE_COMPOUND_OPEN_GUARD,
-    0,
-    0,
-    LEXICAL_MODE_ERE_BODY
-  );
-
-  valid_symbols[ERE_COMPOUND_OPEN_GUARD] = false;
+  valid_symbols[ERE_COMPOUND_OPENING] = false;
   valid_symbols[ERE_CLOSING_HYPHEN] = true;
   failed |= expect_scan_result_at(
     "hyphen before the closing bracket is one token",
@@ -1124,27 +1639,27 @@ static int test_ere_state_transitions(void) {
   );
 
   valid_symbols[ERE_CLOSING_HYPHEN] = false;
-  valid_symbols[ERE_DOT_CLOSE_GUARD] = true;
+  valid_symbols[ERE_DOT_CLOSING] = true;
   failed |= expect_scan_result_at(
-    "compound closer guard is zero width",
+    "compound closer consumes its first character",
     ".]",
     valid_symbols,
     LEXICAL_MODE_ERE_BODY,
     true,
-    ERE_DOT_CLOSE_GUARD,
+    ERE_DOT_CLOSING,
     0,
-    0,
+    1,
     LEXICAL_MODE_ERE_BODY
   );
 
   set_all_symbols_valid(valid_symbols);
   failed |= expect_scan_result_at(
-    "error mode suppresses ERE compound guards",
+    "error mode suppresses ERE compound classification",
     "[.",
     valid_symbols,
     LEXICAL_MODE_ERE_BODY,
     false,
-    ERE_COMPOUND_OPEN_GUARD,
+    ERE_COMPOUND_OPENING,
     0,
     0,
     LEXICAL_MODE_ERE_BODY
@@ -1155,7 +1670,7 @@ static int test_ere_state_transitions(void) {
     valid_symbols,
     LEXICAL_MODE_ERE_BODY,
     false,
-    ERE_ESCAPED_DELIMITER_START,
+    ERE_ESCAPED_DELIMITER_GUARD,
     0,
     0,
     LEXICAL_MODE_ERE_BODY
@@ -1327,84 +1842,89 @@ static int test_error_mode_real_tokens(void) {
     size_t expected_token_end;
     LexicalMode expected_mode;
   } cases[] = {
-    {"error mode emits keyword",
+    {"error mode suppresses classification of keyword",
       "END",
-      true,
+      false,
       END_WORD,
-      3,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits name",
+    {"error mode suppresses classification of name",
       "value",
-      true,
+      false,
       NAME_WORD,
-      5,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits function name",
+    {"error mode suppresses classification of function name",
       "follow(",
-      true,
+      false,
       FUNC_NAME_WORD,
-      6,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits built-in",
+    {"error mode suppresses classification of built-in",
       "length",
-      true,
+      false,
       BUILTIN_FUNC_NAME_WORD,
-      6,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits built-in call",
+    {"error mode suppresses classification of built-in call",
       "length (",
-      true,
+      false,
       BUILTIN_CALL_WORD,
-      6,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits getline keyword",
+    {"error mode suppresses classification of getline keyword",
       "getline x",
-      true,
+      false,
       GETLINE_WORD,
-      7,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits integer",
+    {"error mode suppresses classification of integer",
       "42",
-      true,
+      false,
       NUMBER_INTEGER,
-      2,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits fraction",
+    {"error mode suppresses classification of fraction",
       ".5",
-      true,
+      false,
       NUMBER_FRACTION,
-      2,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits exponent",
+    {"error mode suppresses classification of exponent",
       "1.5e+2",
-      true,
+      false,
       NUMBER_EXPONENT,
-      6,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits composite operator",
+    {"error mode suppresses classification of composite operator",
       "+=",
-      true,
+      false,
       ADD_ASSIGN_OPERATOR,
-      2,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode emits GE", ">=", true, GE_OPERATOR, 2, LEXICAL_MODE_OUTSIDE},
-    {"error mode emits append",
+    {"error mode suppresses classification of GE",
+      ">=",
+      false,
+      GE_OPERATOR,
+      0,
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode suppresses classification of append",
       ">>",
-      true,
+      false,
       APPEND_OPERATOR,
-      2,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode preserves slash longest match",
+    {"error mode suppresses division assignment classification",
       "/=",
-      true,
+      false,
       DIV_ASSIGN_OPERATOR,
-      2,
+      0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode keeps division precedence",
+    {"error mode suppresses division classification",
       "/x",
-      true,
-      DIVISION_SLASH,
-      1,
+      false,
+      DIVISION_SLASH_GUARD,
+      0,
       LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses greater guard",
       ">",
@@ -1412,11 +1932,11 @@ static int test_error_mode_real_tokens(void) {
       OUTPUT_GREATER_GUARD,
       0,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode leaves line continuation to the internal lexer",
+    {"error mode emits line continuation",
       "\\\nname",
-      false,
-      ERROR_SENTINEL,
-      0,
+      true,
+      LINE_CONTINUATION,
+      2,
       LEXICAL_MODE_OUTSIDE},
     {"error mode emits no token for unknown punctuation",
       "@",
@@ -1484,11 +2004,14 @@ expect_length(const char *test_name, unsigned expected, unsigned actual) {
 
 static int check_round_trip(
   const char *test_name,
-  LexicalMode mode,
+  ScannerState source,
   unsigned expected_length
 ) {
-  ScannerState source = {.mode = mode};
-  ScannerState destination = {.mode = LEXICAL_MODE_ERE_ESCAPED_DELIMITER};
+  ScannerState destination = {
+    .mode = LEXICAL_MODE_STRING,
+    .payload = PAYLOAD_SPLIT,
+    .remaining = 17,
+  };
   char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE + 2];
   memset(buffer, 0x5a, sizeof(buffer));
   const unsigned length =
@@ -1505,7 +2028,21 @@ static int check_round_trip(
     buffer + 1,
     length
   );
-  failed |= expect_mode(test_name, mode, destination.mode);
+  failed |= expect_mode(test_name, source.mode, destination.mode);
+  if (
+    destination.payload !=
+    source.payload ||
+    destination.remaining != source.remaining
+  ) {
+    fprintf(
+      stderr,
+      "%s: payload=%u remaining=%u\n",
+      test_name,
+      (unsigned)destination.payload,
+      destination.remaining
+    );
+    failed = 1;
+  }
   return failed;
 }
 
@@ -1514,8 +2051,12 @@ static void test_lifecycle(void) {
   assert(state != NULL);
   assert(state->mode == LEXICAL_MODE_OUTSIDE);
   state->mode = LEXICAL_MODE_STRING;
+  state->payload = PAYLOAD_SPLIT;
+  state->remaining = 17;
   tree_sitter_posix_awk_external_scanner_deserialize(state, NULL, 0);
   assert(state->mode == LEXICAL_MODE_OUTSIDE);
+  assert(state->payload == PAYLOAD_NONE);
+  assert(state->remaining == 0);
   tree_sitter_posix_awk_external_scanner_destroy(state);
 }
 
@@ -1574,76 +2115,158 @@ static void test_disabled_tokens_preserve_state(void) {
   for (
     LexicalMode mode = LEXICAL_MODE_OUTSIDE; mode <= LEXICAL_MODE_STRING; mode++
   ) {
-    for (size_t index = 0; index < ARRAY_LENGTH(inputs); index++) {
-      MockLexer mock = make_mock_lexer(inputs[index].source);
-      mock.length = inputs[index].length;
-      ScannerState state = {.mode = mode};
-      assert(!tree_sitter_posix_awk_external_scanner_scan(
-        &state,
-        &mock.lexer,
-        valid_symbols
-      ));
-      assert(state.mode == mode);
+    for (
+      PayloadMode payload = PAYLOAD_NONE; payload <= PAYLOAD_SPLIT; payload++
+    ) {
+      const uint32_t remaining = payload == PAYLOAD_NONE ? 0 : 5;
+      for (size_t index = 0; index < ARRAY_LENGTH(inputs); index++) {
+        MockLexer mock = make_mock_lexer(inputs[index].source);
+        mock.length = inputs[index].length;
+        ScannerState state = {mode, payload, remaining};
+        assert(!tree_sitter_posix_awk_external_scanner_scan(
+          &state,
+          &mock.lexer,
+          valid_symbols
+        ));
+        assert(state.mode == mode);
+        assert(state.payload == payload);
+        assert(state.remaining == remaining);
+      }
     }
   }
 }
 
 static int test_serialization(void) {
-  int failed = 0;
-  failed |=
-    check_round_trip("outside mode round trip", LEXICAL_MODE_OUTSIDE, 0);
-  failed |= check_round_trip(
-    "ERE body mode round trip",
-    LEXICAL_MODE_ERE_BODY,
-    SERIALIZED_SCANNER_STATE_SIZE
-  );
-  failed |= check_round_trip(
-    "escaped delimiter mode round trip",
-    LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
-    SERIALIZED_SCANNER_STATE_SIZE
-  );
-  failed |= check_round_trip(
-    "string mode round trip",
-    LEXICAL_MODE_STRING,
-    SERIALIZED_SCANNER_STATE_SIZE
-  );
-
-  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE] = {
-    (char)LEXICAL_MODE_ERE_BODY,
-    0,
+  static const struct {
+    const char *name;
+    ScannerState state;
+    unsigned length;
+  } cases[] = {
+    {"outside mode round trip", {LEXICAL_MODE_OUTSIDE, PAYLOAD_NONE, 0}, 0},
+    {"ERE body mode round trip",
+      {LEXICAL_MODE_ERE_BODY, PAYLOAD_NONE, 0},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"string mode round trip",
+      {LEXICAL_MODE_STRING, PAYLOAD_NONE, 0},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"whole outside payload round trip",
+      {LEXICAL_MODE_OUTSIDE, PAYLOAD_WHOLE, 5},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"split outside payload round trip",
+      {LEXICAL_MODE_OUTSIDE, PAYLOAD_SPLIT, 7},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"whole ERE payload round trip",
+      {LEXICAL_MODE_ERE_BODY, PAYLOAD_WHOLE, 3},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"split ERE payload round trip",
+      {LEXICAL_MODE_ERE_BODY, PAYLOAD_SPLIT, 4},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"whole string payload round trip",
+      {LEXICAL_MODE_STRING, PAYLOAD_WHOLE, 2},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"split string payload round trip",
+      {LEXICAL_MODE_STRING, PAYLOAD_SPLIT, 6},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"maximum remaining count round trip",
+      {LEXICAL_MODE_STRING, PAYLOAD_SPLIT, UINT32_MAX},
+      SERIALIZED_SCANNER_STATE_SIZE},
   };
-  ScannerState destination = {.mode = LEXICAL_MODE_ERE_BODY};
-  tree_sitter_posix_awk_external_scanner_deserialize(&destination, buffer, 0);
-  failed |= expect_mode(
-    "empty serialized state resets to outside",
-    LEXICAL_MODE_OUTSIDE,
-    destination.mode
-  );
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    failed |= check_round_trip(cases[i].name, cases[i].state, cases[i].length);
+  }
 
-  destination.mode = LEXICAL_MODE_ERE_BODY;
-  tree_sitter_posix_awk_external_scanner_deserialize(
-    &destination,
-    buffer,
-    SERIALIZED_SCANNER_STATE_SIZE + 1
-  );
-  failed |= expect_mode(
-    "oversized serialized state resets to outside",
-    LEXICAL_MODE_OUTSIDE,
-    destination.mode
-  );
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE] = {0};
+  ScannerState source = {.mode = LEXICAL_MODE_ERE_BODY};
+  const unsigned length =
+    tree_sitter_posix_awk_external_scanner_serialize(&source, buffer);
+  assert(length == SERIALIZED_SCANNER_STATE_SIZE);
+  const unsigned invalid_lengths[] =
+    {0, SERIALIZED_SCANNER_STATE_SIZE - 1, SERIALIZED_SCANNER_STATE_SIZE + 1};
+  for (size_t i = 0; i < ARRAY_LENGTH(invalid_lengths); i++) {
+    ScannerState destination =
+      {.mode = LEXICAL_MODE_STRING, .payload = PAYLOAD_SPLIT, .remaining = 17};
+    tree_sitter_posix_awk_external_scanner_deserialize(
+      &destination,
+      buffer,
+      invalid_lengths[i]
+    );
+    if (
+      destination.mode !=
+      LEXICAL_MODE_OUTSIDE ||
+      destination.payload !=
+      PAYLOAD_NONE ||
+      destination.remaining != 0
+    ) {
+      fprintf(
+        stderr,
+        "serialized length %u did not reset state\n",
+        invalid_lengths[i]
+      );
+      failed = 1;
+    }
+  }
 
   buffer[0] = (char)(LEXICAL_MODE_STRING + 1);
-  destination.mode = LEXICAL_MODE_ERE_BODY;
+  ScannerState destination =
+    {.mode = LEXICAL_MODE_STRING, .payload = PAYLOAD_SPLIT, .remaining = 17};
   tree_sitter_posix_awk_external_scanner_deserialize(
     &destination,
     buffer,
-    SERIALIZED_SCANNER_STATE_SIZE
+    length
   );
-  failed |= expect_mode(
-    "invalid serialized mode resets to outside",
-    LEXICAL_MODE_OUTSIDE,
-    destination.mode
-  );
+  if (
+    destination.mode !=
+    LEXICAL_MODE_OUTSIDE ||
+    destination.payload !=
+    PAYLOAD_NONE ||
+    destination.remaining != 0
+  ) {
+    fprintf(stderr, "invalid serialized mode did not reset state\n");
+    failed = 1;
+  }
+  const unsigned char invalid_states[][SERIALIZED_SCANNER_STATE_SIZE] = {
+    {LEXICAL_MODE_STRING, PAYLOAD_SPLIT + 1, 1, 0, 0, 0},
+    {LEXICAL_MODE_STRING, PAYLOAD_NONE, 1, 0, 0, 0},
+    {LEXICAL_MODE_ERE_BODY, PAYLOAD_WHOLE, 0, 0, 0, 0},
+    {LEXICAL_MODE_ERE_BODY, PAYLOAD_SPLIT, 0, 0, 0, 0},
+  };
+  for (size_t i = 0; i < ARRAY_LENGTH(invalid_states); i++) {
+    destination = (ScannerState){LEXICAL_MODE_STRING, PAYLOAD_SPLIT, 17};
+    tree_sitter_posix_awk_external_scanner_deserialize(
+      &destination,
+      (const char *)invalid_states[i],
+      SERIALIZED_SCANNER_STATE_SIZE
+    );
+    if (
+      destination.mode !=
+      LEXICAL_MODE_OUTSIDE ||
+      destination.payload !=
+      PAYLOAD_NONE ||
+      destination.remaining != 0
+    ) {
+      fprintf(
+        stderr,
+        "invalid serialized payload %zu did not reset state\n",
+        i
+      );
+      failed = 1;
+    }
+  }
+  source =
+    (ScannerState){LEXICAL_MODE_ERE_BODY, PAYLOAD_SPLIT, UINT32_C(0x12345678)};
+  const unsigned encoded_length =
+    tree_sitter_posix_awk_external_scanner_serialize(&source, buffer);
+  const unsigned char expected_encoding[] = {
+    LEXICAL_MODE_ERE_BODY,
+    PAYLOAD_SPLIT,
+    0x78,
+    0x56,
+    0x34,
+    0x12,
+  };
+  assert(encoded_length == sizeof(expected_encoding));
+  assert(memcmp(buffer, expected_encoding, sizeof(expected_encoding)) == 0);
   return failed;
 }
 
@@ -1666,10 +2289,12 @@ int main(void) {
   test_disabled_tokens_preserve_state();
   failed |= test_serialization();
   failed |= test_source_token_ranges();
-  failed |= test_split_token_boundaries();
+  failed |= test_continued_token_boundaries();
   failed |= test_split_composite_operators();
-  failed |= test_split_lexical_modes();
-  failed |= test_linear_split_number_detection();
+  failed |= test_continuation_lexical_modes();
+  failed |= test_literal_classification();
+  failed |= test_payload_pieces_keep_exact_ranges();
+  failed |= test_linear_whole_and_split_payloads();
   failed |= test_blank_skip_token_ranges();
   failed |= test_greater_dispatch();
   failed |= test_slash_dispatch();

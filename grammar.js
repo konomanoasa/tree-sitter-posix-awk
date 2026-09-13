@@ -32,10 +32,13 @@ const KEYWORDS = [
   "while",
 ];
 
+const classifiedToken = ($, classification) =>
+  seq(classification, $._token_payload);
+
 const keywordRules = Object.fromEntries(
   KEYWORDS.map((keyword) => [
     `${keyword}_keyword`,
-    ($) => $[`_${keyword}_word`],
+    ($) => classifiedToken($, $[`_${keyword}_word`]),
   ]),
 );
 
@@ -58,8 +61,34 @@ const TWO_CHARACTER_TOKENS = [
   "append",
 ];
 
+const SINGLE_CHARACTER_OPERATORS = {
+  "+": "plus",
+  "-": "minus",
+  "*": "star",
+  "%": "percent",
+  "^": "caret",
+  "!": "bang",
+  "<": "less",
+  ">": "greater",
+  "=": "equal",
+  "|": "pipe",
+};
+
+const singleOperator = ($, character) =>
+  alias($[`_${SINGLE_CHARACTER_OPERATORS[character]}`], character);
+
+const singleCharacterTokenRules = Object.fromEntries(
+  Object.values(SINGLE_CHARACTER_OPERATORS).map((name) => [
+    `_${name}`,
+    ($) => seq($[`_${name}_operator`], $._token_whole),
+  ]),
+);
+
 const twoCharacterTokenRules = Object.fromEntries(
-  TWO_CHARACTER_TOKENS.map((name) => [name, ($) => $[`_${name}_operator`]]),
+  TWO_CHARACTER_TOKENS.map((name) => [
+    name,
+    ($) => classifiedToken($, $[`_${name}_operator`]),
+  ]),
 );
 
 const newlineLayout = ($) => optional($.newline_opt);
@@ -67,9 +96,6 @@ const newlineLayout = ($) => optional($.newline_opt);
 const afterOptionalNewline = ($, member) => seq(newlineLayout($), member);
 
 const functionBody = ($) => afterOptionalNewline($, field("body", $.action));
-
-const ereEscapeWithCharacter = ($, character) =>
-  seq($._ere_escape_start, $._escape_introducer, character);
 
 // A separate closing-hyphen token avoids competing with range separators.
 const ereClosingHyphen = ($) => alias($._ere_closing_hyphen, "-");
@@ -109,14 +135,10 @@ const initialFollowListRules = (prefix, firstElement) => {
 };
 
 const ereCompoundOpening = ($, punctuation) =>
-  seq(
-    $._ere_compound_open_guard,
-    token.immediate("["),
-    token.immediate(punctuation),
-  );
+  seq(alias($._ere_compound_opening, "["), token.immediate(punctuation));
 
-const ereCompoundClosing = (guard, punctuation) =>
-  seq(guard, token.immediate(punctuation), token.immediate("]"));
+const ereCompoundClosing = (closing, punctuation) =>
+  seq(alias(closing, punctuation), token.immediate("]"));
 
 const header = ($, keyword, rest) => seq(keyword, rest, newlineLayout($));
 
@@ -320,7 +342,7 @@ const tieredExpressionRules = (context) => {
               $.div_assign,
               $.add_assign,
               $.sub_assign,
-              "=",
+              singleOperator($, "="),
             ),
           ),
           field("right", expression($)),
@@ -473,14 +495,14 @@ const tieredExpressionRules = (context) => {
         : []),
       ...["+", "-"].map((operator) =>
         seq(
-          field("operator", operator),
+          field("operator", singleOperator($, operator)),
           field("operand", aliasedAnyTier($, context, "unary")),
         ),
       ),
     );
   rules[not] = ($) =>
     seq(
-      field("operator", "!"),
+      field("operator", singleOperator($, "!")),
       field("operand", aliasedAnyTier($, context, "unary")),
     );
   rules[nonUnary("unary")] = ($) =>
@@ -549,23 +571,38 @@ export default grammar({
     $._number_integer,
     $._number_fraction,
     $._number_exponent,
-    $._division_slash,
-    $._ere_opening_slash,
+    $._division_slash_guard,
+    $._ere_opening_slash_guard,
     ...TWO_CHARACTER_TOKENS.map((name) => $[`_${name}_operator`]),
+    ...Object.values(SINGLE_CHARACTER_OPERATORS).map(
+      (name) => $[`_${name}_operator`],
+    ),
     $._output_greater_guard,
-    $._ere_compound_open_guard,
-    $._ere_dot_close_guard,
-    $._ere_equal_close_guard,
-    $._ere_colon_close_guard,
-    $._ere_escape_start,
-    $._ere_escaped_delimiter_start,
-    $._ere_escaped_delimiter_end,
+    $._ere_compound_opening,
+    $._ere_dot_closing,
+    $._ere_equal_closing,
+    $._ere_colon_closing,
+    $._ere_bracket_literal_open,
+    $._ere_compound_content,
     $._ere_closing_hyphen,
     $._ere_closing,
     $._string_opening,
     $._string_end,
+    $._string_content_guard,
+    $._string_escape_guard,
+    $._ere_named_escape_guard,
+    $._ere_quoted_escape_guard,
+    $._ere_octal_escape_guard,
+    $._ere_undefined_escape_guard,
+    $._ere_escaped_delimiter_guard,
+    $._ere_class_name_guard,
+    $._ere_dup_count_guard,
+    $._token_whole,
+    $._token_content,
+    $._token_final_content,
+    $._token_line_continuation,
     $.comment,
-    $.split_token,
+    $.line_continuation,
     $._error_sentinel,
   ],
 
@@ -573,7 +610,6 @@ export default grammar({
     token(repeat1(choice(" ", "\t"))),
     $.comment,
     $.line_continuation,
-    $.split_token,
   ],
 
   inline: ($) => [
@@ -589,15 +625,53 @@ export default grammar({
     program: ($) =>
       seq(optional(alias($._item_list, $.item_list)), optional($._item)),
 
-    _additive_operator: () => field("operator", choice("+", "-")),
+    _token_payload: ($) =>
+      choice(
+        $._token_whole,
+        seq(
+          repeat1(
+            choice(
+              field("content", alias($._token_content, $.token_content)),
+              alias($._token_line_continuation, $.line_continuation),
+            ),
+          ),
+          field("content", alias($._token_final_content, $.token_content)),
+        ),
+      ),
+
+    _division_slash: ($) => seq($._division_slash_guard, $._token_whole),
+
+    _ere_opening_slash: ($) => seq($._ere_opening_slash_guard, $._token_whole),
+
+    ...singleCharacterTokenRules,
+
+    _additive_operator: ($) =>
+      field("operator", choice(singleOperator($, "+"), singleOperator($, "-"))),
 
     _multiplicative_operator: ($) =>
-      field("operator", choice("*", alias($._division_slash, "/"), "%")),
+      field(
+        "operator",
+        choice(
+          singleOperator($, "*"),
+          alias($._division_slash, "/"),
+          singleOperator($, "%"),
+        ),
+      ),
 
-    _exponentiation_operator: () => field("operator", "^"),
+    _exponentiation_operator: ($) => field("operator", singleOperator($, "^")),
 
     _comparison_operator: ($) =>
-      field("operator", choice("<", $.le, $.ne, $.eq, ">", $.ge)),
+      field(
+        "operator",
+        choice(
+          singleOperator($, "<"),
+          $.le,
+          $.ne,
+          $.eq,
+          singleOperator($, ">"),
+          $.ge,
+        ),
+      ),
 
     _match_operator: ($) => field("operator", choice("~", $.no_match)),
 
@@ -702,10 +776,12 @@ export default grammar({
 
     _for_in_clause: ($) =>
       seq(
-        field("variable", alias($._for_in_variable_word, $.name)),
+        field("variable", alias($.for_in_variable, $.name)),
         $.in_keyword,
         field("array", $.name),
       ),
+
+    for_in_variable: ($) => classifiedToken($, $._for_in_variable_word),
 
     _for_header: ($) =>
       header(
@@ -775,7 +851,13 @@ export default grammar({
 
     output_redirection: ($) =>
       seq(
-        choice(seq($._output_greater_guard, choice(">", $.append)), "|"),
+        choice(
+          seq(
+            $._output_greater_guard,
+            choice(singleOperator($, ">"), $.append),
+          ),
+          singleOperator($, "|"),
+        ),
         $.expr,
       ),
 
@@ -840,7 +922,9 @@ export default grammar({
     _user_function_call: ($) => seq($.func_name, callArguments($)),
 
     _builtin_function_call: ($) =>
-      seq(alias($._builtin_call_word, $.builtin_func_name), callArguments($)),
+      seq(alias($.builtin_call_name, $.builtin_func_name), callArguments($)),
+
+    builtin_call_name: ($) => classifiedToken($, $._builtin_call_word),
 
     lvalue: ($) =>
       choice(
@@ -857,13 +941,17 @@ export default grammar({
         field("get", $.simple_get),
         prec.right(
           PRECEDENCE.field,
-          seq(field("get", $.simple_get), "<", field("source", $.expr)),
+          seq(
+            field("get", $.simple_get),
+            singleOperator($, "<"),
+            field("source", $.expr),
+          ),
         ),
         prec.right(
           PRECEDENCE.field,
           seq(
             field("source", $.non_unary_expr),
-            "|",
+            singleOperator($, "|"),
             field("get", $.simple_get),
           ),
         ),
@@ -872,7 +960,11 @@ export default grammar({
     unary_input_function: ($) =>
       prec.right(
         PRECEDENCE.field,
-        seq(field("source", $.unary_expr), "|", field("get", $.simple_get)),
+        seq(
+          field("source", $.unary_expr),
+          singleOperator($, "|"),
+          field("get", $.simple_get),
+        ),
       ),
 
     simple_get: ($) =>
@@ -881,18 +973,21 @@ export default grammar({
         prec.dynamic(1, seq($.getline_keyword, field("target", $.lvalue))),
       ),
 
-    getline_keyword: ($) => $._getline_word,
+    getline_keyword: ($) => classifiedToken($, $._getline_word),
 
-    in_keyword: ($) => $._in_word,
+    in_keyword: ($) => classifiedToken($, $._in_word),
 
-    func_name: ($) => $._func_name_word,
+    func_name: ($) => classifiedToken($, $._func_name_word),
 
-    builtin_func_name: ($) => $._builtin_func_name_word,
+    builtin_func_name: ($) => classifiedToken($, $._builtin_func_name_word),
 
-    name: ($) => $._name_word,
+    name: ($) => classifiedToken($, $._name_word),
 
     number: ($) =>
-      choice($._number_integer, $._number_fraction, $._number_exponent),
+      classifiedToken(
+        $,
+        choice($._number_integer, $._number_fraction, $._number_exponent),
+      ),
 
     string: ($) =>
       seq(
@@ -902,13 +997,9 @@ export default grammar({
         field("closing", token.immediate('"')),
       ),
 
-    string_content: () => token.immediate(/[^"\\\n]+/),
+    string_content: ($) => classifiedToken($, $._string_content_guard),
 
-    escape_sequence: ($) =>
-      seq(
-        $._escape_introducer,
-        choice($._escape_character, $._escape_octal_digits),
-      ),
+    escape_sequence: ($) => classifiedToken($, $._string_escape_guard),
 
     ...twoCharacterTokenRules,
 
@@ -957,8 +1048,8 @@ export default grammar({
         $.quoted_character,
         $.wildcard,
         $.bracket_expression,
-        alias($._ere_octal_escape_sequence, $.escape_sequence),
-        alias($._ere_undefined_escape_sequence, $.escape_sequence),
+        alias($.ere_octal_escape_sequence, $.escape_sequence),
+        alias($.ere_undefined_escape_sequence, $.escape_sequence),
       ),
 
     ordinary_character: ($) =>
@@ -967,11 +1058,11 @@ export default grammar({
         $._ere_ordinary_close_parenthesis,
         $._ere_ordinary_close_brace,
         $.escaped_delimiter,
-        alias($._ere_named_escape_sequence, $.escape_sequence),
+        alias($.ere_named_escape_sequence, $.escape_sequence),
       ),
 
     quoted_character: ($) =>
-      alias($._ere_quoted_escape_sequence, $.escape_sequence),
+      alias($.ere_quoted_escape_sequence, $.escape_sequence),
 
     wildcard: () => token.immediate("."),
 
@@ -1002,7 +1093,7 @@ export default grammar({
         $._ere_close_brace,
       ),
 
-    dup_count: ($) => $._number_digit_chunk,
+    dup_count: ($) => classifiedToken($, $._ere_dup_count_guard),
 
     bracket_expression: ($) =>
       seq(
@@ -1057,9 +1148,9 @@ export default grammar({
     collating_element: ($) =>
       choice(
         alias($._ere_bracket_character, $.collating_element_content),
-        alias(token.immediate("["), $.collating_element_content),
+        alias($._ere_bracket_literal_open, $.collating_element_content),
         $.escaped_delimiter,
-        alias($._ere_bracket_escape_sequence, $.escape_sequence),
+        alias($.ere_bracket_escape_sequence, $.escape_sequence),
       ),
 
     collating_symbol: ($) =>
@@ -1082,7 +1173,7 @@ export default grammar({
     character_class: ($) =>
       seq($._ere_open_colon, $.class_name, $._ere_colon_close),
 
-    class_name: ($) => $._ere_class_name_spelling,
+    class_name: ($) => classifiedToken($, $._ere_class_name_guard),
 
     meta_character: ($) => $._ere_compound_meta_character,
 
@@ -1105,47 +1196,47 @@ export default grammar({
     _ere_compound_nonmeta_atom: ($) =>
       choice(
         alias($._ere_compound_nonmeta_character, $.collating_element_content),
+        alias($._ere_compound_content, $.collating_element_content),
         $.escaped_delimiter,
-        alias($._ere_bracket_escape_sequence, $.escape_sequence),
+        alias($.ere_bracket_escape_sequence, $.escape_sequence),
       ),
 
     _ere_open_dot: ($) => ereCompoundOpening($, "."),
 
-    _ere_dot_close: ($) => ereCompoundClosing($._ere_dot_close_guard, "."),
+    _ere_dot_close: ($) => ereCompoundClosing($._ere_dot_closing, "."),
 
     _ere_open_equal: ($) => ereCompoundOpening($, "="),
 
-    _ere_equal_close: ($) => ereCompoundClosing($._ere_equal_close_guard, "="),
+    _ere_equal_close: ($) => ereCompoundClosing($._ere_equal_closing, "="),
 
     _ere_open_colon: ($) => ereCompoundOpening($, ":"),
 
-    _ere_colon_close: ($) => ereCompoundClosing($._ere_colon_close_guard, ":"),
+    _ere_colon_close: ($) => ereCompoundClosing($._ere_colon_closing, ":"),
 
     escaped_delimiter: ($) =>
-      seq(
-        $._ere_escaped_delimiter_start,
-        $._escape_introducer,
-        $._ere_escaped_delimiter_end,
-      ),
+      classifiedToken($, $._ere_escaped_delimiter_guard),
 
-    _ere_named_escape_sequence: ($) =>
-      ereEscapeWithCharacter($, $._ere_named_escape_character),
+    ere_named_escape_sequence: ($) =>
+      classifiedToken($, $._ere_named_escape_guard),
 
-    _ere_quoted_escape_sequence: ($) =>
-      ereEscapeWithCharacter($, $._ere_quoted_escape_character),
+    ere_quoted_escape_sequence: ($) =>
+      classifiedToken($, $._ere_quoted_escape_guard),
 
-    _ere_octal_escape_sequence: ($) =>
-      ereEscapeWithCharacter($, $._escape_octal_digits),
+    ere_octal_escape_sequence: ($) =>
+      classifiedToken($, $._ere_octal_escape_guard),
 
-    _ere_undefined_escape_sequence: ($) =>
-      ereEscapeWithCharacter($, $._ere_undefined_escape_character),
+    ere_undefined_escape_sequence: ($) =>
+      classifiedToken($, $._ere_undefined_escape_guard),
 
-    _ere_bracket_escape_sequence: ($) =>
-      choice(
-        $._ere_named_escape_sequence,
-        $._ere_quoted_escape_sequence,
-        $._ere_octal_escape_sequence,
-        $._ere_undefined_escape_sequence,
+    ere_bracket_escape_sequence: ($) =>
+      classifiedToken(
+        $,
+        choice(
+          $._ere_named_escape_guard,
+          $._ere_quoted_escape_guard,
+          $._ere_octal_escape_guard,
+          $._ere_undefined_escape_guard,
+        ),
       ),
 
     // Tree-sitter rejects the POSIX bracket spelling for these delimiter
@@ -1167,33 +1258,14 @@ export default grammar({
     _ere_bracket_character: () => token.immediate(/[^\x2D\x2F\x5B\x5C\x5D\n]/),
 
     _ere_compound_nonmeta_character: () =>
-      token.immediate(/[^\x2D\x2F\x5C\x5D\n]/),
+      token.immediate(/[^.:=\x2D\x2F\x5C\x5D\n]/),
 
     _ere_compound_meta_character: () => token.immediate(/[\x2D\x5D]/),
-
-    _ere_class_name_spelling: () => token.immediate(/[A-Za-z][A-Za-z0-9]*/),
-
-    _ere_named_escape_character: () => token.immediate(prec(1, /[abfnrtv]/)),
-
-    _ere_quoted_escape_character: () =>
-      token.immediate(prec(1, /[().*+?{}|^$\x5B\x5C\x5D]/)),
-
-    _ere_undefined_escape_character: () => token.immediate(/[^0-7\x2F\x5C\n]/),
 
     newline_opt: ($) => rawNewlines($),
 
     terminator: ($) => choice(rawNewlines($), seq(";", repeat($.newline))),
 
     newline: () => "\n",
-
-    line_continuation: () => token(seq("\\", "\n")),
-
-    _number_digit_chunk: () => token.immediate(/[0-9]+/),
-
-    _escape_introducer: () => token.immediate(/\\/),
-
-    _escape_character: () => token.immediate(/[^0-7\n]/),
-
-    _escape_octal_digits: () => token.immediate(/[0-7]{1,3}/),
   },
 });

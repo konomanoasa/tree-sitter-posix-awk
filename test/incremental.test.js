@@ -13,7 +13,6 @@ import {
   excludes,
   freshTest,
   hasRecovery,
-  hasSplitToken,
   lines,
   matchingLineCount,
   writeSource,
@@ -535,6 +534,51 @@ for (const { name, escaped, plain } of [
 }
 
 const classEre = lines("BEGIN { print /[[:alpha:]]/ }");
+
+for (const [operator, continuation, suffix, kind] of [
+  ["+", "\\\n", "=5}", "add_assign"],
+  ["-", "\\\n", "=5}", "sub_assign"],
+  ["*", "\\\n", "=5}", "mul_assign"],
+  ["%", "\\\n", "=5}", "mod_assign"],
+  ["^", "\\\n", "=5}", "pow_assign"],
+  ["|", "\\\n", "|5}", "or"],
+  ["+", "\\\n\\\n", "+}", "incr"],
+  ["-", "\\\n\\\n", "-}", "decr"],
+]) {
+  const prefix = `{x${operator}${continuation}`;
+  determinismTest(
+    `${kind} is reclassified after repairing its second character`,
+    `${prefix}/\\x`,
+    prefix + suffix,
+    [
+      { byte: prefix.length + 2, deleteBytes: 1, insert: "" },
+      { byte: prefix.length, deleteBytes: 2, insert: suffix },
+    ],
+    (tree) => {
+      contains(tree, `operator: ${kind}`);
+      contains(tree, "line_continuation");
+    },
+  );
+}
+
+for (const [marker, kind] of [
+  ["=", "equivalence_class"],
+  [".", "collating_symbol"],
+]) {
+  determinismTest(
+    `a ${kind} closer is reclassified after repairing a continuation`,
+    `/[[${marker}a${marker}\\))`,
+    `/[[${marker}a${marker}\\\n]]/`,
+    [
+      { byte: 8, deleteBytes: 1, insert: "" },
+      { byte: 7, deleteBytes: 1, insert: "\n]]/" },
+    ],
+    (tree) => {
+      contains(tree, kind);
+      contains(tree, "line_continuation");
+    },
+  );
+}
 
 determinismTest(
   "equivalence to character class",
@@ -1222,7 +1266,7 @@ determinismTest(
   [{ byte: 9, deleteBytes: 2, insert: " " }],
 );
 
-function splitTokenHistoryTest(name, initialSource, steps) {
+function continuationHistoryTest(name, initialSource, steps) {
   test(`posix_awk: ${name}`, () => {
     const initial = writeSource(name, "initial", initialSource);
     const edits = [];
@@ -1237,18 +1281,10 @@ function splitTokenHistoryTest(name, initialSource, steps) {
       const fresh = captureParse(writeSource(name, "expected", step.source));
       const incremental = captureParse(initial, edits);
       for (const result of [fresh, incremental]) {
-        assert.ok(result.status === 0 || result.status === 1, label);
-        if (step.split) {
-          assert.ok(
-            hasSplitToken(result.tree) || hasRecovery(result.tree),
-            `${label}\n${result.tree}`,
-          );
-        } else {
-          assertStatus(label, result, 0);
-          clean(result.tree);
-        }
+        assertStatus(label, result, 0);
+        clean(result.tree);
       }
-      if (!step.split) assert.equal(incremental.tree, fresh.tree, label);
+      assert.equal(incremental.tree, fresh.tree, label);
     }
   });
 }
@@ -1262,41 +1298,43 @@ for (const [name, before, after] of [
   ["number suffix", "BEGIN { print 1.0", "F }\n"],
   ["string", 'BEGIN { print "a', 'b" }\n'],
   ["ERE bracket", "BEGIN { print /[a", "-z]/ }\n"],
+  ["string escape", 'BEGIN { print "\\', 'n" }\n'],
+  ["octal escape", 'BEGIN { print "\\1', '23" }\n'],
+  ["ERE escaped delimiter", "BEGIN { print /a\\", "/b/ }\n"],
+  ["ERE class name", "BEGIN { print /[[:al", "pha:]]/ }\n"],
+  ["ERE duplication count", "BEGIN { print /a{1", "2}/ }\n"],
+  ["ERE compound delimiter", "BEGIN { print /[[", ":alpha:]]/ }\n"],
 ]) {
   const initial = before + after;
   const split = `${before}\\\n${after}`;
   const prefix = "# shifted source\n";
-  splitTokenHistoryTest(
-    `${name} splits remain detectable after a prefix edit and disappear after repair`,
+  continuationHistoryTest(
+    `${name} continuations remain deterministic through prefix edits and removal`,
     initial,
     [
       {
         edits: [{ byte: before.length, deleteBytes: 0, insert: "\\\n" }],
         source: split,
-        split: true,
       },
       {
         edits: [{ byte: 0, deleteBytes: 0, insert: prefix }],
         source: prefix + split,
-        split: true,
       },
       {
         edits: [
           { byte: prefix.length + before.length, deleteBytes: 2, insert: "" },
         ],
         source: prefix + initial,
-        split: false,
       },
       {
         edits: [{ byte: 0, deleteBytes: prefix.length, insert: "" }],
         source: initial,
-        split: false,
       },
     ],
   );
 }
 
-splitTokenHistoryTest(
+continuationHistoryTest(
   "quotes change a safe continuation into a string split and back",
   lines("{ print a\\", "+b }"),
   [
@@ -1306,7 +1344,6 @@ splitTokenHistoryTest(
         { byte: 8, deleteBytes: 0, insert: '"' },
       ],
       source: lines('{ print "a\\', '+b" }'),
-      split: true,
     },
     {
       edits: [
@@ -1314,61 +1351,102 @@ splitTokenHistoryTest(
         { byte: 8, deleteBytes: 1, insert: "" },
       ],
       source: lines("{ print a\\", "+b }"),
-      split: false,
     },
   ],
 );
 
-splitTokenHistoryTest(
+continuationHistoryTest(
   "a slash changes a division gap into an ERE split and back",
   lines("{ print x /\\", "a/ + b }"),
   [
     {
       edits: [{ byte: 10, deleteBytes: 0, insert: "~ " }],
       source: lines("{ print x ~ /\\", "a/ + b }"),
-      split: true,
     },
     {
       edits: [{ byte: 10, deleteBytes: 2, insert: "" }],
       source: lines("{ print x /\\", "a/ + b }"),
-      split: false,
     },
   ],
 );
 
-splitTokenHistoryTest(
-  "a comment marker changes continuation detection without retaining scanner state",
+continuationHistoryTest(
+  "a comment marker changes continuation ownership without retaining scanner state",
   lines("{", "# fo\\", "o", "}"),
   [
     {
       edits: [{ byte: 2, deleteBytes: 2, insert: "" }],
       source: lines("{", "fo\\", "o", "}"),
-      split: true,
     },
     {
       edits: [{ byte: 2, deleteBytes: 0, insert: "# " }],
       source: lines("{", "# fo\\", "o", "}"),
-      split: false,
     },
   ],
 );
 
-splitTokenHistoryTest(
+continuationHistoryTest(
   "a blank separates a split word into two tokens and back",
   lines("{ f\\", "oo(x) }"),
   [
     {
       edits: [{ byte: 3, deleteBytes: 0, insert: " " }],
       source: lines("{ f \\", "oo(x) }"),
-      split: false,
     },
     {
       edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
       source: lines("{ f\\", "oo(x) }"),
-      split: true,
     },
   ],
 );
+
+for (const { name, initial, changed, removed, inserted, expected } of [
+  {
+    name: "a keyword becomes a name after a continued prefix",
+    initial: lines("BE\\", "GIN { print 1 }"),
+    changed: lines("BE\\", "GUN { print 1 }"),
+    removed: "GIN",
+    inserted: "GUN",
+    expected: "name",
+  },
+  {
+    name: "a builtin becomes a user function after a continued prefix",
+    initial: lines("BEGIN { print len\\", "gth(x) }"),
+    changed: lines("BEGIN { print len\\", "gtx(x) }"),
+    removed: "gth",
+    inserted: "gtx",
+    expected: "func_name",
+  },
+  {
+    name: "an exponent edit moves a continuation out of its number",
+    initial: lines("BEGIN { print 1\\", "e+2 }"),
+    changed: lines("BEGIN { print 1\\", "e+x }"),
+    removed: "e+2",
+    inserted: "e+x",
+    expected: "number `1`",
+  },
+]) {
+  determinismTest(
+    name,
+    initial,
+    changed,
+    [
+      {
+        byte: initial.indexOf(removed),
+        deleteBytes: removed.length,
+        insert: inserted,
+      },
+    ],
+    (tree) => contains(tree, expected),
+  );
+  determinismTest(`${name} and changes back`, changed, initial, [
+    {
+      byte: changed.indexOf(inserted),
+      deleteBytes: inserted.length,
+      insert: removed,
+    },
+  ]);
+}
 
 function createEditHistoryGenerator() {
   let seed = 1n;
@@ -1461,12 +1539,7 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
     for (const result of [fresh, incremental]) {
       assert.ok(result.status === 0 || result.status === 1, history.context);
     }
-    if (hasSplitToken(fresh.tree)) {
-      assert.ok(
-        hasSplitToken(incremental.tree) || hasRecovery(incremental.tree),
-        history.context,
-      );
-    } else if (fresh.status === 0 && !hasRecovery(fresh.tree)) {
+    if (fresh.status === 0 && !hasRecovery(fresh.tree)) {
       assert.equal(incremental.status, 0, history.context);
       assert.equal(hasRecovery(incremental.tree), false, history.context);
       assert.equal(incremental.tree, fresh.tree, history.context);

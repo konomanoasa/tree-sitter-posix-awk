@@ -34,8 +34,8 @@ enum TokenType {
   NUMBER_INTEGER,
   NUMBER_FRACTION,
   NUMBER_EXPONENT,
-  DIVISION_SLASH,
-  ERE_OPENING_SLASH,
+  DIVISION_SLASH_GUARD,
+  ERE_OPENING_SLASH_GUARD,
   DIV_ASSIGN_OPERATOR,
   ADD_ASSIGN_OPERATOR,
   SUB_ASSIGN_OPERATOR,
@@ -52,27 +52,49 @@ enum TokenType {
   INCR_OPERATOR,
   DECR_OPERATOR,
   APPEND_OPERATOR,
+  PLUS_OPERATOR,
+  MINUS_OPERATOR,
+  STAR_OPERATOR,
+  PERCENT_OPERATOR,
+  CARET_OPERATOR,
+  BANG_OPERATOR,
+  LESS_OPERATOR,
+  GREATER_OPERATOR,
+  EQUAL_OPERATOR,
+  PIPE_OPERATOR,
   OUTPUT_GREATER_GUARD,
-  ERE_COMPOUND_OPEN_GUARD,
-  ERE_DOT_CLOSE_GUARD,
-  ERE_EQUAL_CLOSE_GUARD,
-  ERE_COLON_CLOSE_GUARD,
-  ERE_ESCAPE_START,
-  ERE_ESCAPED_DELIMITER_START,
-  ERE_ESCAPED_DELIMITER_END,
+  ERE_COMPOUND_OPENING,
+  ERE_DOT_CLOSING,
+  ERE_EQUAL_CLOSING,
+  ERE_COLON_CLOSING,
+  ERE_BRACKET_LITERAL_OPEN,
+  ERE_COMPOUND_CONTENT,
   ERE_CLOSING_HYPHEN,
   ERE_CLOSING,
   STRING_OPENING,
   STRING_END,
+  STRING_CONTENT_GUARD,
+  STRING_ESCAPE_GUARD,
+  ERE_NAMED_ESCAPE_GUARD,
+  ERE_QUOTED_ESCAPE_GUARD,
+  ERE_OCTAL_ESCAPE_GUARD,
+  ERE_UNDEFINED_ESCAPE_GUARD,
+  ERE_ESCAPED_DELIMITER_GUARD,
+  ERE_CLASS_NAME_GUARD,
+  ERE_DUP_COUNT_GUARD,
+  TOKEN_WHOLE,
+  TOKEN_CONTENT,
+  TOKEN_FINAL_CONTENT,
+  TOKEN_LINE_CONTINUATION,
   COMMENT,
-  SPLIT_TOKEN,
+  LINE_CONTINUATION,
   ERROR_SENTINEL,
   TOKEN_TYPE_COUNT,
 };
 
 enum {
   MAX_RESERVED_WORD_LENGTH = 8,
-  SERIALIZED_SCANNER_STATE_SIZE = 1,
+  SERIALIZED_SCANNER_STATE_SIZE = 6,
 };
 
 typedef char SerializedScannerStateFitsTreeSitterBuffer
@@ -133,12 +155,19 @@ typedef enum {
 typedef enum {
   LEXICAL_MODE_OUTSIDE,
   LEXICAL_MODE_ERE_BODY,
-  LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
   LEXICAL_MODE_STRING,
 } LexicalMode;
 
+typedef enum {
+  PAYLOAD_NONE,
+  PAYLOAD_WHOLE,
+  PAYLOAD_SPLIT,
+} PayloadMode;
+
 typedef struct {
   LexicalMode mode;
+  PayloadMode payload;
+  uint32_t remaining;
 } ScannerState;
 
 static const WordEntry WORDS[] = {
@@ -231,6 +260,24 @@ static const CompositeOperator COMPOSITE_OPERATORS[] = {
   {'>', '>', APPEND_OPERATOR},
 };
 
+typedef struct {
+  int32_t character;
+  enum TokenType token;
+} SingleOperator;
+
+static const SingleOperator SINGLE_OPERATORS[] = {
+  {'+', PLUS_OPERATOR},
+  {'-', MINUS_OPERATOR},
+  {'*', STAR_OPERATOR},
+  {'%', PERCENT_OPERATOR},
+  {'^', CARET_OPERATOR},
+  {'!', BANG_OPERATOR},
+  {'<', LESS_OPERATOR},
+  {'>', GREATER_OPERATOR},
+  {'=', EQUAL_OPERATOR},
+  {'|', PIPE_OPERATOR},
+};
+
 static bool is_ascii_blank(int32_t character) {
   return character == ' ' || character == '\t';
 }
@@ -252,60 +299,66 @@ static bool is_word_continue(int32_t character) {
   return is_word_start(character) || is_ascii_digit(character);
 }
 
-typedef enum {
-  CONTINUATION_NONE,
-  CONTINUATION_PAIRS,
-  CONTINUATION_INVALID,
-} ContinuationResult;
+typedef struct {
+  TSLexer *lexer;
+  uint32_t offset;
+  uint32_t end;
+  uint32_t continuations;
+  int32_t character;
+  bool eof;
+  bool overflow;
+} LogicalCursor;
 
-static ContinuationResult advance_line_continuations(TSLexer *lexer) {
-  ContinuationResult result = CONTINUATION_NONE;
+typedef struct {
+  uint32_t length;
+  uint32_t continuations;
+} TokenSpan;
 
-  while (lexer->lookahead == '\\') {
-    lexer->advance(lexer, false);
-    if (lexer->lookahead != '\n') {
-      return CONTINUATION_INVALID;
+typedef struct {
+  WordKind kind;
+  TokenSpan span;
+} ScannedWord;
+
+static bool advance_logical_source(LogicalCursor *cursor) {
+  if (cursor->offset == UINT32_MAX) {
+    cursor->overflow = true;
+    return false;
+  }
+  cursor->lexer->advance(cursor->lexer, false);
+  cursor->offset++;
+  return true;
+}
+
+static void logical_next(LogicalCursor *cursor) {
+  TSLexer *lexer = cursor->lexer;
+  for (;;) {
+    if (lexer->eof(lexer) || cursor->overflow) {
+      cursor->eof = true;
+      cursor->character = 0;
+      return;
     }
-
-    lexer->advance(lexer, false);
-    result = CONTINUATION_PAIRS;
-  }
-
-  return result;
-}
-
-// Skipping during lookahead would move the token start past its marked end.
-static void skip_ascii_blanks(TSLexer *lexer) {
-  while (is_ascii_blank(lexer->lookahead)) {
-    lexer->advance(lexer, true);
-  }
-}
-
-static void advance_ascii_blanks(TSLexer *lexer) {
-  while (is_ascii_blank(lexer->lookahead)) {
-    lexer->advance(lexer, false);
-  }
-}
-
-static void advance_comment_to_boundary(TSLexer *lexer) {
-  if (lexer->lookahead != '#') {
+    const int32_t character = lexer->lookahead;
+    if (!advance_logical_source(cursor)) {
+      cursor->eof = true;
+      return;
+    }
+    if (character == '\\' && lexer->lookahead == '\n') {
+      if (!advance_logical_source(cursor)) {
+        cursor->eof = true;
+        return;
+      }
+      cursor->continuations++;
+      continue;
+    }
+    cursor->character = character;
+    cursor->end = cursor->offset;
+    cursor->eof = false;
     return;
   }
-  do {
-    lexer->advance(lexer, false);
-  } while (lexer->lookahead != '\n' && !lexer->eof(lexer));
 }
 
-static bool advance_boundary_gap_remainder(TSLexer *lexer) {
-  for (;;) {
-    advance_ascii_blanks(lexer);
-    if (lexer->lookahead != '\\') {
-      return true;
-    }
-    if (advance_line_continuations(lexer) == CONTINUATION_INVALID) {
-      return false;
-    }
-  }
+static TokenSpan logical_span(const LogicalCursor *cursor) {
+  return (TokenSpan){cursor->end, cursor->continuations};
 }
 
 static bool emit(TSLexer *lexer, enum TokenType token) {
@@ -323,74 +376,136 @@ static bool emit_mode(
   return emit(lexer, token);
 }
 
+static bool begin_payload(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols,
+  enum TokenType token,
+  TokenSpan span
+) {
+  if (span.length == 0 || !valid_symbols[token]) {
+    return false;
+  }
+  state->payload = span.continuations == 0 ? PAYLOAD_WHOLE : PAYLOAD_SPLIT;
+  state->remaining = span.length;
+  return emit(lexer, token);
+}
+
+static bool
+scan_payload(ScannerState *state, TSLexer *lexer, const bool *valid_symbols) {
+  uint32_t consumed = 0;
+  enum TokenType token = TOKEN_WHOLE;
+  lexer->mark_end(lexer);
+  if (state->payload == PAYLOAD_WHOLE) {
+    while (consumed < state->remaining && !lexer->eof(lexer)) {
+      lexer->advance(lexer, false);
+      consumed++;
+    }
+    if (consumed != state->remaining) {
+      return false;
+    }
+    lexer->mark_end(lexer);
+  } else {
+    while (consumed < state->remaining && !lexer->eof(lexer)) {
+      const int32_t character = lexer->lookahead;
+      lexer->advance(lexer, false);
+      if (character == '\\' && lexer->lookahead == '\n') {
+        if (consumed == 0 && state->remaining >= 2) {
+          lexer->advance(lexer, false);
+          consumed = 2;
+          lexer->mark_end(lexer);
+          token = TOKEN_LINE_CONTINUATION;
+        }
+        break;
+      }
+      consumed++;
+      lexer->mark_end(lexer);
+    }
+    if (token != TOKEN_LINE_CONTINUATION) {
+      token =
+        consumed == state->remaining ? TOKEN_FINAL_CONTENT : TOKEN_CONTENT;
+    }
+  }
+  if (consumed == 0 || !valid_symbols[token]) {
+    return false;
+  }
+  state->remaining -= consumed;
+  if (state->remaining == 0) {
+    state->payload = PAYLOAD_NONE;
+  }
+  return emit(lexer, token);
+}
+
 static WordKind classify_word(const char *word, size_t length) {
   if (length > MAX_RESERVED_WORD_LENGTH) {
     return WORD_KIND_NAME;
   }
-
   for (size_t i = 0; i < ARRAY_LENGTH(WORDS); i++) {
     if (strcmp(WORDS[i].spelling, word) == 0) {
       return WORDS[i].kind;
     }
   }
-
   return WORD_KIND_NAME;
 }
 
-static WordKind scan_word_spelling(TSLexer *lexer) {
-  char word[MAX_RESERVED_WORD_LENGTH + 1] = {0};
+static ScannedWord scan_word_spelling(LogicalCursor *cursor) {
+  ScannedWord word = {0};
+  char spelling[MAX_RESERVED_WORD_LENGTH + 1] = {0};
   size_t length = 0;
-
-  if (!is_word_start(lexer->lookahead)) {
-    return WORD_KIND_NONE;
+  if (cursor->eof || !is_word_start(cursor->character)) {
+    return word;
   }
-
-  while (is_word_continue(lexer->lookahead)) {
+  do {
     if (length < MAX_RESERVED_WORD_LENGTH) {
-      word[length] = (char)lexer->lookahead;
+      spelling[length] = (char)cursor->character;
     }
     if (length <= MAX_RESERVED_WORD_LENGTH) {
       length++;
     }
-    lexer->advance(lexer, false);
-  }
-
-  return classify_word(word, length);
+    word.span = logical_span(cursor);
+    logical_next(cursor);
+  } while (!cursor->eof && is_word_continue(cursor->character));
+  word.kind = classify_word(spelling, length);
+  return word;
 }
 
-static bool scan_for_in_shape(TSLexer *lexer) {
-  if (
-    !advance_boundary_gap_remainder(lexer) ||
-    scan_word_spelling(lexer) !=
-    WORD_KIND_IN ||
-    !advance_boundary_gap_remainder(lexer) ||
-    scan_word_spelling(lexer) !=
-    WORD_KIND_NAME ||
-    !advance_boundary_gap_remainder(lexer)
-  ) {
+static void logical_skip_blanks(LogicalCursor *cursor) {
+  while (!cursor->eof && is_ascii_blank(cursor->character)) {
+    logical_next(cursor);
+  }
+}
+
+static bool scan_for_in_shape(LogicalCursor *cursor) {
+  logical_skip_blanks(cursor);
+  if (scan_word_spelling(cursor).kind != WORD_KIND_IN) {
     return false;
   }
-  return lexer->lookahead == ')';
+  logical_skip_blanks(cursor);
+  if (scan_word_spelling(cursor).kind != WORD_KIND_NAME) {
+    return false;
+  }
+  logical_skip_blanks(cursor);
+  return !cursor->eof && cursor->character == ')';
 }
 
-// Only promote for-in variables where expected: the same spelling can be
-// a parenthesized membership test.
-static WordKind
-promote_word_kind(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
+static WordKind promote_word_kind(
+  LogicalCursor *cursor,
+  const bool *valid_symbols,
+  WordKind kind
+) {
   switch (kind) {
   case WORD_KIND_NAME:
-    if (lexer->lookahead == '(') {
+    if (!cursor->eof && cursor->character == '(') {
       return WORD_KIND_FUNC_NAME;
     }
-    if (valid_symbols[FOR_IN_VARIABLE_WORD] && scan_for_in_shape(lexer)) {
+    if (valid_symbols[FOR_IN_VARIABLE_WORD] && scan_for_in_shape(cursor)) {
       return WORD_KIND_FOR_IN_VARIABLE;
     }
     return kind;
   case WORD_KIND_BUILTIN_FUNC_NAME:
-    if (!advance_boundary_gap_remainder(lexer)) {
-      return kind;
-    }
-    return lexer->lookahead == '(' ? WORD_KIND_BUILTIN_CALL : kind;
+    logical_skip_blanks(cursor);
+    return !cursor->eof && cursor->character == '(' ? WORD_KIND_BUILTIN_CALL
+                                                    : kind;
   default:
     return kind;
   }
@@ -405,60 +520,6 @@ static const WordToken *find_word_token(WordKind kind) {
   return NULL;
 }
 
-static bool
-emit_word_kind(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
-  const WordToken *token = find_word_token(kind);
-  if (token == NULL || !valid_symbols[token->token]) {
-    return false;
-  }
-  return emit(lexer, token->token);
-}
-
-static bool word_kind_is_valid(const bool *valid_symbols, WordKind kind) {
-  const WordToken *token = find_word_token(kind);
-  return token != NULL && valid_symbols[token->token];
-}
-
-static bool word_spelling_is_valid(const bool *valid_symbols, WordKind kind) {
-  switch (kind) {
-  case WORD_KIND_NAME:
-    return word_kind_is_valid(valid_symbols, WORD_KIND_NAME) ||
-      word_kind_is_valid(valid_symbols, WORD_KIND_FUNC_NAME) ||
-      word_kind_is_valid(valid_symbols, WORD_KIND_FOR_IN_VARIABLE);
-  case WORD_KIND_BUILTIN_FUNC_NAME:
-    return word_kind_is_valid(valid_symbols, kind) ||
-      word_kind_is_valid(valid_symbols, WORD_KIND_BUILTIN_CALL);
-  default:
-    return word_kind_is_valid(valid_symbols, kind);
-  }
-}
-
-static bool
-scan_word_token(TSLexer *lexer, const bool *valid_symbols, WordKind kind) {
-  lexer->mark_end(lexer);
-  const ContinuationResult continuation = advance_line_continuations(lexer);
-  if (continuation == CONTINUATION_INVALID) {
-    return emit_word_kind(lexer, valid_symbols, kind);
-  }
-  if (
-    continuation == CONTINUATION_PAIRS && is_word_continue(lexer->lookahead)
-  ) {
-    if (!valid_symbols[SPLIT_TOKEN]) {
-      return false;
-    }
-    lexer->mark_end(lexer);
-    return emit(lexer, SPLIT_TOKEN);
-  }
-  if (!word_spelling_is_valid(valid_symbols, kind)) {
-    return false;
-  }
-  return emit_word_kind(
-    lexer,
-    valid_symbols,
-    promote_word_kind(lexer, valid_symbols, kind)
-  );
-}
-
 static bool has_word_token(const bool *valid_symbols) {
   for (size_t i = 0; i < ARRAY_LENGTH(WORD_TOKENS); i++) {
     if (valid_symbols[WORD_TOKENS[i].token]) {
@@ -466,6 +527,22 @@ static bool has_word_token(const bool *valid_symbols) {
     }
   }
   return false;
+}
+
+static bool scan_word_token(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+  LogicalCursor cursor = {.lexer = lexer};
+  logical_next(&cursor);
+  const ScannedWord word = scan_word_spelling(&cursor);
+  const WordKind kind = promote_word_kind(&cursor, valid_symbols, word.kind);
+  const WordToken *token = find_word_token(kind);
+  return !cursor.overflow &&
+    token !=
+    NULL &&
+    begin_payload(state, lexer, valid_symbols, token->token, word.span);
 }
 
 static enum TokenType number_kind_token(NumberKind kind) {
@@ -479,112 +556,80 @@ static enum TokenType number_kind_token(NumberKind kind) {
   }
 }
 
-static bool peek_number_continuations(TSLexer *lexer, bool *crossed) {
-  const ContinuationResult continuation = advance_line_continuations(lexer);
-  if (continuation == CONTINUATION_PAIRS) {
-    *crossed = true;
-  }
-  return continuation != CONTINUATION_INVALID;
-}
-
-static NumberKind
-accept_number(TSLexer *lexer, NumberKind kind, bool crossed, bool *split) {
-  lexer->mark_end(lexer);
-  *split = crossed;
-  return kind;
-}
-
-static NumberKind scan_number_kind(TSLexer *lexer, bool *split) {
+static NumberKind scan_number_kind(LogicalCursor *cursor, TokenSpan *span) {
   NumberKind kind = NUMBER_KIND_NONE;
-  bool crossed = false;
-
-  while (is_ascii_digit(lexer->lookahead)) {
-    lexer->advance(lexer, false);
-    kind = accept_number(lexer, NUMBER_KIND_INTEGER, crossed, split);
-    if (!peek_number_continuations(lexer, &crossed)) {
-      return kind;
-    }
+  while (!cursor->eof && is_ascii_digit(cursor->character)) {
+    kind = NUMBER_KIND_INTEGER;
+    *span = logical_span(cursor);
+    logical_next(cursor);
   }
-  if (lexer->lookahead == '.') {
-    lexer->advance(lexer, false);
+  if (!cursor->eof && cursor->character == '.') {
     if (kind != NUMBER_KIND_NONE) {
-      kind = accept_number(lexer, NUMBER_KIND_FRACTION, crossed, split);
+      kind = NUMBER_KIND_FRACTION;
+      *span = logical_span(cursor);
     }
-    if (!peek_number_continuations(lexer, &crossed)) {
-      return kind;
-    }
-    while (is_ascii_digit(lexer->lookahead)) {
-      lexer->advance(lexer, false);
-      kind = accept_number(lexer, NUMBER_KIND_FRACTION, crossed, split);
-      if (!peek_number_continuations(lexer, &crossed)) {
-        return kind;
-      }
+    logical_next(cursor);
+    while (!cursor->eof && is_ascii_digit(cursor->character)) {
+      kind = NUMBER_KIND_FRACTION;
+      *span = logical_span(cursor);
+      logical_next(cursor);
     }
   }
   if (kind == NUMBER_KIND_NONE) {
     return kind;
   }
-
-  if (lexer->lookahead == 'e' || lexer->lookahead == 'E') {
-    lexer->advance(lexer, false);
-    if (!peek_number_continuations(lexer, &crossed)) {
+  if (!cursor->eof && (cursor->character == 'e' || cursor->character == 'E')) {
+    logical_next(cursor);
+    if (
+      !cursor->eof && (cursor->character == '+' || cursor->character == '-')
+    ) {
+      logical_next(cursor);
+    }
+    if (cursor->eof || !is_ascii_digit(cursor->character)) {
       return kind;
     }
-    if (lexer->lookahead == '+' || lexer->lookahead == '-') {
-      lexer->advance(lexer, false);
-      if (!peek_number_continuations(lexer, &crossed)) {
-        return kind;
-      }
-    }
-    if (!is_ascii_digit(lexer->lookahead)) {
-      return kind;
-    }
-    while (is_ascii_digit(lexer->lookahead)) {
-      lexer->advance(lexer, false);
-      kind = accept_number(lexer, NUMBER_KIND_EXPONENT, crossed, split);
-      if (!peek_number_continuations(lexer, &crossed)) {
-        return kind;
-      }
-    }
+    do {
+      kind = NUMBER_KIND_EXPONENT;
+      *span = logical_span(cursor);
+      logical_next(cursor);
+    } while (!cursor->eof && is_ascii_digit(cursor->character));
   }
   if (
+    !cursor->eof &&
     kind !=
     NUMBER_KIND_INTEGER &&
-    (lexer->lookahead ==
+    (cursor->character ==
       'f' ||
-      lexer->lookahead ==
+      cursor->character ==
       'F' ||
-      lexer->lookahead ==
+      cursor->character ==
       'l' ||
-      lexer->lookahead == 'L')
+      cursor->character == 'L')
   ) {
-    lexer->advance(lexer, false);
-    kind = accept_number(lexer, kind, crossed, split);
+    *span = logical_span(cursor);
   }
   return kind;
 }
 
-static bool
-emit_number_kind(TSLexer *lexer, const bool *valid_symbols, NumberKind kind) {
-  if (kind == NUMBER_KIND_NONE || !valid_symbols[number_kind_token(kind)]) {
-    return false;
-  }
-  return emit(lexer, number_kind_token(kind));
+static bool has_number_token(const bool *valid_symbols) {
+  return valid_symbols[NUMBER_INTEGER] ||
+    valid_symbols[NUMBER_FRACTION] ||
+    valid_symbols[NUMBER_EXPONENT];
 }
 
-static bool
-has_valid_composite_operator_start(int32_t first, const bool *valid_symbols) {
-  for (size_t i = 0; i < ARRAY_LENGTH(COMPOSITE_OPERATORS); i++) {
-    if (
-      COMPOSITE_OPERATORS[i].first ==
-      first &&
-      (valid_symbols[COMPOSITE_OPERATORS[i].token] ||
-        valid_symbols[SPLIT_TOKEN])
-    ) {
-      return true;
-    }
-  }
-  return false;
+static bool scan_number_token(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+  LogicalCursor cursor = {.lexer = lexer};
+  TokenSpan span = {0};
+  logical_next(&cursor);
+  const NumberKind kind = scan_number_kind(&cursor, &span);
+  return kind !=
+    NUMBER_KIND_NONE &&
+    !cursor.overflow &&
+    begin_payload(state, lexer, valid_symbols, number_kind_token(kind), span);
 }
 
 static const CompositeOperator *
@@ -601,88 +646,102 @@ find_composite_operator(int32_t first, int32_t second) {
   return NULL;
 }
 
-static bool
-scan_composite_operator_start(TSLexer *lexer, const bool *valid_symbols) {
-  const int32_t first = lexer->lookahead;
-  lexer->advance(lexer, false);
-  const ContinuationResult continuation = advance_line_continuations(lexer);
-  if (continuation == CONTINUATION_INVALID) {
-    return false;
-  }
-  const CompositeOperator *composite =
-    find_composite_operator(first, lexer->lookahead);
-  if (composite == NULL) {
-    return false;
-  }
-  if (continuation == CONTINUATION_PAIRS) {
-    if (!valid_symbols[SPLIT_TOKEN]) {
-      return false;
+static const SingleOperator *find_single_operator(int32_t character) {
+  for (size_t i = 0; i < ARRAY_LENGTH(SINGLE_OPERATORS); i++) {
+    if (SINGLE_OPERATORS[i].character == character) {
+      return &SINGLE_OPERATORS[i];
     }
-    lexer->advance(lexer, false);
-    lexer->mark_end(lexer);
-    return emit(lexer, SPLIT_TOKEN);
   }
-  if (!valid_symbols[composite->token]) {
-    return false;
-  }
-
-  lexer->advance(lexer, false);
-  lexer->mark_end(lexer);
-  return emit(lexer, composite->token);
+  return NULL;
 }
 
 static bool
-has_greater_start(const bool *valid_symbols, bool allow_zero_width_guard) {
-  return valid_symbols[SPLIT_TOKEN] ||
-    valid_symbols[GE_OPERATOR] ||
-    valid_symbols[APPEND_OPERATOR] ||
-    (allow_zero_width_guard && valid_symbols[OUTPUT_GREATER_GUARD]);
+has_valid_composite_operator_start(int32_t first, const bool *valid_symbols) {
+  for (size_t i = 0; i < ARRAY_LENGTH(COMPOSITE_OPERATORS); i++) {
+    if (
+      COMPOSITE_OPERATORS[i].first ==
+      first &&
+      valid_symbols[COMPOSITE_OPERATORS[i].token]
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
-// Dispatch together so an invalid two-character operator cannot block the
-// zero-width redirection guard.
-static bool scan_greater_start(
+static bool scan_composite_operator_start(
+  ScannerState *state,
   TSLexer *lexer,
-  const bool *valid_symbols,
-  bool allow_zero_width_guard
+  const bool *valid_symbols
 ) {
-  lexer->advance(lexer, false);
-  const ContinuationResult continuation = advance_line_continuations(lexer);
-  if (
-    continuation ==
-    CONTINUATION_PAIRS &&
-    (lexer->lookahead == '=' || lexer->lookahead == '>')
-  ) {
-    if (!valid_symbols[SPLIT_TOKEN]) {
-      return false;
-    }
-    lexer->advance(lexer, false);
-    lexer->mark_end(lexer);
-    return emit(lexer, SPLIT_TOKEN);
-  }
-  if (continuation == CONTINUATION_NONE && lexer->lookahead == '=') {
-    if (!valid_symbols[GE_OPERATOR]) {
-      return false;
-    }
-    lexer->advance(lexer, false);
-    lexer->mark_end(lexer);
-    return emit(lexer, GE_OPERATOR);
-  }
-  if (
-    continuation ==
-    CONTINUATION_NONE &&
-    lexer->lookahead ==
-    '>' &&
-    valid_symbols[APPEND_OPERATOR]
-  ) {
-    lexer->advance(lexer, false);
-    lexer->mark_end(lexer);
-    return emit(lexer, APPEND_OPERATOR);
-  }
-  if (!allow_zero_width_guard || !valid_symbols[OUTPUT_GREATER_GUARD]) {
+  const int32_t first = lexer->lookahead;
+  LogicalCursor cursor = {.lexer = lexer};
+  logical_next(&cursor);
+  logical_next(&cursor);
+  const CompositeOperator *composite =
+    cursor.eof ? NULL : find_composite_operator(first, cursor.character);
+  if (cursor.overflow) {
     return false;
   }
-  return emit(lexer, OUTPUT_GREATER_GUARD);
+  if (composite != NULL) {
+    return begin_payload(
+      state,
+      lexer,
+      valid_symbols,
+      composite->token,
+      logical_span(&cursor)
+    );
+  }
+  const SingleOperator *single = find_single_operator(first);
+  return single !=
+    NULL &&
+    begin_payload(
+      state,
+      lexer,
+      valid_symbols,
+      single->token,
+      (TokenSpan){1, 0}
+    );
+}
+
+static bool scan_greater_start(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+  LogicalCursor cursor = {.lexer = lexer};
+  logical_next(&cursor);
+  logical_next(&cursor);
+  if (!cursor.eof && cursor.character == '=') {
+    return begin_payload(
+      state,
+      lexer,
+      valid_symbols,
+      GE_OPERATOR,
+      logical_span(&cursor)
+    );
+  }
+  if (
+    !cursor.eof && cursor.character == '>' && valid_symbols[APPEND_OPERATOR]
+  ) {
+    return begin_payload(
+      state,
+      lexer,
+      valid_symbols,
+      APPEND_OPERATOR,
+      logical_span(&cursor)
+    );
+  }
+  if (valid_symbols[OUTPUT_GREATER_GUARD]) {
+    return emit(lexer, OUTPUT_GREATER_GUARD);
+  }
+  return begin_payload(
+    state,
+    lexer,
+    valid_symbols,
+    GREATER_OPERATOR,
+    (TokenSpan){1, 0}
+  );
 }
 
 static bool scan_slash_start(
@@ -690,108 +749,260 @@ static bool scan_slash_start(
   TSLexer *lexer,
   const bool *valid_symbols
 ) {
-  lexer->advance(lexer, false);
-  lexer->mark_end(lexer);
-  const ContinuationResult continuation = advance_line_continuations(lexer);
-  if (
-    continuation ==
-    CONTINUATION_PAIRS &&
-    lexer->lookahead ==
-    '=' &&
-    valid_symbols[SPLIT_TOKEN]
-  ) {
-    lexer->advance(lexer, false);
-    lexer->mark_end(lexer);
-    return emit(lexer, SPLIT_TOKEN);
-  }
-  if (continuation == CONTINUATION_NONE && lexer->lookahead == '=') {
+  LogicalCursor cursor = {.lexer = lexer};
+  logical_next(&cursor);
+  logical_next(&cursor);
+  if (!cursor.eof && cursor.character == '=') {
     if (valid_symbols[DIV_ASSIGN_OPERATOR]) {
-      lexer->advance(lexer, false);
-      lexer->mark_end(lexer);
-      return emit(lexer, DIV_ASSIGN_OPERATOR);
+      return begin_payload(
+        state,
+        lexer,
+        valid_symbols,
+        DIV_ASSIGN_OPERATOR,
+        logical_span(&cursor)
+      );
     }
-    if (valid_symbols[DIVISION_SLASH]) {
+    if (valid_symbols[DIVISION_SLASH_GUARD]) {
       return false;
     }
   }
-  if (valid_symbols[DIVISION_SLASH]) {
-    return emit(lexer, DIVISION_SLASH);
+  if (valid_symbols[DIVISION_SLASH_GUARD]) {
+    return begin_payload(
+      state,
+      lexer,
+      valid_symbols,
+      DIVISION_SLASH_GUARD,
+      (TokenSpan){1, 0}
+    );
   }
-  if (valid_symbols[ERE_OPENING_SLASH]) {
-    return emit_mode(state, lexer, LEXICAL_MODE_ERE_BODY, ERE_OPENING_SLASH);
+  if (
+    begin_payload(
+      state,
+      lexer,
+      valid_symbols,
+      ERE_OPENING_SLASH_GUARD,
+      (TokenSpan){1, 0}
+    )
+  ) {
+    state->mode = LEXICAL_MODE_ERE_BODY;
+    return true;
   }
   return false;
 }
 
-static bool scan_ere_backslash_context(
+static bool is_octal_digit(int32_t character) {
+  return character >= '0' && character <= '7';
+}
+
+static bool character_in(int32_t character, const char *characters) {
+  return character >
+    0 &&
+    character <=
+    127 &&
+    strchr(characters, (char)character) != NULL;
+}
+
+static bool
+scan_escape(ScannerState *state, TSLexer *lexer, const bool *valid_symbols) {
+  LogicalCursor cursor = {.lexer = lexer, .offset = 1};
+  logical_next(&cursor);
+  if (cursor.eof || cursor.character == '\n') {
+    return false;
+  }
+  const int32_t character = cursor.character;
+  TokenSpan span = logical_span(&cursor);
+  if (is_octal_digit(character)) {
+    for (unsigned count = 1; count < 3; count++) {
+      logical_next(&cursor);
+      if (cursor.eof || !is_octal_digit(cursor.character)) {
+        break;
+      }
+      span = logical_span(&cursor);
+    }
+  }
+  enum TokenType token = STRING_ESCAPE_GUARD;
+  if (state->mode == LEXICAL_MODE_ERE_BODY) {
+    if (character == '/') {
+      token = ERE_ESCAPED_DELIMITER_GUARD;
+    } else if (is_octal_digit(character)) {
+      token = ERE_OCTAL_ESCAPE_GUARD;
+    } else if (character_in(character, "abfnrtv")) {
+      token = ERE_NAMED_ESCAPE_GUARD;
+    } else if (character_in(character, "().*+?{}|^$[\\]")) {
+      token = ERE_QUOTED_ESCAPE_GUARD;
+    } else {
+      token = ERE_UNDEFINED_ESCAPE_GUARD;
+    }
+  }
+  return !cursor.overflow &&
+    begin_payload(state, lexer, valid_symbols, token, span);
+}
+
+static bool scan_backslash(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols,
+  bool recovering
+) {
+  lexer->advance(lexer, false);
+  if (lexer->lookahead == '\n') {
+    if (!valid_symbols[LINE_CONTINUATION]) {
+      return false;
+    }
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit(lexer, LINE_CONTINUATION);
+  }
+  return !recovering &&
+    state->mode !=
+    LEXICAL_MODE_OUTSIDE &&
+    scan_escape(state, lexer, valid_symbols);
+}
+
+static bool scan_string_content(
   ScannerState *state,
   TSLexer *lexer,
   const bool *valid_symbols
 ) {
-  if (lexer->lookahead != '\\') {
+  LogicalCursor cursor = {.lexer = lexer};
+  TokenSpan span = {0};
+  logical_next(&cursor);
+  while (
+    !cursor.eof &&
+    cursor.character !=
+    '"' &&
+    cursor.character !=
+    '\\' &&
+    cursor.character != '\n'
+  ) {
+    span = logical_span(&cursor);
+    logical_next(&cursor);
+  }
+  return !cursor.overflow &&
+    begin_payload(state, lexer, valid_symbols, STRING_CONTENT_GUARD, span);
+}
+
+static bool scan_ere_spelling(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols,
+  enum TokenType token
+) {
+  LogicalCursor cursor = {.lexer = lexer};
+  TokenSpan span = {0};
+  logical_next(&cursor);
+  if (
+    cursor.eof ||
+    (token == ERE_CLASS_NAME_GUARD && !is_ascii_letter(cursor.character))
+  ) {
     return false;
   }
+  while (
+    !cursor.eof &&
+    (is_ascii_digit(cursor.character) ||
+      (token == ERE_CLASS_NAME_GUARD && is_ascii_letter(cursor.character)))
+  ) {
+    span = logical_span(&cursor);
+    logical_next(&cursor);
+  }
+  return !cursor.overflow &&
+    begin_payload(state, lexer, valid_symbols, token, span);
+}
 
+typedef struct {
+  enum TokenType delimiter;
+  enum TokenType content;
+  int32_t first;
+} EreCompoundToken;
+
+static const EreCompoundToken ERE_COMPOUND_TOKENS[] = {
+  {ERE_COMPOUND_OPENING, ERE_BRACKET_LITERAL_OPEN, '['},
+  {ERE_DOT_CLOSING, ERE_COMPOUND_CONTENT, '.'},
+  {ERE_EQUAL_CLOSING, ERE_COMPOUND_CONTENT, '='},
+  {ERE_COLON_CLOSING, ERE_COMPOUND_CONTENT, ':'},
+};
+
+static bool scan_ere_compound_token(
+  TSLexer *lexer,
+  const EreCompoundToken *token,
+  const bool *valid_symbols
+) {
   lexer->advance(lexer, false);
-  if (lexer->lookahead == '\n' && valid_symbols[SPLIT_TOKEN]) {
+  lexer->mark_end(lexer);
+  LogicalCursor cursor = {.lexer = lexer, .offset = 1};
+  logical_next(&cursor);
+  const bool matches = !cursor.eof &&
+    (token->delimiter == ERE_COMPOUND_OPENING
+        ? character_in(cursor.character, ".=:")
+        : cursor.character == ']');
+  if (matches && valid_symbols[token->delimiter]) {
+    return emit(lexer, token->delimiter);
+  }
+  return valid_symbols[token->content] && emit(lexer, token->content);
+}
+
+static bool scan_ere_context(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols,
+  bool recovering
+) {
+  if (!recovering) {
+    for (size_t i = 0; i < ARRAY_LENGTH(ERE_COMPOUND_TOKENS); i++) {
+      const EreCompoundToken *token = &ERE_COMPOUND_TOKENS[i];
+      if (
+        lexer->lookahead ==
+        token->first &&
+        (valid_symbols[token->delimiter] || valid_symbols[token->content])
+      ) {
+        return scan_ere_compound_token(lexer, token, valid_symbols);
+      }
+    }
+    if (
+      valid_symbols[ERE_CLASS_NAME_GUARD] && is_ascii_letter(lexer->lookahead)
+    ) {
+      return scan_ere_spelling(
+        state,
+        lexer,
+        valid_symbols,
+        ERE_CLASS_NAME_GUARD
+      );
+    }
+    if (
+      valid_symbols[ERE_DUP_COUNT_GUARD] && is_ascii_digit(lexer->lookahead)
+    ) {
+      return scan_ere_spelling(
+        state,
+        lexer,
+        valid_symbols,
+        ERE_DUP_COUNT_GUARD
+      );
+    }
+  }
+  if (lexer->lookahead == '/' && valid_symbols[ERE_CLOSING]) {
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
-    return emit(lexer, SPLIT_TOKEN);
+    return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, ERE_CLOSING);
   }
-  if (valid_symbols[ERROR_SENTINEL]) {
-    return false;
-  }
-  if (lexer->lookahead == '/' && valid_symbols[ERE_ESCAPED_DELIMITER_START]) {
-    return emit_mode(
-      state,
-      lexer,
-      LEXICAL_MODE_ERE_ESCAPED_DELIMITER,
-      ERE_ESCAPED_DELIMITER_START
-    );
-  }
-  if (
-    lexer->lookahead !=
-    '\n' &&
-    !lexer->eof(lexer) &&
-    valid_symbols[ERE_ESCAPE_START]
-  ) {
-    return emit(lexer, ERE_ESCAPE_START);
+  if (lexer->lookahead == '-' && valid_symbols[ERE_CLOSING_HYPHEN]) {
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    LogicalCursor cursor = {.lexer = lexer, .offset = 1};
+    logical_next(&cursor);
+    return !cursor.eof &&
+      cursor.character ==
+      ']' &&
+      emit(lexer, ERE_CLOSING_HYPHEN);
   }
   return false;
 }
 
-static bool is_ere_compound_punctuation(int32_t character) {
-  switch (character) {
-  case '.':
-  case '=':
-  case ':':
-    return true;
-  default:
-    return false;
-  }
-}
-
-typedef struct {
-  enum TokenType guard;
-  int32_t opening;
-} EreCompoundGuard;
-
-static const EreCompoundGuard ERE_COMPOUND_GUARDS[] = {
-  {ERE_COMPOUND_OPEN_GUARD, '['},
-  {ERE_DOT_CLOSE_GUARD, '.'},
-  {ERE_EQUAL_CLOSE_GUARD, '='},
-  {ERE_COLON_CLOSE_GUARD, ':'},
-};
-
-static bool scan_ere_compound_guard(TSLexer *lexer, enum TokenType guard) {
-  lexer->advance(lexer, false);
-  const bool matches = guard == ERE_COMPOUND_OPEN_GUARD
-    ? is_ere_compound_punctuation(lexer->lookahead)
-    : lexer->lookahead == ']';
-  if (!matches) {
-    return false;
-  }
-  return emit(lexer, guard);
+static bool scan_comment(TSLexer *lexer) {
+  do {
+    lexer->advance(lexer, false);
+  } while (lexer->lookahead != '\n' && !lexer->eof(lexer));
+  lexer->mark_end(lexer);
+  return emit(lexer, COMMENT);
 }
 
 void *tree_sitter_posix_awk_external_scanner_create(void) {
@@ -805,10 +1016,14 @@ void tree_sitter_posix_awk_external_scanner_destroy(void *payload) {
 unsigned
 tree_sitter_posix_awk_external_scanner_serialize(void *payload, char *buffer) {
   const ScannerState *state = payload;
-  if (state->mode == LEXICAL_MODE_OUTSIDE) {
+  if (state->mode == LEXICAL_MODE_OUTSIDE && state->payload == PAYLOAD_NONE) {
     return 0;
   }
   buffer[0] = (char)state->mode;
+  buffer[1] = (char)state->payload;
+  for (unsigned i = 0; i < 4; i++) {
+    buffer[2 + i] = (char)(state->remaining >> (i * 8));
+  }
   return SERIALIZED_SCANNER_STATE_SIZE;
 }
 
@@ -818,104 +1033,25 @@ void tree_sitter_posix_awk_external_scanner_deserialize(
   unsigned length
 ) {
   ScannerState *state = payload;
-  state->mode = LEXICAL_MODE_OUTSIDE;
-  if (length == SERIALIZED_SCANNER_STATE_SIZE) {
-    const unsigned char mode = (unsigned char)buffer[0];
-    if (mode <= LEXICAL_MODE_STRING) {
-      state->mode = (LexicalMode)mode;
-    }
+  *state = (ScannerState){0};
+  if (length != SERIALIZED_SCANNER_STATE_SIZE) {
+    return;
   }
-}
-
-static bool scan_ere_context(
-  ScannerState *state,
-  TSLexer *lexer,
-  const bool *valid_symbols
-) {
-  lexer->mark_end(lexer);
-
-  if (state->mode == LEXICAL_MODE_ERE_ESCAPED_DELIMITER) {
-    if (lexer->lookahead == '/' && valid_symbols[ERE_ESCAPED_DELIMITER_END]) {
-      lexer->advance(lexer, false);
-      lexer->mark_end(lexer);
-      return emit_mode(
-        state,
-        lexer,
-        LEXICAL_MODE_ERE_BODY,
-        ERE_ESCAPED_DELIMITER_END
-      );
-    }
-    return scan_ere_backslash_context(state, lexer, valid_symbols);
+  const unsigned char mode = (unsigned char)buffer[0];
+  const unsigned char payload_mode = (unsigned char)buffer[1];
+  if (mode > LEXICAL_MODE_STRING || payload_mode > PAYLOAD_SPLIT) {
+    return;
   }
-
-  if (!valid_symbols[ERROR_SENTINEL]) {
-    for (size_t i = 0; i < ARRAY_LENGTH(ERE_COMPOUND_GUARDS); i++) {
-      if (
-        valid_symbols[ERE_COMPOUND_GUARDS[i].guard] &&
-        lexer->lookahead == ERE_COMPOUND_GUARDS[i].opening
-      ) {
-        return scan_ere_compound_guard(lexer, ERE_COMPOUND_GUARDS[i].guard);
-      }
-    }
+  uint32_t remaining = 0;
+  for (unsigned i = 0; i < 4; i++) {
+    remaining |= (uint32_t)(unsigned char)buffer[2 + i] << (i * 8);
   }
-
-  if (lexer->lookahead == '/' && valid_symbols[ERE_CLOSING]) {
-    lexer->advance(lexer, false);
-    lexer->mark_end(lexer);
-    return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, ERE_CLOSING);
+  if ((payload_mode == PAYLOAD_NONE) != (remaining == 0)) {
+    return;
   }
-
-  if (lexer->lookahead == '-' && valid_symbols[ERE_CLOSING_HYPHEN]) {
-    lexer->advance(lexer, false);
-    if (lexer->lookahead != ']') {
-      return false;
-    }
-    lexer->mark_end(lexer);
-    return emit(lexer, ERE_CLOSING_HYPHEN);
-  }
-
-  return scan_ere_backslash_context(state, lexer, valid_symbols);
-}
-
-static bool scan_string_context(
-  ScannerState *state,
-  TSLexer *lexer,
-  const bool *valid_symbols
-) {
-  lexer->mark_end(lexer);
-  if (lexer->lookahead == '\\') {
-    lexer->advance(lexer, false);
-    if (lexer->lookahead == '\n' && valid_symbols[SPLIT_TOKEN]) {
-      lexer->advance(lexer, false);
-      lexer->mark_end(lexer);
-      return emit(lexer, SPLIT_TOKEN);
-    }
-    return false;
-  }
-  const bool at_string_end =
-    lexer->lookahead == '"' || lexer->lookahead == '\n' || lexer->eof(lexer);
-  if (at_string_end && valid_symbols[STRING_END]) {
-    return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, STRING_END);
-  }
-  return false;
-}
-
-static bool scan_string_opening(ScannerState *state, TSLexer *lexer) {
-  lexer->advance(lexer, false);
-  lexer->mark_end(lexer);
-  return emit_mode(state, lexer, LEXICAL_MODE_STRING, STRING_OPENING);
-}
-
-static bool scan_comment(TSLexer *lexer) {
-  advance_comment_to_boundary(lexer);
-  lexer->mark_end(lexer);
-  return emit(lexer, COMMENT);
-}
-
-static bool has_number_token(const bool *valid_symbols) {
-  return valid_symbols[NUMBER_INTEGER] ||
-    valid_symbols[NUMBER_FRACTION] ||
-    valid_symbols[NUMBER_EXPONENT];
+  state->mode = (LexicalMode)mode;
+  state->payload = (PayloadMode)payload_mode;
+  state->remaining = remaining;
 }
 
 bool tree_sitter_posix_awk_external_scanner_scan(
@@ -924,65 +1060,80 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   const bool *valid_symbols
 ) {
   ScannerState *state = payload;
-  switch (state->mode) {
-  case LEXICAL_MODE_ERE_BODY:
-  case LEXICAL_MODE_ERE_ESCAPED_DELIMITER:
-    return scan_ere_context(state, lexer, valid_symbols);
-  case LEXICAL_MODE_STRING:
-    return scan_string_context(state, lexer, valid_symbols);
-  case LEXICAL_MODE_OUTSIDE:
-    break;
+  if (state->payload != PAYLOAD_NONE) {
+    return scan_payload(state, lexer, valid_symbols);
   }
-
-  // During recovery all tokens are valid; disable zero-width guards to avoid
-  // accepting them at arbitrary positions.
   const bool recovering = valid_symbols[ERROR_SENTINEL];
-  skip_ascii_blanks(lexer);
+  if (state->mode == LEXICAL_MODE_OUTSIDE) {
+    while (is_ascii_blank(lexer->lookahead)) {
+      lexer->advance(lexer, true);
+    }
+  }
   lexer->mark_end(lexer);
-
+  if (lexer->lookahead == '\\') {
+    return scan_backslash(state, lexer, valid_symbols, recovering);
+  }
+  if (state->mode == LEXICAL_MODE_ERE_BODY) {
+    return scan_ere_context(state, lexer, valid_symbols, recovering);
+  }
+  if (state->mode == LEXICAL_MODE_STRING) {
+    if (
+      (
+        lexer->lookahead == '"' || lexer->lookahead == '\n' || lexer->eof(lexer)
+      ) &&
+      valid_symbols[STRING_END]
+    ) {
+      return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, STRING_END);
+    }
+    return !recovering &&
+      valid_symbols[STRING_CONTENT_GUARD] &&
+      scan_string_content(state, lexer, valid_symbols);
+  }
   if (lexer->lookahead == '#' && valid_symbols[COMMENT]) {
     return scan_comment(lexer);
   }
-
   if (lexer->lookahead == '"' && valid_symbols[STRING_OPENING]) {
-    return scan_string_opening(state, lexer);
+    lexer->advance(lexer, false);
+    lexer->mark_end(lexer);
+    return emit_mode(state, lexer, LEXICAL_MODE_STRING, STRING_OPENING);
   }
-
-  if (
-    is_word_start(lexer->lookahead) &&
-    (has_word_token(valid_symbols) || valid_symbols[SPLIT_TOKEN])
-  ) {
-    const WordKind kind = scan_word_spelling(lexer);
-    return scan_word_token(lexer, valid_symbols, kind);
+  if (recovering) {
+    return false;
+  }
+  if (is_word_start(lexer->lookahead) && has_word_token(valid_symbols)) {
+    return scan_word_token(state, lexer, valid_symbols);
   }
   if (
     (is_ascii_digit(lexer->lookahead) || lexer->lookahead == '.') &&
-    (has_number_token(valid_symbols) || valid_symbols[SPLIT_TOKEN])
+    has_number_token(valid_symbols)
   ) {
-    bool split = false;
-    const NumberKind kind = scan_number_kind(lexer, &split);
-    if (split) {
-      return valid_symbols[SPLIT_TOKEN] && emit(lexer, SPLIT_TOKEN);
-    }
-    return emit_number_kind(lexer, valid_symbols, kind);
+    return scan_number_token(state, lexer, valid_symbols);
   }
   if (
     lexer->lookahead ==
     '/' &&
-    (valid_symbols[DIVISION_SLASH] ||
-      valid_symbols[ERE_OPENING_SLASH] ||
-      valid_symbols[DIV_ASSIGN_OPERATOR] ||
-      valid_symbols[SPLIT_TOKEN])
+    (valid_symbols[DIVISION_SLASH_GUARD] ||
+      valid_symbols[ERE_OPENING_SLASH_GUARD] ||
+      valid_symbols[DIV_ASSIGN_OPERATOR])
   ) {
     return scan_slash_start(state, lexer, valid_symbols);
   }
   if (
-    lexer->lookahead == '>' && has_greater_start(valid_symbols, !recovering)
+    lexer->lookahead ==
+    '>' &&
+    (valid_symbols[GE_OPERATOR] ||
+      valid_symbols[GREATER_OPERATOR] ||
+      valid_symbols[APPEND_OPERATOR] ||
+      valid_symbols[OUTPUT_GREATER_GUARD])
   ) {
-    return scan_greater_start(lexer, valid_symbols, !recovering);
+    return scan_greater_start(state, lexer, valid_symbols);
   }
-  if (has_valid_composite_operator_start(lexer->lookahead, valid_symbols)) {
-    return scan_composite_operator_start(lexer, valid_symbols);
+  const SingleOperator *single = find_single_operator(lexer->lookahead);
+  if (
+    (single != NULL && valid_symbols[single->token]) ||
+    has_valid_composite_operator_start(lexer->lookahead, valid_symbols)
+  ) {
+    return scan_composite_operator_start(state, lexer, valid_symbols);
   }
   return false;
 }

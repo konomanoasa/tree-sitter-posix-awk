@@ -112,11 +112,18 @@ f
               (name))))))))
 
 ==================
-split decimal digits expose a named marker
+continued decimal digits remain one number with source fragments
 ==================
 1\
 2
 ---
 
 (program
-  (split_token))
+  (item
+    (normal_pattern
+      (expr
+        (non_unary_expr
+          (number
+            (token_content)
+            (line_continuation)
+            (token_content)))))))

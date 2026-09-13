@@ -15,8 +15,6 @@ import {
   determinismTest,
   dirty,
   freshTest,
-  hasRecovery,
-  hasSplitToken,
   lines,
   nativeLibrary,
   parseDescription,
@@ -205,11 +203,43 @@ test("posix_awk: actions, EREs and strings require one opening and closing token
   }
 });
 
-test("posix_awk: split_token is a named extra leaf without fields", () => {
-  assert.deepEqual(
-    nodeTypes.find((node) => node.type === "split_token"),
-    { type: "split_token", named: true, extra: true },
+test("posix_awk: continued tokens expose content fields and no rejection marker", () => {
+  assert.equal(
+    nodeTypes.some((node) => node.type === "split_token"),
+    false,
   );
+  assert.deepEqual(
+    nodeTypes.find((node) => node.type === "token_content"),
+    {
+      type: "token_content",
+      named: true,
+    },
+  );
+  for (const kind of [
+    "name",
+    "func_name",
+    "builtin_func_name",
+    "begin_keyword",
+    "number",
+    "and",
+    "or",
+    "string_content",
+    "escape_sequence",
+    "escaped_delimiter",
+    "class_name",
+    "dup_count",
+  ]) {
+    const node = nodeTypes.find((node) => node.type === kind);
+    assert.deepEqual(
+      node.fields.content,
+      {
+        multiple: true,
+        required: false,
+        types: [{ type: "token_content", named: true }],
+      },
+      kind,
+    );
+  }
 });
 
 for (const [name, source] of [
@@ -249,21 +279,16 @@ for (const [name, source] of [
   ["logical or", lines("{ print x |\\", "| y }")],
   ["logical and", lines("{ print x &\\", "& y }")],
   ["non-match", lines("{ print x !\\", "~ y }")],
-  ["equality", lines("{ print x =\\", "= y }")],
-  ["less or equal", lines("{ print x <\\", "= y }")],
-  ["greater or equal", lines("{ print x >\\", "= y }")],
-  ["inequality", lines("{ print x !\\", "= y }")],
+  ["equality", lines("{ print (x =\\", "= y) }")],
+  ["less or equal", lines("{ print (x <\\", "= y) }")],
+  ["greater or equal", lines("{ print (x >\\", "= y) }")],
+  ["inequality", lines("{ print (x !\\", "= y) }")],
   ["increment", lines("{ x +\\", "+ }")],
   ["decrement", lines("{ x -\\", "- }")],
   ["append", lines("{ print x >\\", "> file }")],
 ]) {
-  test(`posix_awk: ${name} splits have a detection marker or recovery`, () => {
-    const result = captureParse(writeSource(name, "split", source));
-    assert.ok(result.status === 0 || result.status === 1, result.stdout);
-    assert.ok(
-      hasSplitToken(result.tree) || hasRecovery(result.tree),
-      result.tree,
-    );
+  freshTest(`${name} continuations preserve normal parsing`, source, (tree) => {
+    contains(tree, "line_continuation");
   });
 }
 
@@ -298,7 +323,7 @@ for (const [name, source, expected] of [
 }
 
 freshTest(
-  "comment backslashes do not create split tokens",
+  "comment backslashes remain comment text",
   lines("# name\\", "BEGIN { # += \\", "print 1 }"),
   (tree) => {
     assert.equal(tree.includes("line_continuation"), false, tree);
@@ -329,6 +354,28 @@ freshTest(
   (tree) => {
     contains(tree, "escape_sequence");
     assert.equal(tree.includes("line_continuation"), false, tree);
+  },
+);
+
+freshTest(
+  "continuations between string quotes preserve an empty string",
+  lines('BEGIN { print "\\', "\\", '" }'),
+  (tree) => {
+    contains(tree, "string");
+    contains(tree, "line_continuation");
+    assert.equal(tree.includes("string_content"), false, tree);
+    assert.equal(tree.includes("token_content"), false, tree);
+  },
+);
+
+freshTest(
+  "a blank after a continuation separates two word leaves",
+  lines("BEGIN { print va\\", " lue }"),
+  (tree) => {
+    contains(tree, "name `va`");
+    contains(tree, "name `lue`");
+    contains(tree, "line_continuation");
+    assert.equal(tree.includes("token_content"), false, tree);
   },
 );
 
@@ -421,6 +468,22 @@ for (const { name, source } of membershipPrecedenceCases) {
 }
 
 const invalidSyntaxCases = [
+  {
+    name: "a continued comparison still requires parentheses in print arguments",
+    source: lines("BEGIN { print x =\\", "= y }"),
+  },
+  {
+    name: "a continued comparison cannot become an output redirection",
+    source: lines("BEGIN { print x >\\", "= y }"),
+  },
+  {
+    name: "continuations cannot supply the expression in an empty ERE",
+    source: lines("BEGIN { print /\\", "/ }"),
+  },
+  {
+    name: "continuations cannot supply the expression in an empty ERE group",
+    source: lines("BEGIN { print /(\\", ")/ }"),
+  },
   {
     name: "division without a final operand is rejected",
     source: lines("BEGIN { print x /a/ }"),
@@ -608,6 +671,18 @@ test("posix_awk: Unicode source retains byte ranges without normalization", () =
 test("posix_awk: large tokens, statement lists and nested blocks parse through EOF", () => {
   for (const [name, source] of [
     ["long string", `BEGIN { print "${"x".repeat(80_000)}" }\n`],
+    [
+      "many continuations in a name",
+      `BEGIN { print ${"x\\\n".repeat(16_000)}x }\n`,
+    ],
+    [
+      "many continuations in a number",
+      `BEGIN { print ${"1\\\n".repeat(16_000)}1 }\n`,
+    ],
+    [
+      "many continuations in string content",
+      `BEGIN { print "${"x\\\n".repeat(16_000)}x" }\n`,
+    ],
     ["wide statement list", `BEGIN { ${"x++;".repeat(16_000)} }\n`],
     ["deep blocks", `BEGIN ${"{".repeat(2000)}print 1;${"}".repeat(2000)}\n`],
   ]) {

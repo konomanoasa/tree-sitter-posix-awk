@@ -379,3 +379,183 @@ $getline $-x++
                                 (incr)))))))))))))))
     (terminator
       (newline))))
+
+==================
+nested redirected getline retains scalar targets in ordinary expressions
+==================
+
+{$getline y < $getline y < $getline y < $getline y < $getline y < x}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword)
+                              (lvalue
+                                (name)))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword)
+                                          (lvalue
+                                            (name)))
+                                        (expr
+                                          (non_unary_expr
+                                            (lvalue
+                                              (expr
+                                                (non_unary_expr
+                                                  (non_unary_input_function
+                                                    (simple_get
+                                                      (getline_keyword)
+                                                      (lvalue
+                                                        (name)))
+                                                    (expr
+                                                      (non_unary_expr
+                                                        (lvalue
+                                                          (expr
+                                                            (non_unary_expr
+                                                              (non_unary_input_function
+                                                                (simple_get
+                                                                  (getline_keyword)
+                                                                  (lvalue
+                                                                    (name)))
+                                                                (expr
+                                                                  (non_unary_expr
+                                                                    (lvalue
+                                                                      (expr
+                                                                        (non_unary_expr
+                                                                          (non_unary_input_function
+                                                                            (simple_get
+                                                                              (getline_keyword)
+                                                                              (lvalue
+                                                                                (name)))
+                                                                            (expr
+                                                                              (non_unary_expr
+                                                                                (lvalue
+                                                                                  (name))))))))))))))))))))))))))))))))))))))))
+    (terminator
+      (newline))))
+
+==================
+nested redirected getline without targets remains an ordinary expression
+==================
+
+{$getline < $getline < $getline < $getline < $getline < $getline < $getline < $getline < $getline < $getline < x}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword))
+                                        (expr
+                                          (non_unary_expr
+                                            (lvalue
+                                              (expr
+                                                (non_unary_expr
+                                                  (non_unary_input_function
+                                                    (simple_get
+                                                      (getline_keyword))
+                                                    (expr
+                                                      (non_unary_expr
+                                                        (lvalue
+                                                          (expr
+                                                            (non_unary_expr
+                                                              (non_unary_input_function
+                                                                (simple_get
+                                                                  (getline_keyword))
+                                                                (expr
+                                                                  (non_unary_expr
+                                                                    (lvalue
+                                                                      (expr
+                                                                        (non_unary_expr
+                                                                          (non_unary_input_function
+                                                                            (simple_get
+                                                                              (getline_keyword))
+                                                                            (expr
+                                                                              (non_unary_expr
+                                                                                (lvalue
+                                                                                  (expr
+                                                                                    (non_unary_expr
+                                                                                      (non_unary_input_function
+                                                                                        (simple_get
+                                                                                          (getline_keyword))
+                                                                                        (expr
+                                                                                          (non_unary_expr
+                                                                                            (lvalue
+                                                                                              (expr
+                                                                                                (non_unary_expr
+                                                                                                  (non_unary_input_function
+                                                                                                    (simple_get
+                                                                                                      (getline_keyword))
+                                                                                                    (expr
+                                                                                                      (non_unary_expr
+                                                                                                        (lvalue
+                                                                                                          (expr
+                                                                                                            (non_unary_expr
+                                                                                                              (non_unary_input_function
+                                                                                                                (simple_get
+                                                                                                                  (getline_keyword))
+                                                                                                                (expr
+                                                                                                                  (non_unary_expr
+                                                                                                                    (lvalue
+                                                                                                                      (expr
+                                                                                                                        (non_unary_expr
+                                                                                                                          (non_unary_input_function
+                                                                                                                            (simple_get
+                                                                                                                              (getline_keyword))
+                                                                                                                            (expr
+                                                                                                                              (non_unary_expr
+                                                                                                                                (lvalue
+                                                                                                                                  (expr
+                                                                                                                                    (non_unary_expr
+                                                                                                                                      (non_unary_input_function
+                                                                                                                                        (simple_get
+                                                                                                                                          (getline_keyword))
+                                                                                                                                        (expr
+                                                                                                                                          (non_unary_expr
+                                                                                                                                            (lvalue
+                                                                                                                                              (name))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+    (terminator
+      (newline))))

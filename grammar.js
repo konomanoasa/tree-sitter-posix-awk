@@ -236,11 +236,8 @@ const directInputFunction = ($, get) =>
     ),
   );
 
-const simpleGet = ($, target) =>
-  choice(
-    $.getline_keyword,
-    prec.dynamic(1, seq($.getline_keyword, field("target", target))),
-  );
+const getWithTarget = ($, target) =>
+  prec.dynamic(1, seq($.getline_keyword, field("target", target)));
 
 const terminatedStatements = ($) => repeat1($.terminated_statement);
 
@@ -258,7 +255,7 @@ const EXPRESSION_CONTEXT = {
     comparison: true,
     input: ($) =>
       choice(
-        alias($.direct_input_function, $.non_unary_input_function),
+        $._direct_input_function,
         alias($.piped_input_function, $.non_unary_input_function),
       ),
     unaryInput: true,
@@ -275,7 +272,7 @@ const EXPRESSION_CONTEXT = {
     expression: "expr",
     unaryExpression: "unary_expr",
     nonUnaryExpression: "non_unary_expr",
-    input: ($) => alias($.direct_input_function, $.non_unary_input_function),
+    input: ($) => $._direct_input_function,
   },
 };
 
@@ -308,7 +305,7 @@ const CLASSIFICATIONS = ["unary", "non_unary"];
 const aliasedAnyTier = ($, context, tier) =>
   alias($[anyTierName(context, tier)], $[context.expression]);
 
-const nonUnaryAtom = ($, context, lvalue = $.lvalue) => {
+const nonUnaryAtom = ($, context, lvalue = $._lvalue) => {
   const atoms = [
     $._parenthesized_expression,
     $.number,
@@ -401,7 +398,9 @@ const unaryExpressionRules = (context) => {
       ),
     );
 
-  rules[nonUnary("atom")] = ($) => nonUnaryAtom($, context);
+  // A postfix update must win over forwarding its lvalue as a complete atom.
+  rules[nonUnary("atom")] = ($) =>
+    nonUnaryAtom($, context, prec(-1, $._lvalue));
 
   return rules;
 };
@@ -477,7 +476,7 @@ const tieredExpressionRules = (context) => {
       prec.right(
         PRECEDENCE.assignment,
         seq(
-          field("left", $.lvalue),
+          field("left", $._lvalue),
           field(
             "operator",
             choice(
@@ -696,6 +695,9 @@ export default grammar({
   ],
 
   inline: ($) => [
+    $._lvalue,
+    $._simple_get,
+    $._direct_input_function,
     $._item,
     // Unit-reduction merging must not inherit update fields through atom children.
     $._normal_non_unary_update_expr,
@@ -707,10 +709,8 @@ export default grammar({
   ],
 
   conflicts: ($) => [
-    [$.simple_get],
-    [$.simple_get, $.postfix_simple_get],
-    [$.lvalue, $.postfix_lvalue],
-    [$._normal_non_unary_field_atom_expr, $.postfix_non_unary_field_expr],
+    [$.postfix_simple_get],
+    [$.postfix_simple_get, $.nonpostfix_simple_get],
     // The final item joins item_list only after its terminator is known.
     [$.item_list, $._item_list],
   ],
@@ -957,7 +957,7 @@ export default grammar({
     _prefix_update_expr: ($) =>
       seq(
         field("operator", choice($.incr, $.decr)),
-        field("operand", $.lvalue),
+        field("operand", $._lvalue),
       ),
 
     ...normalExpressionRules,
@@ -967,25 +967,23 @@ export default grammar({
     // A pending field operand cannot start a competing pipe source.
     ...fieldExpressionRules,
 
-    normal_field_expr: ($) =>
+    nonpostfix_field_expr: ($) =>
       choice(
         alias($.normal_unary_field_expr, $.unary_expr),
-        alias($.normal_non_unary_field_expr, $.non_unary_expr),
+        alias($.nonpostfix_non_unary_field_expr, $.non_unary_expr),
       ),
 
     normal_unary_field_expr: ($) =>
       prec(PRECEDENCE.field, $._field_unary_unary_expr),
 
-    _normal_non_unary_field_atom_expr: ($) =>
-      prec(PRECEDENCE.field, nonUnaryAtom($, EXPRESSION_CONTEXT.field)),
-
-    normal_non_unary_field_expr: ($) =>
+    nonpostfix_non_unary_field_expr: ($) =>
       prec(
         PRECEDENCE.field,
         choice(
-          $._normal_non_unary_field_atom_expr,
           $._field_not_expr,
           $._prefix_update_expr,
+          alias($.nonpostfix_lvalue, $.lvalue),
+          alias($.nonpostfix_direct_input_function, $.non_unary_input_function),
         ),
       ),
 
@@ -998,8 +996,17 @@ export default grammar({
 
     builtin_call_name: ($) => $._builtin_call_word,
 
-    lvalue: ($) =>
-      lvalueWithFieldOperand($, alias($.normal_field_expr, $.expr)),
+    _lvalue: ($) =>
+      choice(
+        alias($.postfix_lvalue, $.lvalue),
+        alias($.nonpostfix_lvalue, $.lvalue),
+      ),
+
+    nonpostfix_lvalue: ($) =>
+      seq(
+        field("operator", "$"),
+        field("operand", alias($.nonpostfix_field_expr, $.expr)),
+      ),
 
     postfix_lvalue: ($) =>
       lvalueWithFieldOperand($, alias($.postfix_field_expr, $.expr)),
@@ -1024,7 +1031,14 @@ export default grammar({
         ),
       ),
 
-    direct_input_function: ($) => directInputFunction($, $.simple_get),
+    _direct_input_function: ($) =>
+      choice(
+        alias($.postfix_direct_input_function, $.non_unary_input_function),
+        alias($.nonpostfix_direct_input_function, $.non_unary_input_function),
+      ),
+
+    nonpostfix_direct_input_function: ($) =>
+      directInputFunction($, alias($.nonpostfix_simple_get, $.simple_get)),
 
     postfix_direct_input_function: ($) =>
       directInputFunction($, alias($.postfix_simple_get, $.simple_get)),
@@ -1035,7 +1049,7 @@ export default grammar({
         seq(
           field("source", $.non_unary_expr),
           singleOperator($, "|"),
-          field("get", $.simple_get),
+          field("get", $._simple_get),
         ),
       ),
 
@@ -1045,13 +1059,24 @@ export default grammar({
         seq(
           field("source", $.unary_expr),
           singleOperator($, "|"),
-          field("get", $.simple_get),
+          field("get", $._simple_get),
         ),
       ),
 
-    simple_get: ($) => simpleGet($, $.lvalue),
+    _simple_get: ($) =>
+      choice(
+        alias($.postfix_simple_get, $.simple_get),
+        alias($.nonpostfix_simple_get, $.simple_get),
+      ),
 
-    postfix_simple_get: ($) => simpleGet($, alias($.postfix_lvalue, $.lvalue)),
+    nonpostfix_simple_get: ($) =>
+      getWithTarget($, alias($.nonpostfix_lvalue, $.lvalue)),
+
+    postfix_simple_get: ($) =>
+      choice(
+        $.getline_keyword,
+        getWithTarget($, alias($.postfix_lvalue, $.lvalue)),
+      ),
 
     getline_keyword: ($) => $._getline_word,
 

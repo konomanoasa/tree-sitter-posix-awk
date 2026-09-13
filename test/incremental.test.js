@@ -20,6 +20,17 @@ import {
   writeSource,
 } from "./support/parser.js";
 
+determinismTest(
+  "nested input source ownership is restored with a getline keyword",
+  lines("{$getlin y < $getline y < $getline y < $getline y < $getline y < x}"),
+  lines("{$getline y < $getline y < $getline y < $getline y < $getline y < x}"),
+  [{ byte: 8, deleteBytes: 0, insert: "e" }],
+  (tree) => {
+    assert.equal(matchingLineCount(tree, /target: lvalue$/), 5, tree);
+    assert.equal(matchingLineCount(tree, /source: expr$/), 5, tree);
+  },
+);
+
 for (const { label, initial, final, removed, inserted } of [
   {
     label: "an else without a consequence",

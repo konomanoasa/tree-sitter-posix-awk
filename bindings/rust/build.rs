@@ -4,8 +4,9 @@ fn main() {
   let mut c_config = cc::Build::new();
   c_config.std("c17").include(src_dir);
 
-  #[cfg(target_env = "msvc")]
-  c_config.flag("-utf-8");
+  if c_config.get_compiler().is_like_msvc() {
+    c_config.flag("-utf-8");
+  }
 
   if std::env::var("TARGET").unwrap() == "wasm32-unknown-unknown" {
     let Ok(wasm_headers) =

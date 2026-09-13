@@ -376,6 +376,20 @@ const closedEre = lines("BEGIN { print /abc/", "print /ok/ }");
 
 const unclosedEre = lines("BEGIN { print /abc", "print /ok/ }");
 
+determinismTest(
+  "escaping the first closing parenthesis repairs an empty ERE group",
+  lines("/())/"),
+  lines(String.raw`/(\))/`),
+  [{ byte: 2, deleteBytes: 0, insert: "\\" }],
+  (tree) => contains(tree, "quoted_character"),
+);
+
+editHistoryTest(
+  "an ERE group opening reclassifies its closing parenthesis and back",
+  lines("/a))/"),
+  [{ byte: 1, deleteBytes: 0, insert: "(" }],
+);
+
 determinismTest("insert ERE closing slash", unclosedEre, closedEre, [
   { byte: 18, deleteBytes: 0, insert: "/" },
 ]);
@@ -534,6 +548,33 @@ for (const { name, escaped, plain } of [
 }
 
 const classEre = lines("BEGIN { print /[[:alpha:]]/ }");
+
+for (const [kind, marker] of [
+  ["collating symbol", "."],
+  ["equivalence class", "="],
+]) {
+  determinismTest(
+    `inserting a split escape repairs an empty ${kind}`,
+    `/[[${marker}${marker}]]/`,
+    `/[[${marker}\\\\\nn${marker}]]/`,
+    [{ byte: 4, deleteBytes: 0, insert: "\\\\\nn" }],
+    (tree) => {
+      contains(tree, "escape_sequence");
+      contains(tree, "line_continuation");
+    },
+  );
+}
+
+determinismTest(
+  "changing compound markers restores the correct lexical mode",
+  "/[[.alpha.]]/",
+  "/[[:alpha:]]/",
+  [
+    { byte: 3, deleteBytes: 1, insert: ":" },
+    { byte: 9, deleteBytes: 1, insert: ":" },
+  ],
+  (tree) => contains(tree, "class_name `alpha`"),
+);
 
 for (const [operator, continuation, suffix, kind] of [
   ["+", "\\\n", "=5}", "add_assign"],
@@ -1266,6 +1307,22 @@ determinismTest(
   [{ byte: 9, deleteBytes: 2, insert: " " }],
 );
 
+determinismTest(
+  "a raw parameter newline becomes a valid continuation",
+  lines("function f(first,", "second) {}"),
+  lines("function f(first,\\", "second) {}"),
+  [{ byte: 17, deleteBytes: 0, insert: "\\" }],
+  (tree) => contains(tree, "line_continuation"),
+);
+
+determinismTest(
+  "removing a raw parameter newline restores a valid function",
+  lines("function f(first,", "second) {}"),
+  lines("function f(first,second) {}"),
+  [{ byte: 17, deleteBytes: 1, insert: "" }],
+  (tree) => excludes(tree, "newline_opt"),
+);
+
 function continuationHistoryTest(name, initialSource, steps) {
   test(`posix_awk: ${name}`, () => {
     const initial = writeSource(name, "initial", initialSource);
@@ -1294,6 +1351,12 @@ for (const [name, before, after] of [
   ["name", "BEGIN { print va", "lue }\n"],
   ["built-in name", "BEGIN { print len", "gth(x) }\n"],
   ["assignment operator", "BEGIN { x +", "= 1 }\n"],
+  ["unary field assignment name", "BEGIN { $-na", "me = value }\n"],
+  [
+    "unary field assignment operator",
+    "BEGIN { print $!array[index] +",
+    "= value }\n",
+  ],
   ["exponent", "BEGIN { print 1e+", "2 }\n"],
   ["number suffix", "BEGIN { print 1.0", "F }\n"],
   ["string", 'BEGIN { print "a', 'b" }\n'],

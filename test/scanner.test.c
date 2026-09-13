@@ -1610,7 +1610,7 @@ static int test_ere_state_transitions(void) {
     ERE_COMPOUND_OPENING,
     0,
     1,
-    LEXICAL_MODE_ERE_BODY
+    LEXICAL_MODE_ERE_COLLATING
   );
 
   valid_symbols[ERE_COMPOUND_OPENING] = false;
@@ -1644,7 +1644,7 @@ static int test_ere_state_transitions(void) {
     "compound closer consumes its first character",
     ".]",
     valid_symbols,
-    LEXICAL_MODE_ERE_BODY,
+    LEXICAL_MODE_ERE_COLLATING,
     true,
     ERE_DOT_CLOSING,
     0,
@@ -2146,6 +2146,15 @@ static int test_serialization(void) {
     {"ERE body mode round trip",
       {LEXICAL_MODE_ERE_BODY, PAYLOAD_NONE, 0},
       SERIALIZED_SCANNER_STATE_SIZE},
+    {"collating symbol mode round trip",
+      {LEXICAL_MODE_ERE_COLLATING, PAYLOAD_NONE, 0},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"equivalence class split escape round trip",
+      {LEXICAL_MODE_ERE_EQUIVALENCE, PAYLOAD_SPLIT, 4},
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"character class split name round trip",
+      {LEXICAL_MODE_ERE_CLASS, PAYLOAD_SPLIT, 7},
+      SERIALIZED_SCANNER_STATE_SIZE},
     {"string mode round trip",
       {LEXICAL_MODE_STRING, PAYLOAD_NONE, 0},
       SERIALIZED_SCANNER_STATE_SIZE},
@@ -2282,6 +2291,101 @@ static void test_reuse_allocator_contract(void) {
 }
 #endif
 
+static int test_compound_terminators_do_not_become_content(void) {
+  const struct {
+    const char *name;
+    const char *source;
+    LexicalMode mode;
+    bool closing_valid;
+    bool scanned;
+    enum TokenType symbol;
+    LexicalMode final_mode;
+  } cases[] = {
+    {"empty collating symbol cannot hide its terminator",
+      ".]",
+      LEXICAL_MODE_ERE_COLLATING,
+      false,
+      false,
+      ERE_COMPOUND_CONTENT,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"continued empty equivalence class cannot hide its terminator",
+      "=\\\n]",
+      LEXICAL_MODE_ERE_EQUIVALENCE,
+      false,
+      false,
+      ERE_COMPOUND_CONTENT,
+      LEXICAL_MODE_ERE_EQUIVALENCE},
+    {"collating symbol accepts a continued terminator",
+      ".\\\n]",
+      LEXICAL_MODE_ERE_COLLATING,
+      true,
+      true,
+      ERE_DOT_CLOSING,
+      LEXICAL_MODE_ERE_BODY},
+    {"equivalence class accepts its terminator",
+      "=]",
+      LEXICAL_MODE_ERE_EQUIVALENCE,
+      true,
+      true,
+      ERE_EQUAL_CLOSING,
+      LEXICAL_MODE_ERE_BODY},
+    {"character class accepts its continued terminator",
+      ":\\\n]",
+      LEXICAL_MODE_ERE_CLASS,
+      true,
+      true,
+      ERE_COLON_CLOSING,
+      LEXICAL_MODE_ERE_BODY},
+    {"an equality marker stays content in a collating symbol",
+      "=]",
+      LEXICAL_MODE_ERE_COLLATING,
+      true,
+      true,
+      ERE_COMPOUND_CONTENT,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"a dot stays content in an equivalence class",
+      ".\\\n]",
+      LEXICAL_MODE_ERE_EQUIVALENCE,
+      true,
+      true,
+      ERE_COMPOUND_CONTENT,
+      LEXICAL_MODE_ERE_EQUIVALENCE},
+    {"a colon stays content in a collating symbol",
+      ":]",
+      LEXICAL_MODE_ERE_COLLATING,
+      true,
+      true,
+      ERE_COMPOUND_CONTENT,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"a nonterminating dot stays content",
+      ".x",
+      LEXICAL_MODE_ERE_COLLATING,
+      false,
+      true,
+      ERE_COMPOUND_CONTENT,
+      LEXICAL_MODE_ERE_COLLATING},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {[ERE_COMPOUND_CONTENT] = true};
+    valid_symbols[ERE_DOT_CLOSING] = cases[i].closing_valid;
+    valid_symbols[ERE_EQUAL_CLOSING] = cases[i].closing_valid;
+    valid_symbols[ERE_COLON_CLOSING] = cases[i].closing_valid;
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].mode,
+      cases[i].scanned,
+      cases[i].symbol,
+      0,
+      1,
+      cases[i].final_mode
+    );
+  }
+  return failed;
+}
+
 int main(void) {
   int failed = 0;
   test_lifecycle();
@@ -2301,6 +2405,7 @@ int main(void) {
   failed |= test_word_boundary_lookahead();
   failed |= test_linear_word_boundary_lookahead();
   failed |= test_ere_state_transitions();
+  failed |= test_compound_terminators_do_not_become_content();
   failed |= test_string_and_comment_modes();
   failed |= test_error_mode_real_tokens();
 #ifdef TREE_SITTER_REUSE_ALLOCATOR

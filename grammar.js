@@ -140,6 +140,70 @@ const ereCompoundOpening = ($, punctuation) =>
 const ereCompoundClosing = (closing, punctuation) =>
   seq(alias(closing, punctuation), token.immediate("]"));
 
+const ereExpressionRules = (insideGroup) => {
+  const name = (rule) => (insideGroup ? `group_${rule}` : rule);
+  const member = ($, rule) =>
+    insideGroup ? alias($[name(rule)], $[rule]) : $[rule];
+  return {
+    [name("extended_reg_exp")]: ($) =>
+      choice(
+        member($, "ere_branch"),
+        seq(
+          field("left", member($, "extended_reg_exp")),
+          field("operator", token.immediate("|")),
+          field("right", member($, "ere_branch")),
+        ),
+      ),
+
+    [name("ere_branch")]: ($) =>
+      choice(
+        member($, "ere_expression"),
+        seq(
+          field("left", member($, "ere_branch")),
+          field("right", member($, "ere_expression")),
+        ),
+      ),
+
+    [name("ere_expression")]: ($) =>
+      choice(
+        member($, "one_char_or_coll_elem_ere"),
+        $.left_anchor,
+        $.right_anchor,
+        seq(
+          field("opening", token.immediate("(")),
+          field(
+            "expression",
+            alias($.group_extended_reg_exp, $.extended_reg_exp),
+          ),
+          field("closing", $._ere_close_parenthesis),
+        ),
+        seq(
+          field("operand", member($, "ere_expression")),
+          field("operator", $.ere_dupl_symbol),
+        ),
+      ),
+
+    [name("one_char_or_coll_elem_ere")]: ($) =>
+      choice(
+        member($, "ordinary_character"),
+        $.quoted_character,
+        $.wildcard,
+        $.bracket_expression,
+        alias($.ere_octal_escape_sequence, $.escape_sequence),
+        alias($.ere_undefined_escape_sequence, $.escape_sequence),
+      ),
+
+    [name("ordinary_character")]: ($) =>
+      choice(
+        alias($._ordinary_character, $.ordinary_character_content),
+        ...(insideGroup ? [] : [$._ere_ordinary_close_parenthesis]),
+        $._ere_ordinary_close_brace,
+        $.escaped_delimiter,
+        alias($.ere_named_escape_sequence, $.escape_sequence),
+      ),
+  };
+};
+
 const header = ($, keyword, rest) => seq(keyword, rest, newlineLayout($));
 
 const conditionalHeader = ($, keyword) =>
@@ -191,7 +255,12 @@ const EXPRESSION_CONTEXT = {
     unaryExpression: "unary_expr",
     nonUnaryExpression: "non_unary_expr",
     comparison: true,
-    input: true,
+    input: ($) =>
+      choice(
+        alias($.direct_input_function, $.non_unary_input_function),
+        alias($.piped_input_function, $.non_unary_input_function),
+      ),
+    unaryInput: true,
   },
   print: {
     prefix: "print",
@@ -199,7 +268,13 @@ const EXPRESSION_CONTEXT = {
     unaryExpression: "unary_print_expr",
     nonUnaryExpression: "non_unary_print_expr",
     comparison: false,
-    input: false,
+  },
+  field: {
+    prefix: "field",
+    expression: "expr",
+    unaryExpression: "unary_expr",
+    nonUnaryExpression: "non_unary_expr",
+    input: ($) => alias($.direct_input_function, $.non_unary_input_function),
   },
 };
 
@@ -244,21 +319,101 @@ const nonUnaryAtom = ($, context) => {
     $.ere,
   ];
   if (context.input) {
-    atoms.push($.non_unary_input_function);
+    atoms.push(context.input($));
   }
   return choice(...atoms);
+};
+
+const classOperandRules = (context, classification, tier) => ({
+  [classOperandName(context, classification, tier)]: ($) =>
+    prec(1, classTier($, context, classification, tier)),
+});
+
+const anyTierRules = (context, tier) => ({
+  ...classOperandRules(context, "unary", tier),
+  ...classOperandRules(context, "non_unary", tier),
+  [anyTierName(context, tier)]: ($) =>
+    choice(
+      aliasedClassTier($, context, "unary", tier),
+      aliasedClassTier($, context, "non_unary", tier),
+    ),
+});
+
+const unaryExpressionRules = (context) => {
+  const rules = anyTierRules(context, "unary");
+  const unary = (tier) => classTierName(context, "unary", tier);
+  const nonUnary = (tier) => classTierName(context, "non_unary", tier);
+  const not = `_${context.prefix}_not_expr`;
+  const addOperand = (classification, tier) =>
+    Object.assign(rules, classOperandRules(context, classification, tier));
+  rules[unary("unary")] = ($) =>
+    choice(
+      ...(context.unaryInput
+        ? [classTier($, context, "unary", "exponentiation")]
+        : []),
+      ...["+", "-"].map((operator) =>
+        seq(
+          field("operator", singleOperator($, operator)),
+          field("operand", aliasedAnyTier($, context, "unary")),
+        ),
+      ),
+    );
+  rules[not] = ($) =>
+    seq(
+      field("operator", singleOperator($, "!")),
+      field("operand", aliasedAnyTier($, context, "unary")),
+    );
+  rules[nonUnary("unary")] = ($) =>
+    choice($[nonUnary("exponentiation")], $[not]);
+
+  const exponentiationTail = `_${context.prefix}_exponentiation_tail`;
+  rules[exponentiationTail] = ($) =>
+    seq(
+      $._exponentiation_operator,
+      field("right", aliasedAnyTier($, context, "unary")),
+    );
+  const exponentiationClassifications = context.unaryInput
+    ? CLASSIFICATIONS
+    : ["non_unary"];
+  for (const classification of exponentiationClassifications) {
+    addOperand(classification, "update");
+    rules[classTierName(context, classification, "exponentiation")] = ($) =>
+      choice(
+        classTier($, context, classification, "update"),
+        seq(
+          field("left", aliasedClassTier($, context, classification, "update")),
+          $[exponentiationTail],
+        ),
+      );
+  }
+  if (context.unaryInput) {
+    rules[unary("update")] = ($) => $.unary_input_function;
+  }
+
+  rules[nonUnary("update")] = ($) =>
+    choice(
+      $[nonUnary("atom")],
+      $._prefix_update_expr,
+      prec.left(
+        PRECEDENCE.postfixUpdate,
+        seq(
+          field("operand", $.lvalue),
+          field("operator", choice($.incr, $.decr)),
+        ),
+      ),
+    );
+
+  rules[nonUnary("atom")] = ($) => nonUnaryAtom($, context);
+
+  return rules;
 };
 
 const tieredExpressionRules = (context) => {
   const rules = {};
   const unary = (tier) => classTierName(context, "unary", tier);
   const nonUnary = (tier) => classTierName(context, "non_unary", tier);
-  const any = (tier) => anyTierName(context, tier);
-  const addOperand = (classification, tier) => {
-    rules[classOperandName(context, classification, tier)] = ($) =>
-      prec(1, classTier($, context, classification, tier));
-  };
-  const not = `_${context.prefix}_not_expr`;
+  const addOperand = (classification, tier) =>
+    Object.assign(rules, classOperandRules(context, classification, tier));
   const conditionalTail = `_${context.prefix}_conditional_tail`;
   const expression = ($) => $[context.expression];
   rules[conditionalTail] = ($) =>
@@ -269,16 +424,8 @@ const tieredExpressionRules = (context) => {
       field("alternative", aliasedAnyTier($, context, "conditional")),
     );
 
-  const addAnyTier = (tier) => {
-    for (const classification of CLASSIFICATIONS) {
-      addOperand(classification, tier);
-    }
-    rules[any(tier)] = ($) =>
-      choice(
-        aliasedClassTier($, context, "unary", tier),
-        aliasedClassTier($, context, "non_unary", tier),
-      );
-  };
+  const addAnyTier = (tier) =>
+    Object.assign(rules, anyTierRules(context, tier));
 
   const addLeftAssociativeTier = (tier, nextTier, operator, precedence) => {
     addAnyTier(nextTier);
@@ -488,70 +635,12 @@ const tieredExpressionRules = (context) => {
     PRECEDENCE.multiplicative,
   );
 
-  rules[unary("unary")] = ($) =>
-    choice(
-      ...(context.input
-        ? [classTier($, context, "unary", "exponentiation")]
-        : []),
-      ...["+", "-"].map((operator) =>
-        seq(
-          field("operator", singleOperator($, operator)),
-          field("operand", aliasedAnyTier($, context, "unary")),
-        ),
-      ),
-    );
-  rules[not] = ($) =>
-    seq(
-      field("operator", singleOperator($, "!")),
-      field("operand", aliasedAnyTier($, context, "unary")),
-    );
-  rules[nonUnary("unary")] = ($) =>
-    choice($[nonUnary("exponentiation")], $[not]);
-
-  const exponentiationTail = `_${context.prefix}_exponentiation_tail`;
-  rules[exponentiationTail] = ($) =>
-    seq(
-      $._exponentiation_operator,
-      field("right", aliasedAnyTier($, context, "unary")),
-    );
-  const exponentiationClassifications = context.input
-    ? CLASSIFICATIONS
-    : ["non_unary"];
-  for (const classification of exponentiationClassifications) {
-    addOperand(classification, "update");
-    rules[classTierName(context, classification, "exponentiation")] = ($) =>
-      choice(
-        classTier($, context, classification, "update"),
-        seq(
-          field("left", aliasedClassTier($, context, classification, "update")),
-          $[exponentiationTail],
-        ),
-      );
-  }
-  if (context.input) {
-    rules[unary("update")] = ($) => $.unary_input_function;
-  }
-
-  rules[nonUnary("update")] = ($) =>
-    choice(
-      $[nonUnary("atom")],
-      $._prefix_update_expr,
-      prec.left(
-        PRECEDENCE.postfixUpdate,
-        seq(
-          field("operand", $.lvalue),
-          field("operator", choice($.incr, $.decr)),
-        ),
-      ),
-    );
-
-  rules[nonUnary("atom")] = ($) => nonUnaryAtom($, context);
-
-  return rules;
+  return { ...rules, ...unaryExpressionRules(context) };
 };
 
 const normalExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.normal);
 const printExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.print);
+const fieldExpressionRules = unaryExpressionRules(EXPRESSION_CONTEXT.field);
 
 const listElementTail = ($, element) =>
   seq(",", afterOptionalNewline($, element));
@@ -619,11 +708,14 @@ export default grammar({
     $._print_unary_assignment_expr,
   ],
 
-  conflicts: ($) => [[$.simple_get]],
+  conflicts: ($) => [
+    [$.simple_get],
+    // The final item joins item_list only after its terminator is known.
+    [$.item_list, $._item_list],
+  ],
 
   rules: {
-    program: ($) =>
-      seq(optional(alias($._item_list, $.item_list)), optional($._item)),
+    program: ($) => seq(optional($.item_list), optional($._item)),
 
     _token_payload: ($) =>
       choice(
@@ -681,7 +773,8 @@ export default grammar({
 
     _logical_or_operator: ($) => field("operator", $.or),
 
-    // Keeping termination in the recursive step makes item boundaries LR(1).
+    item_list: ($) => $._item_list,
+
     _item_list: ($) =>
       choice(
         field("leading", $.newline_opt),
@@ -690,14 +783,14 @@ export default grammar({
 
     _item: ($) =>
       choice(
-        alias($._closed_item, $.item),
-        alias($._normal_pattern_item, $.item),
+        alias($.closed_item, $.item),
+        alias($.normal_pattern_item, $.item),
       ),
 
     _terminated_item: ($) =>
       seq(field("item", $._item), field("terminator", $.terminator)),
 
-    _closed_item: ($) =>
+    closed_item: ($) =>
       choice($._action_item, $._pattern_action_item, $._function_item),
 
     _action_item: ($) => field("action", $.action),
@@ -705,7 +798,7 @@ export default grammar({
     _pattern_action_item: ($) =>
       seq(field("pattern", $.pattern), field("action", $.action)),
 
-    _normal_pattern_item: ($) => field("pattern", $.normal_pattern),
+    normal_pattern_item: ($) => field("pattern", $.normal_pattern),
 
     _function_item: ($) => seq($._function_header, functionBody($)),
 
@@ -719,7 +812,7 @@ export default grammar({
         ")",
       ),
 
-    param_list: ($) => seq($.name, repeat(listElementTail($, $.name))),
+    param_list: ($) => seq($.name, repeat(seq(",", $.name))),
 
     pattern: ($) => choice($.normal_pattern, $.special_pattern),
 
@@ -895,6 +988,9 @@ export default grammar({
 
     ...printExpressionRules,
 
+    // A pending field operand cannot start a competing pipe source.
+    ...fieldExpressionRules,
+
     normal_field_expr: ($) =>
       choice(
         alias($.normal_unary_field_expr, $.unary_expr),
@@ -902,17 +998,17 @@ export default grammar({
       ),
 
     normal_unary_field_expr: ($) =>
-      prec(PRECEDENCE.field, $._normal_unary_unary_expr),
+      prec(PRECEDENCE.field, $._field_unary_unary_expr),
 
     _normal_non_unary_field_atom_expr: ($) =>
-      prec(PRECEDENCE.field, nonUnaryAtom($, EXPRESSION_CONTEXT.normal)),
+      prec(PRECEDENCE.field, nonUnaryAtom($, EXPRESSION_CONTEXT.field)),
 
     normal_non_unary_field_expr: ($) =>
       prec(
         PRECEDENCE.field,
         choice(
           $._normal_non_unary_field_atom_expr,
-          $._normal_not_expr,
+          $._field_not_expr,
           $._prefix_update_expr,
         ),
       ),
@@ -936,7 +1032,7 @@ export default grammar({
         ),
       ),
 
-    non_unary_input_function: ($) =>
+    direct_input_function: ($) =>
       choice(
         field("get", $.simple_get),
         prec.right(
@@ -947,13 +1043,15 @@ export default grammar({
             field("source", $.expr),
           ),
         ),
-        prec.right(
-          PRECEDENCE.field,
-          seq(
-            field("source", $.non_unary_expr),
-            singleOperator($, "|"),
-            field("get", $.simple_get),
-          ),
+      ),
+
+    piped_input_function: ($) =>
+      prec.right(
+        PRECEDENCE.field,
+        seq(
+          field("source", $.non_unary_expr),
+          singleOperator($, "|"),
+          field("get", $.simple_get),
         ),
       ),
 
@@ -1010,56 +1108,8 @@ export default grammar({
         field("closing", alias($._ere_closing, "/")),
       ),
 
-    extended_reg_exp: ($) =>
-      choice(
-        $.ere_branch,
-        seq(
-          field("left", $.extended_reg_exp),
-          field("operator", token.immediate("|")),
-          field("right", $.ere_branch),
-        ),
-      ),
-
-    ere_branch: ($) =>
-      choice(
-        $.ere_expression,
-        seq(field("left", $.ere_branch), field("right", $.ere_expression)),
-      ),
-
-    ere_expression: ($) =>
-      choice(
-        $.one_char_or_coll_elem_ere,
-        $.left_anchor,
-        $.right_anchor,
-        seq(
-          field("opening", token.immediate("(")),
-          field("expression", $.extended_reg_exp),
-          field("closing", $._ere_close_parenthesis),
-        ),
-        seq(
-          field("operand", $.ere_expression),
-          field("operator", $.ere_dupl_symbol),
-        ),
-      ),
-
-    one_char_or_coll_elem_ere: ($) =>
-      choice(
-        $.ordinary_character,
-        $.quoted_character,
-        $.wildcard,
-        $.bracket_expression,
-        alias($.ere_octal_escape_sequence, $.escape_sequence),
-        alias($.ere_undefined_escape_sequence, $.escape_sequence),
-      ),
-
-    ordinary_character: ($) =>
-      choice(
-        alias($._ordinary_character, $.ordinary_character_content),
-        $._ere_ordinary_close_parenthesis,
-        $._ere_ordinary_close_brace,
-        $.escaped_delimiter,
-        alias($.ere_named_escape_sequence, $.escape_sequence),
-      ),
+    ...ereExpressionRules(false),
+    ...ereExpressionRules(true),
 
     quoted_character: ($) =>
       alias($.ere_quoted_escape_sequence, $.escape_sequence),

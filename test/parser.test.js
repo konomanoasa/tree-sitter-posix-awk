@@ -407,6 +407,29 @@ test("posix_awk: range patterns expose one optional separator and two optional o
   }
 });
 
+for (const [name, source, kind] of [
+  [
+    "an equality closing sequence stays inside a collating symbol",
+    "/[[.=].]]/",
+    "collating_symbol",
+  ],
+  [
+    "a dot closing sequence stays inside an equivalence class",
+    "/[[=.]=]]/",
+    "equivalence_class",
+  ],
+  [
+    "a continued colon closing sequence stays inside a collating symbol",
+    lines("/[[.:\\", "].]]/"),
+    "collating_symbol",
+  ],
+]) {
+  freshTest(name, source, (tree) => {
+    contains(tree, kind);
+    contains(tree, "collating_element_content `]`");
+  });
+}
+
 const membershipPrecedenceCases = [
   ["exponentiation", "", "a in b", "^ c"],
   ["multiplication", "", "a in b", "* c"],
@@ -485,12 +508,40 @@ const invalidSyntaxCases = [
     source: lines("BEGIN { print /(\\", ")/ }"),
   },
   {
+    name: "an ERE closing parenthesis cannot supply an empty group expression",
+    source: lines("/())/"),
+  },
+  {
+    name: "an ERE closing parenthesis cannot supply an empty alternation branch",
+    source: lines("/(a|)b)/"),
+  },
+  {
+    name: "a continued closing parenthesis cannot supply a nested ERE branch",
+    source: lines("/((a|\\", ")b)\\", ")/"),
+  },
+  {
     name: "division without a final operand is rejected",
     source: lines("BEGIN { print x /a/ }"),
   },
   {
     name: "division assignment to an invalid lvalue is rejected",
     source: lines("BEGIN { (a) /= b }"),
+  },
+  {
+    name: "a unary operator outside a field cannot form an assignment target",
+    source: lines("BEGIN { +$a = b }"),
+  },
+  {
+    name: "a postfix field update cannot form an assignment target",
+    source: lines("BEGIN { $a++ = b }"),
+  },
+  {
+    name: "exponentiation outside a field cannot form an assignment target",
+    source: lines("BEGIN { $a^b = c }"),
+  },
+  {
+    name: "a split second postfix update still requires an lvalue",
+    source: lines("BEGIN { print $a++-\\", "- }"),
   },
   {
     name: "greater-than-or-equal without a right operand is rejected",
@@ -536,6 +587,18 @@ const invalidSyntaxCases = [
     source: lines("/[[=-=]]/"),
   },
   {
+    name: "an empty collating symbol cannot consume a later terminator",
+    source: lines("/[[..].]]/"),
+  },
+  {
+    name: "an empty equivalence class cannot consume a later terminator",
+    source: lines("/[[==]=]]/"),
+  },
+  {
+    name: "a continued compound terminator cannot become payload",
+    source: lines("/[[..\\", "].]]/"),
+  },
+  {
     name: "a raw closing bracket cannot be the sole equivalence class payload",
     source: lines("/[[=]=]]/"),
   },
@@ -558,6 +621,14 @@ const invalidSyntaxCases = [
   {
     name: "a missing function parameter after a comma is rejected",
     source: lines("function malformed(first,) {}"),
+  },
+  {
+    name: "a raw newline after a function parameter comma is rejected",
+    source: lines("function malformed(first,", "second) {}"),
+  },
+  {
+    name: "a comment cannot continue a function parameter list",
+    source: lines("function malformed(first, # comment \\", "second) {}"),
   },
   {
     name: "a missing parenthesized function header is rejected",

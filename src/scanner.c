@@ -155,6 +155,9 @@ typedef enum {
 typedef enum {
   LEXICAL_MODE_OUTSIDE,
   LEXICAL_MODE_ERE_BODY,
+  LEXICAL_MODE_ERE_COLLATING,
+  LEXICAL_MODE_ERE_EQUIVALENCE,
+  LEXICAL_MODE_ERE_CLASS,
   LEXICAL_MODE_STRING,
 } LexicalMode;
 
@@ -280,6 +283,10 @@ static const SingleOperator SINGLE_OPERATORS[] = {
 
 static bool is_ascii_blank(int32_t character) {
   return character == ' ' || character == '\t';
+}
+
+static bool is_ere_mode(LexicalMode mode) {
+  return mode >= LEXICAL_MODE_ERE_BODY && mode <= LEXICAL_MODE_ERE_CLASS;
 }
 
 static bool is_ascii_digit(int32_t character) {
@@ -821,7 +828,7 @@ scan_escape(ScannerState *state, TSLexer *lexer, const bool *valid_symbols) {
     }
   }
   enum TokenType token = STRING_ESCAPE_GUARD;
-  if (state->mode == LEXICAL_MODE_ERE_BODY) {
+  if (is_ere_mode(state->mode)) {
     if (character == '/') {
       token = ERE_ESCAPED_DELIMITER_GUARD;
     } else if (is_octal_digit(character)) {
@@ -913,16 +920,18 @@ typedef struct {
   enum TokenType delimiter;
   enum TokenType content;
   int32_t first;
+  LexicalMode mode;
 } EreCompoundToken;
 
 static const EreCompoundToken ERE_COMPOUND_TOKENS[] = {
-  {ERE_COMPOUND_OPENING, ERE_BRACKET_LITERAL_OPEN, '['},
-  {ERE_DOT_CLOSING, ERE_COMPOUND_CONTENT, '.'},
-  {ERE_EQUAL_CLOSING, ERE_COMPOUND_CONTENT, '='},
-  {ERE_COLON_CLOSING, ERE_COMPOUND_CONTENT, ':'},
+  {ERE_COMPOUND_OPENING, ERE_BRACKET_LITERAL_OPEN, '[', LEXICAL_MODE_ERE_BODY},
+  {ERE_DOT_CLOSING, ERE_COMPOUND_CONTENT, '.', LEXICAL_MODE_ERE_COLLATING},
+  {ERE_EQUAL_CLOSING, ERE_COMPOUND_CONTENT, '=', LEXICAL_MODE_ERE_EQUIVALENCE},
+  {ERE_COLON_CLOSING, ERE_COMPOUND_CONTENT, ':', LEXICAL_MODE_ERE_CLASS},
 };
 
 static bool scan_ere_compound_token(
+  ScannerState *state,
   TSLexer *lexer,
   const EreCompoundToken *token,
   const bool *valid_symbols
@@ -935,8 +944,23 @@ static bool scan_ere_compound_token(
     (token->delimiter == ERE_COMPOUND_OPENING
         ? character_in(cursor.character, ".=:")
         : cursor.character == ']');
-  if (matches && valid_symbols[token->delimiter]) {
-    return emit(lexer, token->delimiter);
+  if (
+    matches &&
+    (token->delimiter == ERE_COMPOUND_OPENING || state->mode == token->mode)
+  ) {
+    if (!valid_symbols[token->delimiter]) {
+      return false;
+    }
+    LexicalMode mode = LEXICAL_MODE_ERE_BODY;
+    if (token->delimiter == ERE_COMPOUND_OPENING) {
+      for (size_t i = 1; i < ARRAY_LENGTH(ERE_COMPOUND_TOKENS); i++) {
+        if (ERE_COMPOUND_TOKENS[i].first == cursor.character) {
+          mode = ERE_COMPOUND_TOKENS[i].mode;
+          break;
+        }
+      }
+    }
+    return emit_mode(state, lexer, mode, token->delimiter);
   }
   return valid_symbols[token->content] && emit(lexer, token->content);
 }
@@ -955,7 +979,7 @@ static bool scan_ere_context(
         token->first &&
         (valid_symbols[token->delimiter] || valid_symbols[token->content])
       ) {
-        return scan_ere_compound_token(lexer, token, valid_symbols);
+        return scan_ere_compound_token(state, lexer, token, valid_symbols);
       }
     }
     if (
@@ -1073,7 +1097,7 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   if (lexer->lookahead == '\\') {
     return scan_backslash(state, lexer, valid_symbols, recovering);
   }
-  if (state->mode == LEXICAL_MODE_ERE_BODY) {
+  if (is_ere_mode(state->mode)) {
     return scan_ere_context(state, lexer, valid_symbols, recovering);
   }
   if (state->mode == LEXICAL_MODE_STRING) {

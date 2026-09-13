@@ -397,6 +397,227 @@ mod tests {
   }
 
   #[test]
+  fn fields_belong_to_direct_children() {
+    let language: tree_sitter::Language = super::LANGUAGE.into();
+    let fields: Vec<_> = (1..=language.field_count())
+      .map(|id| {
+        language
+          .field_name_for_id(id as u16)
+          .expect("declared field must have a name")
+      })
+      .collect();
+    for (name, source) in [
+      ("unterminated action", "{}"),
+      ("unterminated pattern", "a"),
+      ("unterminated pattern and action", "a {}"),
+      ("unterminated function", "function f(a,b) {}"),
+      ("terminated item", "{}\n"),
+      ("leading newline", "\n{}\n"),
+      ("terminated and unterminated items", "BEGIN {}\nEND {}"),
+      (
+        "split function name and parameter",
+        "func\\\ntion f\\\n(a\\\nb,b) {}",
+      ),
+      (
+        "nested statements and expressions",
+        "BEGIN { if (a) print a ? b : c > d; else for (i in a) { getline a[i] < file } }\n",
+      ),
+      (
+        "shared direct input and pipe aliases",
+        "{print $-getline target < (a | getline); ($+$a=b) | getline target}\n",
+      ),
+      ("group alternation", "/(a|b)c/"),
+      ("group concatenation", "/(ab)c/"),
+      ("nested group repetition", "/((a|b)+?c)d/"),
+      ("group continuation", "/(a\\\n|b)\\\nc/"),
+      ("ungrouped expression", "/a|bc+/"),
+    ] {
+      let tree = parse(source, name);
+      let mut pending = vec![tree.root_node()];
+      while let Some(node) = pending.pop() {
+        for field in &fields {
+          if let Some(child) = node.child_by_field_name(field) {
+            assert_eq!(
+              child.parent(),
+              Some(node),
+              "{name}: {}.{field} must name a direct child",
+              node.kind(),
+            );
+          }
+        }
+        pending.extend(node.children(&mut node.walk()));
+      }
+    }
+  }
+
+  #[test]
+  fn unary_field_assignment_preserves_target_and_right_association() {
+    for (name, target, operand) in [
+      ("positive name", "$+a", "+a"),
+      ("negative name", "$-a", "-a"),
+      ("negated array element", "$!a[b]", "!a[b]"),
+      ("right associative exponentiation", "$-a^b^c", "-a^b^c"),
+      ("nested field reference", "$+$a", "+$a"),
+      ("postfix update inside unary operand", "$+a++", "+a++"),
+      ("split name", "$-na\\\nme", "-na\\\nme"),
+    ] {
+      for operator in ["=", "+=", "-=", "*=", "/=", "%=", "^=", "+\\\n="] {
+        for (prefix, kind) in
+          [("{", "non_unary_expr"), ("{print ", "non_unary_print_expr")]
+        {
+          let source = format!("{prefix}{target}{operator}c=d}}\n");
+          let label = format!("{name}: {source:?}");
+          let tree = parse(&source, &label);
+          let assignment = tree
+            .root_node()
+            .descendant_for_byte_range(prefix.len(), source.len() - 2)
+            .unwrap();
+          assert_eq!(assignment.kind(), kind, "{label}");
+          let left = assignment.child_by_field_name("left").unwrap();
+          assert_eq!(left.kind(), "lvalue", "{label}");
+          assert_eq!(
+            left.utf8_text(source.as_bytes()).unwrap(),
+            target,
+            "{label}"
+          );
+          for (node, field, expected) in [
+            (assignment, "operator", operator),
+            (left, "operator", "$"),
+            (left, "operand", operand),
+            (assignment, "right", "c=d"),
+          ] {
+            let child = node.child_by_field_name(field).unwrap();
+            assert_eq!(child.parent(), Some(node), "{label}: {field}");
+            assert_eq!(
+              child.utf8_text(source.as_bytes()).unwrap(),
+              expected,
+              "{label}: {field}",
+            );
+          }
+          let right = assignment.child_by_field_name("right").unwrap();
+          let nested = right.named_child(0).unwrap();
+          for (field, expected) in
+            [("left", "c"), ("operator", "="), ("right", "d")]
+          {
+            assert_eq!(
+              nested
+                .child_by_field_name(field)
+                .unwrap()
+                .utf8_text(source.as_bytes())
+                .unwrap(),
+              expected,
+              "{label}: nested {field}",
+            );
+          }
+        }
+      }
+    }
+  }
+
+  #[test]
+  fn unary_field_assignment_keeps_parenthesized_pipe_ownership() {
+    for (name, source, pipe_source) in [
+      (
+        "assignment supplies pipe",
+        "{($+a=b) | getline}\n",
+        "($+a=b)",
+      ),
+      ("pipe supplies assignment", "{$+a=(b | getline)}\n", "b"),
+    ] {
+      let tree = parse(source, name);
+      let mut pending = vec![tree.root_node()];
+      let mut fields = Vec::new();
+      let mut sources = Vec::new();
+      while let Some(node) = pending.pop() {
+        if node.kind() == "lvalue"
+          && node.child_by_field_name("operator").is_some()
+        {
+          fields.push(node.utf8_text(source.as_bytes()).unwrap());
+        }
+        if let Some(child) = node.child_by_field_name("source") {
+          sources.push(child.utf8_text(source.as_bytes()).unwrap());
+        }
+        pending.extend(node.children(&mut node.walk()));
+      }
+      assert_eq!(fields, ["$+a"], "{name}");
+      assert_eq!(sources, [pipe_source], "{name}");
+    }
+  }
+
+  #[test]
+  fn nested_unary_fields_complete_before_the_outer_assignment() {
+    for (name, atom, operator, right) in [
+      ("name", "a", "=", "b"),
+      ("number", "1", "+=", "b=c"),
+      ("split name and assignment", "na\\\nme", "+\\\n=", "b"),
+      ("parenthesized pipe", "(cmd | getline)", "=", "b"),
+      ("call argument pipe", "f(cmd | getline)", "=", "b"),
+      ("subscript pipe", "a[cmd | getline]", "=", "b"),
+    ] {
+      for depth in [10, 64] {
+        for prefix in ["{", "{print "] {
+          let target = format!("{}${atom}", "$+".repeat(depth));
+          let source = format!("{prefix}{target}{operator}{right}}}\n");
+          let label = format!("{name}, depth {depth}, {prefix}");
+          let tree = parse(&source, &label);
+          let assignment = tree
+            .root_node()
+            .descendant_for_byte_range(prefix.len(), source.len() - 2)
+            .unwrap();
+          for (field, expected) in [
+            ("left", target.as_str()),
+            ("operator", operator),
+            ("right", right),
+          ] {
+            assert_eq!(
+              assignment
+                .child_by_field_name(field)
+                .unwrap()
+                .utf8_text(source.as_bytes())
+                .unwrap(),
+              expected,
+              "{label}: {field}",
+            );
+          }
+          let mut lvalue = assignment.child_by_field_name("left").unwrap();
+          for level in 0..=depth {
+            assert_eq!(lvalue.kind(), "lvalue", "{label}: level {level}");
+            assert_eq!(lvalue.start_byte(), prefix.len() + level * 2);
+            assert_eq!(lvalue.end_byte(), prefix.len() + target.len());
+            assert_eq!(
+              lvalue.child_by_field_name("operator").unwrap().kind(),
+              "$"
+            );
+            let operand = lvalue.child_by_field_name("operand").unwrap();
+            let expression = operand.named_child(0).unwrap();
+            if level == depth {
+              assert_eq!(
+                operand.utf8_text(source.as_bytes()).unwrap(),
+                atom,
+                "{label}"
+              );
+              assert_eq!(expression.kind(), "non_unary_expr", "{label}");
+            } else {
+              assert_eq!(expression.kind(), "unary_expr", "{label}");
+              assert_eq!(
+                expression.child_by_field_name("operator").unwrap().kind(),
+                "+"
+              );
+              lvalue = expression
+                .child_by_field_name("operand")
+                .unwrap()
+                .named_child(0)
+                .unwrap()
+                .named_child(0)
+                .unwrap();
+            }
+          }
+        }
+      }
+    }
+  }
+
+  #[test]
   fn highlights_capture_only_leaves_and_cover_ere_and_token_spellings() {
     let query = Query::new(&super::LANGUAGE.into(), super::HIGHLIGHTS_QUERY)
       .expect("highlight query must compile");

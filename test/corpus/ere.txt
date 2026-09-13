@@ -1199,3 +1199,45 @@ BEGIN { print /\/[\/][[.a\/b.]][[=a\/b=]]/ }
                                                     (collating_element_content)))))))))))))))))))))))))
     (terminator
       (newline))))
+
+==================
+ERE groups keep escaped parentheses and leave unmatched closers outside
+==================
+
+/((a|\))))/
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (normal_pattern
+        (expr
+          (non_unary_expr
+            (ere
+              (extended_reg_exp
+                (ere_branch
+                  (ere_branch
+                    (ere_expression
+                      (extended_reg_exp
+                        (ere_branch
+                          (ere_expression
+                            (extended_reg_exp
+                              (extended_reg_exp
+                                (ere_branch
+                                  (ere_expression
+                                    (one_char_or_coll_elem_ere
+                                      (ordinary_character
+                                        (ordinary_character_content))))))
+                              (ere_branch
+                                (ere_expression
+                                  (one_char_or_coll_elem_ere
+                                    (quoted_character
+                                      (escape_sequence)))))))))))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere
+                      (ordinary_character))))))))))
+    (terminator
+      (newline))))

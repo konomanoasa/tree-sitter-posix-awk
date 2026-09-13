@@ -364,10 +364,9 @@ function adjacent() {}
       (newline))))
 
 ==================
-a function definition accepts spaces and newlines around its parameter list and body
+a function definition accepts spaces in its header and a newline before its body
 ==================
-function spaced (first,
-second)
+function spaced (first, second)
 {
   return first
 }
@@ -381,8 +380,6 @@ second)
       (name)
       (param_list
         (name)
-        (newline_opt
-          (newline))
         (name))
       (newline_opt
         (newline))

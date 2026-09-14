@@ -1314,7 +1314,7 @@ determinismTest(
 );
 
 determinismTest(
-  "a raw parameter newline becomes a valid continuation",
+  "a parameter newline becomes a line continuation",
   lines("function f(first,", "second) {}"),
   lines("function f(first,\\", "second) {}"),
   [{ byte: 17, deleteBytes: 0, insert: "\\" }],
@@ -1322,11 +1322,42 @@ determinismTest(
 );
 
 determinismTest(
-  "removing a raw parameter newline restores a valid function",
+  "a parameter continuation becomes a raw newline",
+  lines("function f(first,\\", "second) {}"),
+  lines("function f(first,", "second) {}"),
+  [{ byte: 17, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    contains(tree, "parameters: param_list");
+    contains(tree, "newline_opt");
+    excludes(tree, continuationMarker);
+  },
+);
+
+determinismTest(
+  "removing a parameter newline preserves a valid function",
   lines("function f(first,", "second) {}"),
   lines("function f(first,second) {}"),
   [{ byte: 17, deleteBytes: 1, insert: "" }],
   (tree) => excludes(tree, "newline_opt"),
+);
+
+determinismTest(
+  "inserting a parameter newline preserves a valid function",
+  lines("function f(first,second) {}"),
+  lines("function f(first,", "second) {}"),
+  [{ byte: 17, deleteBytes: 0, insert: "\n" }],
+  (tree) => contains(tree, "newline_opt"),
+);
+
+determinismTest(
+  "restoring a parameter after a newline repairs the function header",
+  lines("function f(first,", ") {}"),
+  lines("function f(first,", "second) {}"),
+  [{ byte: 18, deleteBytes: 0, insert: "second" }],
+  (tree) => {
+    contains(tree, "parameters: param_list");
+    contains(tree, "newline_opt");
+  },
 );
 
 function continuationHistoryTest(name, initialSource, steps) {

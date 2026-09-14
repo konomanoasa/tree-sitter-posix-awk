@@ -1439,6 +1439,10 @@
         {
           "type": "name",
           "named": true
+        },
+        {
+          "type": "newline_opt",
+          "named": true
         }
       ]
     }

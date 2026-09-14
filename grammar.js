@@ -796,7 +796,8 @@ export default grammar({
         ")",
       ),
 
-    param_list: ($) => seq($.name, repeat(seq(",", $.name))),
+    param_list: ($) =>
+      seq($.name, repeat(seq(",", afterOptionalNewline($, $.name)))),
 
     pattern: ($) => choice($.normal_pattern, $.special_pattern),
 

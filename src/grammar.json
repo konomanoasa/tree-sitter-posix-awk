@@ -446,8 +446,25 @@
                 "value": ","
               },
               {
-                "type": "SYMBOL",
-                "name": "name"
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "newline_opt"
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "name"
+                  }
+                ]
               }
             ]
           }

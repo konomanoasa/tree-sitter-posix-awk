@@ -779,12 +779,24 @@ const invalidSyntaxCases = [
     source: lines("function malformed(first,) {}"),
   },
   {
-    name: "a raw newline after a function parameter comma is rejected",
-    source: lines("function malformed(first,", "second) {}"),
+    name: "a missing function parameter after a comma and newline is rejected",
+    source: lines("function malformed(first,", ") {}"),
   },
   {
-    name: "a comment cannot continue a function parameter list",
-    source: lines("function malformed(first, # comment \\", "second) {}"),
+    name: "a raw newline before a function parameter comma is rejected",
+    source: lines("function malformed(first", ",second) {}"),
+  },
+  {
+    name: "a raw newline before the first function parameter is rejected",
+    source: lines("function malformed(", "first) {}"),
+  },
+  {
+    name: "a raw newline after the last function parameter is rejected",
+    source: lines("function malformed(first", ") {}"),
+  },
+  {
+    name: "a comment cannot replace a function parameter comma",
+    source: lines("function malformed(first # comment \\", "second) {}"),
   },
   {
     name: "a missing parenthesized function header is rejected",

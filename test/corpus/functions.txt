@@ -1,4 +1,68 @@
 ==================
+a function parameter comma accepts a raw newline
+==================
+function f(a,
+    b) { return a }
+
+---
+
+(program
+  (item_list
+    (item
+      (function_keyword)
+      (func_name)
+      (param_list
+        (name)
+        (newline_opt
+          (newline))
+        (name))
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (return_keyword)
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name)))))))))
+    (terminator
+      (newline))))
+
+==================
+a function parameter list preserves comments and blank lines after commas
+==================
+function spaced (first, # first \
+    # second
+
+    second,
+
+    third) {}
+
+---
+
+(program
+  (item_list
+    (item
+      (function_keyword)
+      (name)
+      (param_list
+        (name)
+        (comment)
+        (newline_opt
+          (newline)
+          (comment)
+          (newline)
+          (newline))
+        (name)
+        (newline_opt
+          (newline)
+          (newline))
+        (name))
+      (action))
+    (terminator
+      (newline))))
+
+==================
 a user function call accepts an empty argument list
 ==================
 

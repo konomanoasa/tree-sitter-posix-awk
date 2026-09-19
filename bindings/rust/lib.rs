@@ -47,7 +47,7 @@ mod tests {
   use std::ops::Range;
 
   use tree_sitter::{
-    Node, Parser, Query, QueryCursor, StreamingIterator, Tree,
+    InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
   };
 
   struct EreCase {
@@ -176,6 +176,28 @@ mod tests {
       ],
     },
     EreCase {
+      name: "a blank before an escape remains content in every literal position",
+      source: r"/ \.[ \]][[. \..]]/",
+      leaves: &[
+        ("/", 0, 1),
+        ("ordinary_character_content", 1, 2),
+        ("escape_sequence", 2, 4),
+        ("[", 4, 5),
+        ("collating_element_content", 5, 6),
+        ("escape_sequence", 6, 8),
+        ("]", 8, 9),
+        ("[", 9, 10),
+        ("[", 10, 11),
+        (".", 11, 12),
+        ("collating_element_content", 12, 13),
+        ("escape_sequence", 13, 15),
+        (".", 15, 16),
+        ("]", 16, 17),
+        ("]", 17, 18),
+        ("/", 18, 19),
+      ],
+    },
+    EreCase {
       name: "collating forms separate raw fragments from adjacent escapes",
       source: r"/[[.a\nb.][=é\t犬=][.\/\141\q.]]/",
       leaves: &[
@@ -258,16 +280,52 @@ mod tests {
     },
   ];
 
-  fn parse(source: &str, name: &str) -> Tree {
+  fn parser() -> Parser {
     let mut parser = Parser::new();
     parser
       .set_language(&super::LANGUAGE.into())
       .expect("generated grammar must load");
-    let tree = parser
+    parser
+  }
+
+  fn parse(source: &str, name: &str) -> Tree {
+    let tree = parser()
       .parse(source, None)
       .expect("parser must return a tree");
     assert!(!tree.root_node().has_error(), "{name}");
     tree
+  }
+
+  fn point(text: &[u8], byte: usize) -> Point {
+    let row = text[..byte].iter().filter(|&&b| b == b'\n').count();
+    let column = byte
+      - text[..byte]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    Point::new(row, column)
+  }
+
+  fn edit(
+    tree: &mut Tree,
+    text: &mut Vec<u8>,
+    start: usize,
+    deleted: usize,
+    inserted: &str,
+  ) {
+    let old_end = start + deleted;
+    let new_end = start + inserted.len();
+    let start_position = point(text, start);
+    let old_end_position = point(text, old_end);
+    text.splice(start..old_end, inserted.bytes());
+    tree.edit(&InputEdit {
+      start_byte: start,
+      old_end_byte: old_end,
+      new_end_byte: new_end,
+      start_position,
+      old_end_position,
+      new_end_position: point(text, new_end),
+    });
   }
 
   fn assert_leaf_partition(
@@ -697,6 +755,270 @@ mod tests {
         case.markers.iter().map(|(start, end)| *start..*end),
         case.name,
         &query,
+      );
+    }
+  }
+
+  #[test]
+  fn batched_edits_before_a_postfix_update_converge_with_a_fresh_parse() {
+    for (name, source, update) in [
+      ("name", "{ target\\\n++ }\n", "++"),
+      ("decrement", "{ target\\\n-- }\n", "--"),
+      ("subscript", "{ a[i]\\\n++ }\n", "++"),
+      ("field", "{ $1\\\n++ }\n", "++"),
+      ("unary operand", "{ -x\\\n++ }\n", "++"),
+      ("print argument", "{ print x\\\n++ }\n", "++"),
+      ("assignment", "{ y = x\\\n++ }\n", "++"),
+      ("repeated continuation", "{ x\\\n\\\n++ }\n", "++"),
+      ("concatenation", "{ x\\\n++ z }\n", "++"),
+    ] {
+      let byte = source.find(update).unwrap();
+      let mut parser = parser();
+      let mut text = source.as_bytes().to_vec();
+      let mut tree = parser.parse(&text, None).unwrap();
+      assert!(!tree.root_node().has_error(), "{name}");
+      let expected = tree.root_node().to_sexp();
+      for (deleted, inserted) in [(update, "x"), ("x", update)] {
+        edit(&mut tree, &mut text, byte, deleted.len(), "");
+        edit(&mut tree, &mut text, byte, 0, inserted);
+        tree = parser.parse(&text, Some(&tree)).unwrap();
+      }
+      assert_eq!(text, source.as_bytes(), "{name}");
+      assert_eq!(tree.root_node().to_sexp(), expected, "{name}");
+    }
+  }
+
+  #[test]
+  fn fresh_parses_ignore_previous_recovery_and_edit_history() {
+    let cases = [
+      ("unfinished action", "BEGIN {", true),
+      ("missing operand", "{ x = }", true),
+      ("unfinished condition", "{ if (x", true),
+      ("unfinished parameters", "function f(a,", true),
+      ("unfinished string", "{ print \"犬", true),
+      ("unfinished string escape", "{ print \"a\\", true),
+      ("unfinished ERE", "/犬", true),
+      ("unfinished ERE escape", "/a\\", true),
+      ("unfinished bracket", "/[a", true),
+      ("unfinished collating symbol", "/[[.a", true),
+      ("unfinished equivalence class", "/[[=a", true),
+      ("unfinished character class", "/[[:alpha", true),
+      ("unfinished interval", "/a{1,", true),
+      ("stray backslash", "{}\\", true),
+      ("continued missing operand", "{ x +\\\n", true),
+      ("invalid continuation", "{ x\\ \n}", true),
+      ("embedded NUL", "{\0}", true),
+      (
+        "getline ambiguity before error",
+        "{ x = getline a + line b+~",
+        true,
+      ),
+      (
+        "getline ambiguity after bracket",
+        "{ [a ? b : getline c-- ; (y) ? 1 : 2 }",
+        true,
+      ),
+      (
+        "complete getline expression",
+        "{ x = getline a + line b++ }",
+        false,
+      ),
+      (
+        "complete getline conditional",
+        "{ a ? b : getline c-- ; (y) ? 1 : 2 }",
+        false,
+      ),
+      ("complete continuation", "{ target\\\n++ }\n", false),
+      ("empty source", "", false),
+    ];
+    let mut reused = parser();
+    for (name, source, has_error) in cases {
+      let expected = parser().parse(source, None).unwrap();
+      assert_eq!(expected.root_node().has_error(), has_error, "{name}");
+      for (previous_name, previous_source, _) in cases {
+        let context = format!("{name} after {previous_name}");
+        let mut text = previous_source.as_bytes().to_vec();
+        let mut previous = reused.parse(&text, None).unwrap();
+        edit(&mut previous, &mut text, 0, 0, "[\\\n");
+        let _edited = reused.parse(&text, Some(&previous)).unwrap();
+        for _ in 0..3 {
+          let actual = reused.parse(source, None).unwrap();
+          assert_same_cst(actual.root_node(), expected.root_node(), &context);
+          let independent = parser().parse(source, None).unwrap();
+          assert_same_cst(
+            independent.root_node(),
+            expected.root_node(),
+            &context,
+          );
+        }
+      }
+    }
+  }
+
+  fn assert_same_cst(actual: Node<'_>, expected: Node<'_>, context: &str) {
+    assert_eq!(actual.kind(), expected.kind(), "{context}");
+    assert_eq!(actual.range(), expected.range(), "{context}");
+    assert_eq!(actual.is_named(), expected.is_named(), "{context}");
+    assert_eq!(actual.is_extra(), expected.is_extra(), "{context}");
+    assert_eq!(actual.is_error(), expected.is_error(), "{context}");
+    assert_eq!(actual.is_missing(), expected.is_missing(), "{context}");
+    assert_eq!(actual.has_error(), expected.has_error(), "{context}");
+    assert_eq!(actual.child_count(), expected.child_count(), "{context}");
+    for index in 0..actual.child_count() {
+      assert_eq!(
+        actual.field_name_for_child(index),
+        expected.field_name_for_child(index),
+        "{context}",
+      );
+      assert_same_cst(
+        actual.child(index).unwrap(),
+        expected.child(index).unwrap(),
+        context,
+      );
+    }
+  }
+
+  #[test]
+  fn restoring_batched_edits_preserves_a_terminated_division_item() {
+    let source = "\n# slash\nBEGIN {\n  x / 2\n}\n";
+    let mut text = source.as_bytes().to_vec();
+    let mut parser = parser();
+    let mut tree = parser.parse(&text, None).unwrap();
+    assert!(!tree.root_node().has_error());
+    let mut reversals = Vec::new();
+    for (start, deleted, inserted) in [
+      (16, 0, "?"),
+      (14, 0, "x"),
+      (23, 2, " "),
+      (15, 0, "--"),
+      (11, 1, "("),
+      (10, 2, ";"),
+      (26, 3, ")"),
+      (13, 2, "{"),
+    ] {
+      reversals.push((
+        start,
+        inserted.len(),
+        String::from_utf8(text[start..start + deleted].to_vec()).unwrap(),
+      ));
+      edit(&mut tree, &mut text, start, deleted, inserted);
+    }
+    tree = parser.parse(&text, Some(&tree)).unwrap();
+    for (start, deleted, inserted) in reversals.into_iter().rev() {
+      edit(&mut tree, &mut text, start, deleted, &inserted);
+    }
+    assert_eq!(text, source.as_bytes());
+    let actual = parser.parse(&text, Some(&tree)).unwrap();
+    let expected = parser.parse(&text, None).unwrap();
+    assert!(!expected.root_node().has_error());
+    assert_same_cst(
+      actual.root_node(),
+      expected.root_node(),
+      "division item after batched edits and restoration",
+    );
+  }
+
+  #[test]
+  fn repairing_a_reparsed_getline_preserves_target_ownership() {
+    let mut parser = parser();
+    let mut text = b"{ x = getline a + line b+~".to_vec();
+    let mut tree = parser.parse(&text, None).unwrap();
+    tree = parser.parse(&text, Some(&tree)).unwrap();
+    let byte = text.iter().position(|&byte| byte == b'~').unwrap();
+    edit(&mut tree, &mut text, byte, 1, "+ }");
+    let actual = parser.parse(&text, Some(&tree)).unwrap();
+    let expected = parser.parse(&text, None).unwrap();
+    assert!(!expected.root_node().has_error());
+    assert_same_cst(
+      actual.root_node(),
+      expected.root_node(),
+      "repair after a reparse without edits",
+    );
+  }
+
+  #[test]
+  fn removing_an_invalid_bracket_before_getline_restores_statements() {
+    let mut parser = parser();
+    let mut text = b"{ a ? b : getline c-- ; (y) ? 1 : 2 }".to_vec();
+    let mut tree = parser.parse(&text, None).unwrap();
+    assert!(!tree.root_node().has_error());
+    edit(&mut tree, &mut text, 2, 0, "[");
+    tree = parser.parse(&text, Some(&tree)).unwrap();
+    edit(&mut tree, &mut text, 2, 1, "");
+    let actual = parser.parse(&text, Some(&tree)).unwrap();
+    let expected = parser.parse(&text, None).unwrap();
+    assert!(!expected.root_node().has_error());
+    assert_same_cst(
+      actual.root_node(),
+      expected.root_node(),
+      "repair before a conditional getline",
+    );
+  }
+
+  #[test]
+  fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
+    let seeds = [
+      "{ x = getline a + line b++ }",
+      "{ a ? b : getline c-- ; (y) ? 1 : 2 }",
+      "{ getline x++ }",
+      "{ getline a[i]-- }",
+      "{ getline x++ y }",
+      "{ source | getline x-- }",
+      "{ -source | getline x-- }",
+      "{ $getline x++ }",
+      "{ getline $getline x < source }",
+      "{ print (getline x++ + y) }",
+      "{ getline x\\\n++ }",
+    ];
+    let mut random = 0x79d07b23u32;
+    let mut next = || {
+      random ^= random << 13;
+      random ^= random >> 17;
+      random ^= random << 5;
+      random as usize
+    };
+    let insertions = [
+      "", "[", "]", "(", ")", "++", "--", "x", " ", ";", "\n", "+", "?", "~",
+      "<", "\\\n",
+    ];
+    for history in 0..5_000 {
+      let source = seeds[history % seeds.len()];
+      let mut parser = parser();
+      let mut text = source.as_bytes().to_vec();
+      let mut tree = parser.parse(&text, None).unwrap();
+      assert!(!tree.root_node().has_error(), "{source}");
+      let mut reversals = Vec::new();
+      let mut steps = Vec::new();
+      for step in 0..10 {
+        let (start, deleted, inserted) = if step < 5 {
+          let start = next() % (text.len() + 1);
+          let deleted = (next() % 4).min(text.len() - start);
+          let inserted = insertions[next() % insertions.len()].to_string();
+          reversals.push((
+            start,
+            inserted.len(),
+            String::from_utf8(text[start..start + deleted].to_vec()).unwrap(),
+          ));
+          (start, deleted, inserted)
+        } else {
+          reversals.pop().unwrap()
+        };
+        steps.push((start, deleted, inserted.clone()));
+        edit(&mut tree, &mut text, start, deleted, &inserted);
+        tree = parser.parse(&text, Some(&tree)).unwrap();
+        let fresh = parser.parse(&text, None).unwrap();
+        if !fresh.root_node().has_error() {
+          let context = format!(
+            "history {history}, step {step}, source {source:?}, edits {steps:?}, final {:?}",
+            String::from_utf8_lossy(&text)
+          );
+          assert_same_cst(tree.root_node(), fresh.root_node(), &context);
+        }
+      }
+      assert_eq!(
+        text,
+        source.as_bytes(),
+        "history {history} must restore its source"
       );
     }
   }

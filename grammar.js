@@ -63,6 +63,10 @@ const SINGLE_CHARACTER_OPERATORS = {
   "|": "pipe",
 };
 
+// The internal twin of this external token is immediate so that the lexer
+// cannot skip blanks to reach a backslash the scanner never saw.
+const continuationMarker = token.immediate("\\");
+
 const singleOperator = ($, character) =>
   alias($[`_${SINGLE_CHARACTER_OPERATORS[character]}_operator`], character);
 
@@ -73,8 +77,6 @@ const twoCharacterTokenRules = Object.fromEntries(
 const newlineLayout = ($) => optional($.newline_opt);
 
 const afterOptionalNewline = ($, member) => seq(newlineLayout($), member);
-
-const functionBody = ($) => afterOptionalNewline($, field("body", $.action));
 
 // A separate closing-hyphen token avoids competing with range separators.
 const ereClosingHyphen = ($) => alias($._ere_closing_hyphen, "-");
@@ -190,8 +192,6 @@ const conditionalHeader = ($, keyword) =>
 
 const keywordHeader = ($, keyword) => seq(keyword, newlineLayout($));
 
-const doWhileTail = ($) => seq($.while_keyword, $._parenthesized_condition);
-
 const controlStatements = ($, body) => [
   prec.right(seq($._if_header, field("consequence", body))),
   seq(
@@ -220,13 +220,6 @@ const callArguments = ($) => parenthesized(optional($.expr_list));
 
 const subscript = (subscripts) => seq("[", subscripts, "]");
 
-const lvalueWithFieldOperand = ($, operand) =>
-  choice(
-    $.name,
-    seq($.name, subscript($.expr_list)),
-    seq(field("operator", "$"), field("operand", operand)),
-  );
-
 const directInputFunction = ($, get) =>
   choice(
     field("get", get),
@@ -237,12 +230,15 @@ const directInputFunction = ($, get) =>
   );
 
 const getWithTarget = ($, target) =>
-  prec.dynamic(1, seq($.getline_keyword, field("target", target)));
+  prec(1, prec.dynamic(1, seq($.getline_keyword, field("target", target))));
 
-const terminatedStatements = ($) => repeat1($.terminated_statement);
+const pipedInput = ($, source, get) =>
+  prec.right(
+    PRECEDENCE.field,
+    seq(field("source", source), singleOperator($, "|"), field("get", get)),
+  );
 
-const statementListWithTail = ($, tail) =>
-  seq(repeat($.terminated_statement), tail);
+const omittedGet = ($) => alias($.postfix_omitted_get, $.simple_get);
 
 const rawNewlines = ($) => repeat1($.newline);
 
@@ -302,6 +298,13 @@ const aliasedClassTier = ($, context, classification, tier) =>
 
 const CLASSIFICATIONS = ["unary", "non_unary"];
 
+const tierHelpers = (context, rules) => ({
+  unary: (tier) => classTierName(context, "unary", tier),
+  nonUnary: (tier) => classTierName(context, "non_unary", tier),
+  addOperand: (classification, tier) =>
+    Object.assign(rules, classOperandRules(context, classification, tier)),
+});
+
 const aliasedAnyTier = ($, context, tier) =>
   alias($[anyTierName(context, tier)], $[context.expression]);
 
@@ -339,11 +342,8 @@ const anyTierRules = (context, tier) => ({
 
 const unaryExpressionRules = (context) => {
   const rules = anyTierRules(context, "unary");
-  const unary = (tier) => classTierName(context, "unary", tier);
-  const nonUnary = (tier) => classTierName(context, "non_unary", tier);
+  const { unary, nonUnary, addOperand } = tierHelpers(context, rules);
   const not = `_${context.prefix}_not_expr`;
-  const addOperand = (classification, tier) =>
-    Object.assign(rules, classOperandRules(context, classification, tier));
   rules[unary("unary")] = ($) =>
     choice(
       ...(context.unaryInput
@@ -407,10 +407,7 @@ const unaryExpressionRules = (context) => {
 
 const tieredExpressionRules = (context) => {
   const rules = {};
-  const unary = (tier) => classTierName(context, "unary", tier);
-  const nonUnary = (tier) => classTierName(context, "non_unary", tier);
-  const addOperand = (classification, tier) =>
-    Object.assign(rules, classOperandRules(context, classification, tier));
+  const { unary, nonUnary, addOperand } = tierHelpers(context, rules);
   const conditionalTail = `_${context.prefix}_conditional_tail`;
   const expression = ($) => $[context.expression];
   rules[conditionalTail] = ($) =>
@@ -424,46 +421,47 @@ const tieredExpressionRules = (context) => {
   const addAnyTier = (tier) =>
     Object.assign(rules, anyTierRules(context, tier));
 
-  const addLeftAssociativeTier = (tier, nextTier, operator, precedence) => {
+  // A left-associative tier owns its own operand alias; a non-associative
+  // tier takes both operands from the next tier.
+  const addBinaryTier = (
+    tier,
+    nextTier,
+    operator,
+    precedence,
+    { leftAssociative, newlineAfterOperator = false },
+  ) => {
     addAnyTier(nextTier);
     const tail = `_${context.prefix}_${tier}_tail`;
-    rules[tail] = ($) =>
-      seq(operator($), field("right", aliasedAnyTier($, context, nextTier)));
+    rules[tail] = ($) => {
+      const right = field("right", aliasedAnyTier($, context, nextTier));
+      return seq(
+        operator($),
+        newlineAfterOperator ? afterOptionalNewline($, right) : right,
+      );
+    };
     for (const classification of CLASSIFICATIONS) {
-      addOperand(classification, tier);
-      rules[classTierName(context, classification, tier)] = ($) =>
-        choice(
-          classTier($, context, classification, nextTier),
-          prec.left(
-            precedence,
-            seq(
-              field("left", aliasedClassTier($, context, classification, tier)),
-              $[tail],
+      if (leftAssociative) {
+        addOperand(classification, tier);
+      }
+      const operation = ($) =>
+        seq(
+          field(
+            "left",
+            aliasedClassTier(
+              $,
+              context,
+              classification,
+              leftAssociative ? tier : nextTier,
             ),
           ),
+          $[tail],
         );
-    }
-  };
-
-  const addNonAssociativeTier = (tier, nextTier, operator, precedence) => {
-    addAnyTier(nextTier);
-    const tail = `_${context.prefix}_${tier}_tail`;
-    rules[tail] = ($) =>
-      seq(operator($), field("right", aliasedAnyTier($, context, nextTier)));
-    for (const classification of CLASSIFICATIONS) {
       rules[classTierName(context, classification, tier)] = ($) =>
         choice(
           classTier($, context, classification, nextTier),
-          prec(
-            precedence,
-            seq(
-              field(
-                "left",
-                aliasedClassTier($, context, classification, nextTier),
-              ),
-              $[tail],
-            ),
-          ),
+          leftAssociative
+            ? prec.left(precedence, operation($))
+            : prec(precedence, operation($)),
         );
     }
   };
@@ -510,44 +508,20 @@ const tieredExpressionRules = (context) => {
       );
   }
 
-  const addNewlineSeparatedTier = (tier, nextTier, operator, precedence) => {
-    addAnyTier(nextTier);
-    const tail = `_${context.prefix}_${tier}_tail`;
-    rules[tail] = ($) =>
-      seq(
-        operator($),
-        afterOptionalNewline(
-          $,
-          field("right", aliasedAnyTier($, context, nextTier)),
-        ),
-      );
-    for (const classification of CLASSIFICATIONS) {
-      rules[classTierName(context, classification, tier)] = ($) =>
-        choice(
-          classTier($, context, classification, nextTier),
-          prec.left(
-            precedence,
-            seq(
-              field("left", aliasedClassTier($, context, classification, tier)),
-              $[tail],
-            ),
-          ),
-        );
-    }
-  };
-
-  addNewlineSeparatedTier(
+  addBinaryTier(
     "logical_or",
     "logical_and",
     ($) => $._logical_or_operator,
     PRECEDENCE.logicalOr,
+    { leftAssociative: true, newlineAfterOperator: true },
   );
 
-  addNewlineSeparatedTier(
+  addBinaryTier(
     "logical_and",
     "membership",
     ($) => $._logical_and_operator,
     PRECEDENCE.logicalAnd,
+    { leftAssociative: true, newlineAfterOperator: true },
   );
 
   const membershipTail = `_${context.prefix}_membership_tail`;
@@ -582,22 +556,57 @@ const tieredExpressionRules = (context) => {
   }
 
   const comparisonTier = context.comparison ? "comparison" : "concatenation";
-  addNonAssociativeTier(
+  addBinaryTier(
     "match",
     comparisonTier,
     ($) => $._match_operator,
     PRECEDENCE.match,
+    { leftAssociative: false },
   );
 
   if (context.comparison) {
-    addNonAssociativeTier(
+    addBinaryTier(
       "comparison",
       "concatenation",
       ($) => $._comparison_operator,
       PRECEDENCE.comparison,
+      { leftAssociative: false },
     );
   }
 
+  // Keep a targetless path for a following postfix update while giving
+  // ordinary getline targets static precedence.
+  if (context.prefix === "normal") {
+    const prefix = "getline_updated";
+    const name = (tier) => `_${prefix}_${tier}`;
+    const operand = (tier) => `${prefix}_${tier}_operand`;
+    const wrapped = ($, tier) => alias($[operand(tier)], $.non_unary_expr);
+    rules[name("update")] = ($) =>
+      seq(
+        field("operand", alias($.postfix_lvalue, $.lvalue)),
+        field("operator", choice($.incr, $.decr)),
+      );
+    rules[operand("update")] = ($) => prec(1, $[name("update")]);
+    rules[name("exponentiation")] = ($) =>
+      choice(
+        $[name("update")],
+        seq(field("left", wrapped($, "update")), $._normal_exponentiation_tail),
+      );
+    for (const [tier, next, precedence] of [
+      ["multiplicative", "exponentiation", PRECEDENCE.multiplicative],
+      ["additive", "multiplicative", PRECEDENCE.additive],
+    ]) {
+      rules[name(tier)] = ($) =>
+        choice(
+          $[name(next)],
+          prec.left(
+            precedence,
+            seq(field("left", wrapped($, tier)), $[`_normal_${tier}_tail`]),
+          ),
+        );
+      rules[operand(tier)] = ($) => prec(1, $[name(tier)]);
+    }
+  }
   const concatenationTail = `_${context.prefix}_concatenation_tail`;
   rules[concatenationTail] = ($) =>
     field("right", aliasedClassTier($, context, "non_unary", "additive"));
@@ -605,6 +614,32 @@ const tieredExpressionRules = (context) => {
     rules[classTierName(context, classification, "concatenation")] = ($) =>
       choice(
         classTier($, context, classification, "additive"),
+        ...(context.prefix === "normal"
+          ? [
+              prec.left(
+                PRECEDENCE.concatenation,
+                seq(
+                  field(
+                    "left",
+                    alias(
+                      classification === "unary"
+                        ? $.omitted_unary_get_operand
+                        : $.omitted_get_operand,
+                      $[
+                        classification === "unary"
+                          ? "unary_expr"
+                          : "non_unary_expr"
+                      ],
+                    ),
+                  ),
+                  field(
+                    "right",
+                    alias($.getline_updated_additive_operand, $.non_unary_expr),
+                  ),
+                ),
+              ),
+            ]
+          : []),
         prec.left(
           PRECEDENCE.concatenation,
           seq(
@@ -618,18 +653,20 @@ const tieredExpressionRules = (context) => {
       );
   }
 
-  addLeftAssociativeTier(
+  addBinaryTier(
     "additive",
     "multiplicative",
     ($) => $._additive_operator,
     PRECEDENCE.additive,
+    { leftAssociative: true },
   );
 
-  addLeftAssociativeTier(
+  addBinaryTier(
     "multiplicative",
     "unary",
     ($) => $._multiplicative_operator,
     PRECEDENCE.multiplicative,
+    { leftAssociative: true },
   );
 
   return { ...rules, ...unaryExpressionRules(context) };
@@ -682,15 +719,16 @@ export default grammar({
     $._ere_class_name,
     $._ere_dup_count,
     $.comment,
-    $._continuation_backslash,
+    continuationMarker,
     $._continuation_newline,
+    $._stray_backslash,
     $._error_sentinel,
   ],
 
   extras: ($) => [
     token(repeat1(choice(" ", "\t"))),
     $.comment,
-    $._continuation_marker,
+    continuationMarker,
     $._continuation_newline,
   ],
 
@@ -699,6 +737,8 @@ export default grammar({
     $._simple_get,
     $._direct_input_function,
     $._item,
+    // A recovered tail can retain errors when reused after its prefix changes.
+    $._normal_conditional_tail,
     // Unit-reduction merging must not inherit update fields through atom children.
     $._normal_non_unary_update_expr,
     $._print_non_unary_update_expr,
@@ -709,17 +749,14 @@ export default grammar({
   ],
 
   conflicts: ($) => [
-    [$.postfix_simple_get],
-    [$.postfix_simple_get, $.nonpostfix_simple_get],
+    [$.postfix_omitted_get, $.postfix_simple_get],
+    [$.postfix_omitted_get, $.nonpostfix_simple_get, $.postfix_simple_get],
     // The final item joins item_list only after its terminator is known.
     [$.item_list, $._item_list],
   ],
 
   rules: {
     program: ($) => seq(optional($.item_list), optional($._item)),
-
-    // A literal extra would let the generated lexer accept raw backslashes.
-    _continuation_marker: ($) => alias($._continuation_backslash, "\\"),
 
     _additive_operator: ($) =>
       field("operator", choice(singleOperator($, "+"), singleOperator($, "-"))),
@@ -784,7 +821,8 @@ export default grammar({
 
     normal_pattern_item: ($) => field("pattern", $.normal_pattern),
 
-    _function_item: ($) => seq($._function_header, functionBody($)),
+    _function_item: ($) =>
+      seq($._function_header, afterOptionalNewline($, field("body", $.action))),
 
     _function_header_prefix: ($) =>
       seq($.function_keyword, field("name", choice($.name, $.func_name)), "("),
@@ -826,10 +864,10 @@ export default grammar({
         field("closing", "}"),
       ),
 
-    terminated_statement_list: ($) => terminatedStatements($),
+    terminated_statement_list: ($) => repeat1($.terminated_statement),
 
     unterminated_statement_list: ($) =>
-      statementListWithTail($, $.unterminated_statement),
+      seq(repeat($.terminated_statement), $.unterminated_statement),
 
     _parenthesized_condition: ($) => parenthesized(field("condition", $.expr)),
 
@@ -896,7 +934,8 @@ export default grammar({
         seq(
           $._do_header,
           field("body", $.terminated_statement),
-          doWhileTail($),
+          $.while_keyword,
+          $._parenthesized_condition,
         ),
       ),
 
@@ -1010,7 +1049,14 @@ export default grammar({
       ),
 
     postfix_lvalue: ($) =>
-      lvalueWithFieldOperand($, alias($.postfix_field_expr, $.expr)),
+      choice(
+        $.name,
+        seq($.name, subscript($.expr_list)),
+        seq(
+          field("operator", "$"),
+          field("operand", alias($.postfix_field_expr, $.expr)),
+        ),
+      ),
 
     postfix_field_expr: ($) =>
       alias($.postfix_non_unary_field_expr, $.non_unary_expr),
@@ -1044,25 +1090,9 @@ export default grammar({
     postfix_direct_input_function: ($) =>
       directInputFunction($, alias($.postfix_simple_get, $.simple_get)),
 
-    piped_input_function: ($) =>
-      prec.right(
-        PRECEDENCE.field,
-        seq(
-          field("source", $.non_unary_expr),
-          singleOperator($, "|"),
-          field("get", $._simple_get),
-        ),
-      ),
+    piped_input_function: ($) => pipedInput($, $.non_unary_expr, $._simple_get),
 
-    unary_input_function: ($) =>
-      prec.right(
-        PRECEDENCE.field,
-        seq(
-          field("source", $.unary_expr),
-          singleOperator($, "|"),
-          field("get", $._simple_get),
-        ),
-      ),
+    unary_input_function: ($) => pipedInput($, $.unary_expr, $._simple_get),
 
     _simple_get: ($) =>
       choice(
@@ -1078,6 +1108,22 @@ export default grammar({
         $.getline_keyword,
         getWithTarget($, alias($.postfix_lvalue, $.lvalue)),
       ),
+
+    omitted_get_operand: ($) =>
+      alias($.omitted_get_input, $.non_unary_input_function),
+
+    omitted_get_input: ($) =>
+      choice(
+        field("get", omittedGet($)),
+        pipedInput($, $.non_unary_expr, omittedGet($)),
+      ),
+
+    omitted_unary_get_operand: ($) =>
+      alias($.omitted_unary_get_input, $.unary_input_function),
+
+    omitted_unary_get_input: ($) => pipedInput($, $.unary_expr, omittedGet($)),
+
+    postfix_omitted_get: ($) => prec(1, $.getline_keyword),
 
     getline_keyword: ($) => $._getline_word,
 
@@ -1117,7 +1163,9 @@ export default grammar({
     quoted_character: ($) =>
       alias($.ere_quoted_escape_sequence, $.escape_sequence),
 
-    wildcard: () => token.immediate("."),
+    // The aliases keep these wrappers around an anonymous leaf even if no
+    // other rule shares the token; a lone token would become the leaf itself.
+    wildcard: () => alias(token.immediate("."), "."),
 
     left_anchor: () => token.immediate("^"),
 
@@ -1136,7 +1184,7 @@ export default grammar({
         ),
       ),
 
-    repetition_modifier: () => token.immediate("?"),
+    repetition_modifier: () => alias(token.immediate("?"), "?"),
 
     _ere_interval: ($) =>
       seq(

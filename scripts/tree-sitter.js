@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -196,14 +196,13 @@ function testCorpus(arguments_) {
       "test-corpus deletes its isolated copy; --update, --debug-graph, and --open-log would lose their output.",
     );
   }
-  const testRoot = mkdtempSync(join(root, `.${packageName}-test-`));
+  const testRoot = mkdtempSync(join(tmpdir(), `${packageName}-test-`));
   let runner;
 
   try {
     copyFiles(
       [
         "package.json",
-        ...(existsSync(join(root, "common")) ? ["common"] : []),
         ...grammars.flatMap(({ path, externalFiles, highlights }) => [
           join(path, "grammar.js"),
           join(path, "src"),
@@ -293,7 +292,12 @@ function main(arguments_) {
   }
 }
 
-if (import.meta.main) {
+// import.meta.main is undefined before Node.js 24.2, which would turn every
+// command into a silent no-op.
+if (
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {

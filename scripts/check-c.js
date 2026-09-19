@@ -16,6 +16,7 @@ import { grammars, packageName, root } from "./tree-sitter.js";
 
 const scannerConfigurations = {
   posix_awk: {
+    enumerators: { "\\": "CONTINUATION_BACKSLASH" },
     externalCount: "TOKEN_TYPE_COUNT",
     reuseAllocator: true,
   },
@@ -144,7 +145,10 @@ function checkExternalTokenOrder(clang, compilerArguments, variant, directory) {
   const grammar = JSON.parse(
     readFileSync(join(variant.includeDirectory, "grammar.json"), "utf8"),
   );
-  const assertions = grammar.externals.map(({ name }, index) => {
+  const assertions = grammar.externals.map((external, index) => {
+    const token =
+      external.type === "IMMEDIATE_TOKEN" ? external.content : external;
+    const name = token.type === "STRING" ? token.value : token.name;
     const enumerator =
       variant.enumerators?.[name] ?? name.replace(/^_/, "").toUpperCase();
     return `typedef char external_${index}[${enumerator} == ${index} ? 1 : -1];`;
@@ -178,7 +182,6 @@ function checkDiagnostics(clang, clangd, variants, directory) {
         // Clangd reports included helpers as unused, and standalone headers
         // lack their callers. Real compilation keeps all warnings enabled.
         "-Wno-unused-function",
-        ...(source === variant.source ? [] : (variant.contractArguments ?? [])),
         "-fsyntax-only",
         source,
       ],
@@ -281,7 +284,6 @@ function main(arguments_) {
           const binary = join(directory, `scanner-${name}${suffix}`);
           run(clang, [
             ...compilerArguments,
-            ...(variant.contractArguments ?? []),
             ...(reuse ? ["-DTREE_SITTER_REUSE_ALLOCATOR"] : []),
             scannerContract,
             "-o",

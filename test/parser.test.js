@@ -738,6 +738,17 @@ const invalidSyntaxCases = [
       "}",
     ),
   },
+  ...[
+    ["an ERE interval opening", String.raw`/a{ \1}/`],
+    ["an ERE interval count", String.raw`/a{1 \}/`],
+    ["an ERE interval separator", String.raw`/a{1, \2}/`],
+    ["an ERE interval maximum", "/a{1,2\t\\}/"],
+    ["an ERE class opening", String.raw`/[[: \alpha:]]/`],
+    ["an ERE class name", String.raw`/[[:alpha \:]]/`],
+  ].map(([name, source]) => ({
+    name: `a blank after ${name} cannot expose a backslash as a continuation`,
+    source: lines(source),
+  })),
   {
     name: "a raw hyphen cannot be the sole equivalence class payload",
     source: lines("/[[=-=]]/"),
@@ -881,7 +892,7 @@ const invalidSyntaxCases = [
 ];
 
 for (const { name, source } of invalidSyntaxCases) {
-  test(`posix_awk: ${name}`, () => {
+  test(`posix_awk: ${name}; fresh recovery repeats across processes`, () => {
     const sourcePath = writeSource(name, "invalid", source);
     const result = captureParse(sourcePath);
     // A parse that recovers with missing nodes alone exits with 0.
@@ -890,6 +901,9 @@ for (const { name, source } of invalidSyntaxCases) {
       parseDescription(`${name} fresh parse`, result),
     );
     dirty(result.tree);
+    const repeated = captureParse(sourcePath);
+    assert.equal(repeated.status, result.status, name);
+    assert.equal(repeated.tree, result.tree, name);
   });
 }
 

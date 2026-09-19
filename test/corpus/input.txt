@@ -559,3 +559,147 @@ nested redirected getline without targets remains an ordinary expression
                                                                                                                                               (name))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
     (terminator
       (newline))))
+
+==================
+getline concatenation preserves arithmetic after an array postfix update
+==================
+{ getline array[i]--^2 * factor + offset }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))))
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)
+                            (expr_list
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name))))))
+                          (decr))
+                        (expr
+                          (non_unary_expr
+                            (number))))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))))))))
+
+==================
+getline concatenation preserves a non-unary pipe source before a postfix update
+==================
+{ "cmd" | getline target++ + offset }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (non_unary_expr
+                        (string
+                          (string_content)))
+                      (simple_get
+                        (getline_keyword))))
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name))
+                      (incr))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))))))))
+
+==================
+getline concatenation preserves a unary pipe source and postfix arithmetic
+==================
+{ -command | getline target--^2 / factor - offset }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (unary_expr
+                  (unary_expr
+                    (unary_input_function
+                      (unary_expr
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))))
+                      (simple_get
+                        (getline_keyword))))
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name))
+                          (decr))
+                        (expr
+                          (non_unary_expr
+                            (number))))
+                      (expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))))))))
+
+==================
+getline prefers a target when a following update can start a concatenated operand
+==================
+{ getline x++ y }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (name)))))
+                  (non_unary_expr
+                    (incr)
+                    (lvalue
+                      (name))))))))))))

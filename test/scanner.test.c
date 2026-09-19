@@ -502,57 +502,98 @@ static int test_composite_operator_boundaries(void) {
   return failed;
 }
 
-static int test_continuation_lexical_modes(void) {
-  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [CONTINUATION_BACKSLASH] = true,
-    [STRING_ESCAPE] = true,
-    [ERE_NAMED_ESCAPE] = true,
-    [ERE_QUOTED_ESCAPE] = true,
-    [ERE_OCTAL_ESCAPE] = true,
-    [ERE_UNDEFINED_ESCAPE] = true,
-  };
-  int failed = 0;
-  for (
-    LexicalMode mode = LEXICAL_MODE_OUTSIDE; mode <= LEXICAL_MODE_STRING; mode++
-  ) {
-    failed |= expect_scan_result_at(
-      "continuation is layout only outside literals",
+static int test_backslash_tokens_by_mode(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    LexicalMode mode;
+    enum TokenType token;
+    LexicalMode final_mode;
+  } cases[] = {
+    {"continuation before LF outside literals",
       "\\\n",
-      valid_symbols,
-      mode,
-      mode == LEXICAL_MODE_OUTSIDE,
+      LEXICAL_MODE_OUTSIDE,
       CONTINUATION_BACKSLASH,
+      LEXICAL_MODE_CONTINUED_NEWLINE},
+    {"stray backslash before a letter",
+      "\\x",
+      LEXICAL_MODE_OUTSIDE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_OUTSIDE},
+    {"stray backslash before a blank and LF",
+      "\\ \n",
+      LEXICAL_MODE_OUTSIDE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_OUTSIDE},
+    {"stray backslash before a tab and LF",
+      "\\\t\n",
+      LEXICAL_MODE_OUTSIDE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_OUTSIDE},
+    {"stray backslash before CR LF",
+      "\\\r\n",
+      LEXICAL_MODE_OUTSIDE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_OUTSIDE},
+    {"stray backslash before a continuation",
+      "\\\\\n",
+      LEXICAL_MODE_OUTSIDE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_OUTSIDE},
+    {"stray backslash at EOF outside literals",
+      "\\",
+      LEXICAL_MODE_OUTSIDE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_OUTSIDE},
+    {"stray backslash before LF in a string",
+      "\\\n",
+      LEXICAL_MODE_STRING,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_STRING},
+    {"stray backslash at EOF in a string",
+      "\\",
+      LEXICAL_MODE_STRING,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_STRING},
+    {"stray backslash before LF in an ERE",
+      "\\\n",
+      LEXICAL_MODE_ERE_BODY,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_ERE_BODY},
+    {"stray backslash at EOF in an ERE",
+      "\\",
+      LEXICAL_MODE_ERE_BODY,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_ERE_BODY},
+    {"stray backslash before LF in a collating symbol",
+      "\\\n",
+      LEXICAL_MODE_ERE_COLLATING,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"stray backslash at EOF in an equivalence class",
+      "\\",
+      LEXICAL_MODE_ERE_EQUIVALENCE,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_ERE_EQUIVALENCE},
+    {"stray backslash before LF in a character class",
+      "\\\n",
+      LEXICAL_MODE_ERE_CLASS,
+      STRAY_BACKSLASH,
+      LEXICAL_MODE_ERE_CLASS},
+  };
+  const bool no_symbols[TOKEN_TYPE_COUNT] = {false};
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      no_symbols,
+      cases[i].mode,
+      true,
+      cases[i].token,
       0,
       1,
-      mode == LEXICAL_MODE_OUTSIDE ? LEXICAL_MODE_CONTINUED_NEWLINE : mode
-    );
-    failed |= expect_scan_result_at(
-      "bare backslash does not become continuation",
-      "\\",
-      valid_symbols,
-      mode,
-      false,
-      CONTINUATION_BACKSLASH,
-      0,
-      0,
-      mode
-    );
-  }
-  const char *invalid_markers[] = {
-    "\\x",
-    "\\ \n",
-    "\\\t\n",
-    "\\\r\n",
-    "\\\\\n",
-  };
-  for (size_t index = 0; index < ARRAY_LENGTH(invalid_markers); index++) {
-    failed |= expect_scan_result(
-      "continuation backslash requires an adjacent LF",
-      invalid_markers[index],
-      valid_symbols,
-      false,
-      CONTINUATION_BACKSLASH,
-      0
+      cases[i].final_mode
     );
   }
   const bool comment_valid[TOKEN_TYPE_COUNT] = {[COMMENT] = true};
@@ -564,6 +605,45 @@ static int test_continuation_lexical_modes(void) {
     COMMENT,
     8
   );
+  return failed;
+}
+
+static int test_escape_classification_ignores_expected_tokens(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    enum TokenType expected;
+    enum TokenType token;
+  } cases[] = {
+    {"named escape is not reclassified as undefined",
+      "\\n",
+      ERE_UNDEFINED_ESCAPE,
+      ERE_NAMED_ESCAPE},
+    {"escaped delimiter is not reclassified as quoted",
+      "\\/",
+      ERE_QUOTED_ESCAPE,
+      ERE_ESCAPED_DELIMITER},
+    {"octal escape is not reclassified as quoted",
+      "\\1",
+      ERE_QUOTED_ESCAPE,
+      ERE_OCTAL_ESCAPE},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].expected] = true;
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      LEXICAL_MODE_ERE_BODY,
+      true,
+      cases[i].token,
+      0,
+      2,
+      LEXICAL_MODE_ERE_BODY
+    );
+  }
   return failed;
 }
 
@@ -745,18 +825,6 @@ static int test_literal_classification(void) {
       STRING_CONTENT,
       6,
       true},
-    {"ERE escape cannot cross an actual newline",
-      "\\\n",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_NAMED_ESCAPE,
-      0,
-      false},
-    {"string escape cannot cross an actual newline",
-      "\\\n",
-      LEXICAL_MODE_STRING,
-      STRING_ESCAPE,
-      0,
-      false},
     {"backslash pair ends before the newline",
       "\\\\\nn",
       LEXICAL_MODE_ERE_BODY,
@@ -800,18 +868,6 @@ static int test_literal_classification(void) {
       ERE_OCTAL_ESCAPE,
       3,
       true},
-    {"named escape is not reclassified as undefined",
-      "\\n",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_UNDEFINED_ESCAPE,
-      0,
-      false},
-    {"escaped delimiter is not reclassified as quoted",
-      "\\/",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_QUOTED_ESCAPE,
-      0,
-      false},
     {"string escape retains unspecified spelling",
       "\\q",
       LEXICAL_MODE_STRING,
@@ -842,18 +898,6 @@ static int test_literal_classification(void) {
       ERE_DUP_COUNT,
       2,
       true},
-    {"incomplete string escape stays incomplete",
-      "\\",
-      LEXICAL_MODE_STRING,
-      STRING_ESCAPE,
-      0,
-      false},
-    {"incomplete ERE escape stays incomplete",
-      "\\",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_NAMED_ESCAPE,
-      0,
-      false},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
@@ -1661,6 +1705,12 @@ static int test_error_mode_real_tokens(void) {
       CONTINUATION_BACKSLASH,
       1,
       LEXICAL_MODE_CONTINUED_NEWLINE},
+    {"error mode emits a stray backslash",
+      "\\name",
+      true,
+      STRAY_BACKSLASH,
+      1,
+      LEXICAL_MODE_OUTSIDE},
     {"error mode emits no token for unknown punctuation",
       "@",
       false,
@@ -1805,10 +1855,8 @@ static void test_disabled_tokens_preserve_state(void) {
   } inputs[] = {
     {"BEGIN", 5},
     {"/", 1},
-    {"\\/", 2},
     {"\"", 1},
     {"#comment", 8},
-    {"\\\n", 2},
     {"\n", 1},
     {"", 0},
     {"\0", 1},
@@ -2025,7 +2073,8 @@ int main(void) {
   failed |= test_continuations_separate_token_spellings();
   test_continuation_token_sequences();
   failed |= test_composite_operator_boundaries();
-  failed |= test_continuation_lexical_modes();
+  failed |= test_backslash_tokens_by_mode();
+  failed |= test_escape_classification_ignores_expected_tokens();
   failed |= test_continued_newline_requires_its_marker();
   test_repeated_continuation_ranges_and_restoration();
   test_pending_continuation_rejects_changed_boundaries();

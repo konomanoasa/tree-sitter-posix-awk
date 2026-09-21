@@ -215,20 +215,18 @@ syncBuiltinESMExports();
         fixture.expectedStatus,
         `${fixture.name}\n${result.stdout}${result.stderr}`,
       );
-      assert.ok(
-        result.stdout.includes(fixture.stdout),
-        `${fixture.name}: CLI stdout is missing`,
+      assert.equal(
+        result.stdout,
+        fixture.stdout.repeat(
+          fixture.expectedStatus === 0 ? grammars.length : 1,
+        ),
+        `${fixture.name}: CLI stdout differs`,
       );
-      assert.ok(
-        result.stderr.includes(fixture.stderr),
-        `${fixture.name}: CLI stderr is missing`,
+      assert.equal(
+        result.stderr,
+        fixture.stderr + (fixture.expectedDiagnostic ?? ""),
+        `${fixture.name}: CLI stderr differs`,
       );
-      if (fixture.expectedDiagnostic !== undefined) {
-        assert.ok(
-          result.stderr.includes(fixture.expectedDiagnostic),
-          `${fixture.name}: termination cause is missing`,
-        );
-      }
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });

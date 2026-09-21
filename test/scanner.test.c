@@ -85,6 +85,7 @@ static MockLexer make_mock_lexer(const char *source) {
     .lexer =
       {
         .lookahead = (unsigned char)source[0],
+        .result_symbol = UINT16_MAX,
         .advance = mock_advance,
         .mark_end = mock_mark_end,
         .eof = mock_eof,
@@ -98,6 +99,7 @@ static void resume_mock_lexer(MockLexer *mock) {
   mock->offset = mock->token_end;
   mock->token_start = mock->token_end;
   mock->content_started = false;
+  mock->lexer.result_symbol = UINT16_MAX;
   mock->lexer.lookahead =
     mock->offset < mock->length ? (unsigned char)mock->source[mock->offset] : 0;
 }

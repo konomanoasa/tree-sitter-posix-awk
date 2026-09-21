@@ -170,30 +170,6 @@
     "}"
   ] @string.regexp)
 
-(non_unary_expr
-  [
-    "?"
-    ":"
-  ] @keyword.conditional.ternary)
-
-(unary_expr
-  [
-    "?"
-    ":"
-  ] @keyword.conditional.ternary)
-
-(non_unary_print_expr
-  [
-    "?"
-    ":"
-  ] @keyword.conditional.ternary)
-
-(unary_print_expr
-  [
-    "?"
-    ":"
-  ] @keyword.conditional.ternary)
-
 (item
   name: [
     (name)

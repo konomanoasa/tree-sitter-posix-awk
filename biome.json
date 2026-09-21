@@ -2,9 +2,9 @@
   "files": {
     "includes": [
       "**",
+      "!!**/target",
       "!**/src/grammar.json",
-      "!**/src/node-types.json",
-      "!!target"
+      "!**/src/node-types.json"
     ]
   },
   "formatter": {

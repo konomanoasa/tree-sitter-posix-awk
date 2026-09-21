@@ -15,11 +15,6 @@
     "version": "0.15.0",
     "license": "MIT",
     "description": "Tree-sitter grammar for POSIX awk.",
-    "authors": [
-      {
-        "name": "konomanoasa"
-      }
-    ],
     "links": {
       "repository": "https://github.com/konomanoasa/tree-sitter-posix-awk"
     }

@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { createTreeSitter, grammars, root } from "../scripts/tree-sitter.js";
-
-const grammar = grammars[0];
+import {
+  createTreeSitter,
+  grammars,
+  packageName,
+  root,
+} from "../scripts/tree-sitter.js";
 
 function decodeEntities(text) {
   return text
@@ -24,7 +34,7 @@ function renderedCaptures(html, source) {
   const captures = [];
   let text = "";
   for (const part of content.matchAll(
-    /<span class='([^']*)'>|<\/span>|([^<]+)/g,
+    /<span class='([^']*)'>|<[/]span>|([^<]+)/g,
   )) {
     if (part[1] !== undefined) stack.push(part[1].replaceAll(" ", "."));
     else if (part[0] === "</span>") assert.notEqual(stack.pop(), undefined);
@@ -115,7 +125,7 @@ function assertCaptures(source, actual, ranges) {
     expected.fill(capture, start, end);
     previousEnd = end;
   }
-  // HTML emits line breaks outside spans; compare colors on source characters.
+  // HTML emits line breaks outside spans.
   for (const [index, byte] of bytes.entries()) {
     if (byte !== 10)
       assert.equal(
@@ -147,36 +157,37 @@ const captureNames = [
 ];
 let highlight;
 
+let directory;
 let runner;
-
 before(() => {
+  directory = mkdtempSync(join(tmpdir(), `${packageName}-highlight-`));
   runner = createTreeSitter();
-  const directory = join(runner.directory, "highlight");
-  mkdirSync(directory);
   highlight = createHighlighter({
     directory,
     root,
-    run: (args) => assertCommand(args).stdout,
+    run: assertCommand,
     captureNames,
   });
 });
-
 after(() => {
-  runner?.close();
+  try {
+    runner?.close();
+  } finally {
+    if (directory) rmSync(directory, { recursive: true, force: true });
+  }
 });
 
-function assertCommand(args) {
-  const result = runner.run(args, {
-    maxBuffer: 16 * 1024 * 1024,
+function assertCommand(arguments_) {
+  const result = runner.run(arguments_, {
     timeout: 60_000,
   });
-  if (result.error !== undefined) {
-    throw result.error;
-  }
+  assert.ifError(result.error);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.doesNotMatch(result.stderr, /Non-standard highlight captures/);
-  return result;
+  return result.stdout;
 }
+
+const grammar = grammars[0];
 
 const finalCaptureCases = [
   {

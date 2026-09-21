@@ -1,28 +1,23 @@
 [package]
-authors = [ "konomanoasa" ]
-autoexamples = false
-categories = [ "parser-implementations", "parsing", "text-editors" ]
-description = "Tree-sitter grammar for POSIX awk."
-edition = "2024"
-keywords = [ "incremental", "parsing", "tree-sitter", "posix-awk" ]
-license = "MIT"
 name = "tree-sitter-posix-awk"
-readme = "README.md"
-repository = "https://github.com/konomanoasa/tree-sitter-posix-awk"
 version = "0.15.0"
-
+edition = "2024"
 build = "bindings/rust/build.rs"
 links = "tree-sitter-posix-awk"
-include = [ "/bindings/rust/*.rs", "/grammar.js", "/queries/*.scm", "/src/*.c", "/src/*.json", "/src/tree_sitter/*.h", "/tree-sitter.json", "/LICENSE", "/README.md" ]
+publish = false
 
 [lib]
 path = "bindings/rust/lib.rs"
 
-[dependencies]
-tree-sitter-language = "0.1"
+[[test]]
+name = "bindings"
+path = "test/bindings.test.rs"
 
-[build-dependencies]
-cc = "1.2"
+[dependencies]
+tree-sitter-language = "0.1.8"
 
 [dev-dependencies]
 tree-sitter = "0.27.0"
+
+[build-dependencies]
+cc = "1.4"

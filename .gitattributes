@@ -5,5 +5,4 @@
 **/src/parser.c linguist-generated=true
 **/src/tree_sitter/*.h linguist-generated=true
 
-# Corpus inputs intentionally exercise trailing blanks.
 test/corpus/**/*.txt whitespace=-blank-at-eol

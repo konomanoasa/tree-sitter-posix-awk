@@ -37,6 +37,14 @@ jobs:
         with:
           generate: false
           test-parser-cmd: ${{ runner.os == 'macOS' && 'npm run check' || 'npm test' }}
+          test-rust: true
+          rust-version: stable
+      - name: Check Rust bindings
+        shell: bash
+        run: |
+          rustup component add clippy rustfmt --toolchain stable
+          cargo +stable clippy --locked --all-targets -- -D warnings
+          cargo +stable fmt --all -- --check
       - name: Build parsers
         if: runner.os == 'macOS'
         shell: sh

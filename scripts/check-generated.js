@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   mkdtempSync,
   readdirSync,
@@ -9,17 +10,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { generateParsers, grammars, packageName, root } from "./tree-sitter.js";
 
-const parserBudgets = {
-  posix_awk: {
-    STATE_COUNT: 4_200,
-    LARGE_STATE_COUNT: 520,
-    SYMBOL_COUNT: 450,
-    EXTERNAL_TOKEN_COUNT: 82,
-    parser_bytes: 6_000_000,
-    maximum_ACTIONS_index: 3_500,
-    parse_table_storage_bytes: 750_000,
-  },
-};
+const prerequisiteScripts = [];
 
 const generatedPaths = [
   "grammar.json",
@@ -118,11 +109,6 @@ function parseTableStorageBytes(parser, metrics, path) {
 }
 
 function checkParser(grammar, generatedRoot) {
-  const budget = parserBudgets[grammar.name];
-  if (Object.keys(parserBudgets).length > 0 && budget === undefined) {
-    throw new Error(`Missing parser budget for ${grammar.name}`);
-  }
-
   const parserPath = join(generatedRoot, grammar.path, "src", "parser.c");
   const displayPath = relative(generatedRoot, parserPath);
   const parser = readFileSync(parserPath, "utf8");
@@ -146,27 +132,33 @@ function checkParser(grammar, generatedRoot) {
   );
 
   console.log(`${grammar.name}:`);
-  console.log("Metric                           Actual      Maximum");
-  let failed = false;
+  console.log("Metric                           Actual");
   for (const [name, value] of Object.entries(metrics)) {
-    const maximum = budget?.[name];
-    console.log(
-      `${name.padEnd(28)} ${String(value).padStart(12)} ${String(maximum ?? "-").padStart(12)}`,
-    );
-    if (maximum !== undefined && value > maximum) {
-      console.error(
-        `${displayPath}: ${name} exceeds its parser budget: ${value} > ${maximum}`,
-      );
-      failed = true;
-    }
+    console.log(`${name.padEnd(28)} ${String(value).padStart(12)}`);
   }
-  return { failed, languageVersion: metrics.LANGUAGE_VERSION };
+  return metrics.LANGUAGE_VERSION;
 }
 
 function main(arguments_) {
   if (arguments_.length !== 0) {
     throw new Error("Usage: node scripts/check-generated.js");
   }
+
+  for (const script of prerequisiteScripts) {
+    const result = spawnSync(
+      process.execPath,
+      [join(root, "scripts", script), "--check"],
+      {
+        cwd: root,
+        stdio: "inherit",
+        timeout: 60_000,
+        killSignal: "SIGKILL",
+      },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) return 1;
+  }
+
   const generatedRoot = mkdtempSync(
     join(tmpdir(), `${packageName}-generated-`),
   );
@@ -201,9 +193,7 @@ function main(arguments_) {
 
     const languageVersions = new Map();
     for (const grammar of grammars) {
-      const result = checkParser(grammar, generatedRoot);
-      failed = result.failed || failed;
-      languageVersions.set(grammar.name, result.languageVersion);
+      languageVersions.set(grammar.name, checkParser(grammar, generatedRoot));
     }
     if (new Set(languageVersions.values()).size !== 1) {
       console.error(

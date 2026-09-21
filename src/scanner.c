@@ -267,7 +267,6 @@ static enum TokenType classify_word(const char *word, size_t length) {
   return NAME_WORD;
 }
 
-// Returns TOKEN_TYPE_COUNT when no word starts at the lookahead.
 static enum TokenType scan_word_spelling(TSLexer *lexer) {
   char spelling[MAX_RESERVED_WORD_LENGTH + 1] = {0};
   size_t length = 0;
@@ -474,8 +473,7 @@ static bool scan_escape(const ScannerState *state, TSLexer *lexer) {
   return emit(lexer, token);
 }
 
-// The continuation marker is also an internal token, so every backslash must
-// leave the scanner as a marker, an escape, or a stray token no state accepts.
+// Every backslash must be emitted to prevent fallback to the internal marker.
 static bool
 scan_backslash(ScannerState *state, TSLexer *lexer, bool recovering) {
   lexer->advance(lexer, false);

@@ -193,8 +193,7 @@ function excludes(tree, unexpected) {
   );
 }
 
-// The --cst error marker covers both ERROR and missing nodes; missing named
-// leaves do not include the word MISSING.
+// Missing named leaves omit MISSING; use the root --cst error marker.
 
 const recoveryMarker = /^[0-9: \t-]+•/m;
 

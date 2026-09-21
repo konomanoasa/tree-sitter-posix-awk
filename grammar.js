@@ -63,8 +63,7 @@ const SINGLE_CHARACTER_OPERATORS = {
   "|": "pipe",
 };
 
-// The internal twin of this external token is immediate so that the lexer
-// cannot skip blanks to reach a backslash the scanner never saw.
+// Skipping blanks can reach a backslash the external scanner never saw.
 const continuationMarker = token.immediate("\\");
 
 const singleOperator = ($, character) =>
@@ -275,9 +274,8 @@ const EXPRESSION_CONTEXT = {
 const classTierName = (context, classification, tier) =>
   `_${context.prefix}_${classification}_${tier}_expr`;
 
-// Hidden operand rules would forward child fields into the parent, making
-// ts_node_child_by_field_name return an inner operand. Visible rules with
-// aliases preserve field ownership without exposing extra node types.
+// Hidden operand rules leak inner fields into the parent; aliased visible rules
+// prevent this.
 const classOperandName = (context, classification, tier) =>
   `${context.prefix}_${classification}_${tier}_operand`;
 
@@ -421,8 +419,6 @@ const tieredExpressionRules = (context) => {
   const addAnyTier = (tier) =>
     Object.assign(rules, anyTierRules(context, tier));
 
-  // A left-associative tier owns its own operand alias; a non-associative
-  // tier takes both operands from the next tier.
   const addBinaryTier = (
     tier,
     nextTier,
@@ -574,8 +570,7 @@ const tieredExpressionRules = (context) => {
     );
   }
 
-  // Keep a targetless path for a following postfix update while giving
-  // ordinary getline targets static precedence.
+  // A following postfix update still needs the targetless getline path.
   if (context.prefix === "normal") {
     const prefix = "getline_updated";
     const name = (tier) => `_${prefix}_${tier}`;
@@ -1163,8 +1158,7 @@ export default grammar({
     quoted_character: ($) =>
       alias($.ere_quoted_escape_sequence, $.escape_sequence),
 
-    // The aliases keep these wrappers around an anonymous leaf even if no
-    // other rule shares the token; a lone token would become the leaf itself.
+    // Aliasing preserves the wrapper even when no other rule shares the token.
     wildcard: () => alias(token.immediate("."), "."),
 
     left_anchor: () => token.immediate("^"),
@@ -1227,8 +1221,7 @@ export default grammar({
     _ere_initial_close: ($) =>
       alias(token.immediate("]"), $.collating_element_content),
 
-    // Inlining this choice would let the anonymous hyphen alias replace the
-    // collating_element wrapper.
+    // Inlining lets the hyphen alias replace the collating_element wrapper.
     _ere_initial_hyphen: ($) =>
       choice($._ere_bracket_hyphen, ereClosingHyphen($)),
 
@@ -1332,8 +1325,8 @@ export default grammar({
         $._ere_undefined_escape,
       ),
 
-    // Tree-sitter rejects the POSIX bracket spelling for these delimiter
-    // characters, so the exclusion sets use its hexadecimal regex escape.
+    // Tree-sitter rejects the POSIX bracket spelling for these excluded
+    // delimiters.
     _ordinary_character: () => token.immediate(/[^.\x5B\x5C*^$+?{|}()/\n]/),
 
     _ere_ordinary_close_parenthesis: () => token.immediate(")"),

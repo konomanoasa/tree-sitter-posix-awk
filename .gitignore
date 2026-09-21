@@ -3,6 +3,8 @@
 *.dylib
 *.o
 
+build/
+
 node_modules/
 
 target/

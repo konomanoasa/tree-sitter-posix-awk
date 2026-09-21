@@ -20,10 +20,10 @@
     "access": "public"
   },
   "scripts": {
+    "build": "npm run tree-sitter -- build-all",
     "check": "biome check . && node scripts/check-c.js && node scripts/check-generated.js && npm test",
     "format": "biome check --write . && node scripts/check-c.js --write",
     "generate": "npm run tree-sitter -- generate-all",
-    "parse": "npm run tree-sitter -- parse --scope source.awk",
     "test": "npm run tree-sitter -- test-corpus --rebuild && node --test --test-concurrency=1 \"test/*.test.js\"",
     "test:bindings": "cargo test --locked",
     "test:fuzz": "node --test --test-name-pattern=\"fixed-seed generated histories\" test/incremental.test.js",

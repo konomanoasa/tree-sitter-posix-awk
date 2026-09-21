@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   mkdtempSync,
   readdirSync,
@@ -9,8 +8,6 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { generateParsers, grammars, packageName, root } from "./tree-sitter.js";
-
-const prerequisiteScripts = [];
 
 const generatedPaths = [
   "grammar.json",
@@ -142,21 +139,6 @@ function checkParser(grammar, generatedRoot) {
 function main(arguments_) {
   if (arguments_.length !== 0) {
     throw new Error("Usage: node scripts/check-generated.js");
-  }
-
-  for (const script of prerequisiteScripts) {
-    const result = spawnSync(
-      process.execPath,
-      [join(root, "scripts", script), "--check"],
-      {
-        cwd: root,
-        stdio: "inherit",
-        timeout: 60_000,
-        killSignal: "SIGKILL",
-      },
-    );
-    if (result.error) throw result.error;
-    if (result.status !== 0) return 1;
   }
 
   const generatedRoot = mkdtempSync(

@@ -86,7 +86,7 @@ function resultStatus(result) {
   return result.status ?? 1;
 }
 
-function createTreeSitter(environment = {}) {
+function createTreeSitter() {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), `${packageName}-`));
   const cacheDirectory = join(root, "node_modules", ".cache", packageName);
   const configDirectory = join(temporaryDirectory, "config");
@@ -133,14 +133,13 @@ function createTreeSitter(environment = {}) {
       if (closed) {
         throw new Error("Tree-sitter runner is closed.");
       }
-      const { env = {}, ...spawnOptions } = options;
       return spawnSync(treeSitterExecutable(), arguments_, {
         cwd: root,
         encoding: "utf8",
         maxBuffer: 256 * 1024 * 1024,
         windowsHide: true,
         killSignal: "SIGKILL",
-        ...spawnOptions,
+        ...options,
         env: {
           ...process.env,
           APPDATA: configDirectory,
@@ -151,8 +150,6 @@ function createTreeSitter(environment = {}) {
           TREE_SITTER_SEED: process.env.TREE_SITTER_SEED ?? "1",
           XDG_CACHE_HOME: cacheDirectory,
           XDG_CONFIG_HOME: configDirectory,
-          ...environment,
-          ...env,
         },
       });
     },
@@ -184,6 +181,25 @@ function generateParsers(outputRoot = root) {
     if (status !== 0) {
       return status;
     }
+  }
+  return 0;
+}
+
+function buildParsers(runner) {
+  const directory = join(root, "build");
+  mkdirSync(directory, { recursive: true });
+  for (const { name, path } of grammars) {
+    const library = join(
+      directory,
+      `${name}.${process.platform === "win32" ? "dll" : "so"}`,
+    );
+    const status = runChecked(runner, [
+      "build",
+      join(root, path),
+      "--output",
+      library,
+    ]);
+    if (status !== 0) return status;
   }
   return 0;
 }
@@ -252,7 +268,6 @@ function fuzzParsers(runner, arguments_) {
         ["fuzz", "--lib-path", library, "--lang-name", name, ...arguments_],
         {
           encoding: "utf8",
-          env: { NO_COLOR: "1" },
           maxBuffer: 16 * 1024 * 1024,
           timeout: 600_000,
           killSignal: "SIGKILL",
@@ -290,6 +305,12 @@ function main(arguments_) {
 
   const runner = createTreeSitter();
   try {
+    if (command === "build-all") {
+      if (rest.length !== 0) {
+        throw new Error("Usage: node scripts/tree-sitter.js build-all");
+      }
+      return buildParsers(runner);
+    }
     if (command === "fuzz-all") return fuzzParsers(runner, rest);
     return runChecked(runner, arguments_);
   } finally {

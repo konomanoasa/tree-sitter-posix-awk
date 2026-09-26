@@ -1746,10 +1746,13 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
     const initial = writeSource("generated", "initial", history.initial);
     const final = writeSource("generated", "final", history.source);
     const fresh = captureParse(final);
+    const repeated = captureParse(final);
     const incremental = captureParse(initial, history.edits);
     for (const result of [fresh, incremental]) {
       assert.ok(result.status === 0 || result.status === 1, history.context);
     }
+    assert.equal(repeated.status, fresh.status, history.context);
+    assert.equal(repeated.tree, fresh.tree, history.context);
     if (fresh.status === 0 && !hasRecovery(fresh.tree)) {
       assert.equal(incremental.status, 0, history.context);
       assert.equal(hasRecovery(incremental.tree), false, history.context);
@@ -1761,7 +1764,7 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
   assert.equal(checked, 500);
   assert.ok(compared > 0);
   context.diagnostic(
-    `posix_awk: checked ${checked} generated edit states, compared ${compared} valid CSTs`,
+    `posix_awk: compared ${checked} repeated fresh CSTs and ${compared} valid incremental CSTs`,
   );
 });
 

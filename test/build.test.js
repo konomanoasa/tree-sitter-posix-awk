@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,20 +9,19 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { grammars, packageName, root } from "../scripts/tree-sitter.js";
+import { copyFiles, packageName, root } from "../scripts/tree-sitter.js";
+
+const configuration = JSON.parse(readFileSync(join(root, "tree-sitter.json")));
+const grammars = configuration.grammars.map((grammar) => ({
+  ...grammar,
+  externalFiles: [].concat(grammar["external-files"] ?? []),
+  highlights: [].concat(grammar.highlights ?? []),
+}));
 
 const language = packageName.slice("tree-sitter-".length).replaceAll("-", "_");
-
-function copyFiles(paths, directory) {
-  for (const path of new Set(paths)) {
-    const destination = join(directory, path);
-    mkdirSync(dirname(destination), { recursive: true });
-    cpSync(join(root, path), destination, { recursive: true });
-  }
-}
 
 test(`${language}: generated checks reject stale and missing files without rewriting them`, () => {
   const cache = join(root, "node_modules", ".cache");
@@ -89,7 +87,7 @@ test(`${language}: generated checks reject stale and missing files without rewri
   }
 });
 
-test(`${language}: Rust rebuilds grammars after parser or allocator header changes`, () => {
+test(`${language}: Rust rebuilds grammars after source or header changes`, () => {
   const directory = mkdtempSync(join(tmpdir(), `${packageName}-build-`));
   const source = join(directory, "source");
   try {
@@ -98,7 +96,7 @@ test(`${language}: Rust rebuilds grammars after parser or allocator header chang
         "Cargo.toml",
         "Cargo.lock",
         "bindings/rust",
-        "test/bindings.test.rs",
+        "test",
         ...(existsSync(join(root, "common")) ? ["common"] : []),
         ...grammars.flatMap(({ path, externalFiles, highlights }) => [
           join(path, "src"),
@@ -129,19 +127,39 @@ test(`${language}: Rust rebuilds grammars after parser or allocator header chang
 
     const initial = check();
     assert.equal(initial.status, 0, initial.output);
-    for (const grammar of grammars) {
-      for (const header of ["parser.h", "alloc.h"]) {
-        const path = join(source, grammar.path, "src", "tree_sitter", header);
-        const original = readFileSync(path);
-        const marker = "tree_sitter_header_change_requires_rebuild";
-        writeFileSync(path, `${original}\n#error ${marker}\n`);
-        const changed = check();
-        assert.notEqual(changed.status, 0, `${path}: ${changed.output}`);
-        assert.ok(changed.output.includes(marker), changed.output);
-        writeFileSync(path, original);
-        const restored = check();
-        assert.equal(restored.status, 0, restored.output);
-      }
+    const dependencies = new Set(
+      grammars.flatMap(({ path, externalFiles }) => {
+        const scanner = join(path, "src", "scanner.c");
+        const scannerFiles = [scanner, ...externalFiles].filter((file) =>
+          existsSync(join(source, file)),
+        );
+        const usesAllocator = scannerFiles.some((file) =>
+          readFileSync(join(source, file), "utf8").includes(
+            "tree_sitter/alloc.h",
+          ),
+        );
+        return [
+          join(path, "src", "parser.c"),
+          join(path, "src", "tree_sitter", "parser.h"),
+          ...(existsSync(join(source, scanner)) ? [scanner] : []),
+          ...(usesAllocator
+            ? [join(path, "src", "tree_sitter", "alloc.h")]
+            : []),
+          ...externalFiles.filter((file) => file.endsWith(".h")),
+        ];
+      }),
+    );
+    for (const file of dependencies) {
+      const path = join(source, file);
+      const original = readFileSync(path);
+      const marker = "tree_sitter_source_change_requires_rebuild";
+      writeFileSync(path, `${original}\n#error ${marker}\n`);
+      const changed = check();
+      assert.notEqual(changed.status, 0, `${path}: ${changed.output}`);
+      assert.ok(changed.output.includes(marker), changed.output);
+      writeFileSync(path, original);
+      const restored = check();
+      assert.equal(restored.status, 0, restored.output);
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -231,4 +249,17 @@ syncBuiltinESMExports();
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test(`${language}: package metadata matches the grammar and license`, () => {
+  const { metadata } = configuration;
+  const pkg = JSON.parse(readFileSync(join(root, "package.json")));
+  for (const key of ["version", "license", "description"])
+    assert.equal(pkg[key], metadata[key]);
+  assert.equal(pkg.repository, `git+${metadata.links.repository}.git`);
+  assert.ok(
+    readFileSync(join(root, "LICENSE"), "utf8").startsWith(
+      `${pkg.license} License`,
+    ),
+  );
 });

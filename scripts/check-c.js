@@ -11,23 +11,31 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join } from "node:path";
 import { grammars, packageName, root } from "./tree-sitter.js";
 
 const enumerators = { "\\": "CONTINUATION_BACKSLASH" };
+const tokenCount = "TOKEN_TYPE_COUNT";
 
 const warningArguments = ["-Wall", "-Wextra", "-Werror", "-pedantic"];
 const scannerContract = join(root, "test", "scanner.test.c");
+const contracts = [scannerContract];
 
 const variants = grammars.map((grammar) => {
   const includeDirectory = join(root, grammar.path, "src");
+  const source = join(includeDirectory, "scanner.c");
+  const headers = grammar.externalFiles
+    .filter((file) => file.endsWith(".h"))
+    .map((file) => join(root, file));
   return {
     name: grammar.name,
     includeDirectory,
-    source: join(includeDirectory, "scanner.c"),
-    headers: grammar.externalFiles
-      .filter((file) => file.endsWith(".h"))
-      .map((file) => join(root, file)),
+    source,
+    headers,
+    contractArguments: [],
+    reuseAllocator: [source, ...headers].some((file) =>
+      readFileSync(file, "utf8").includes('"tree_sitter/alloc.h"'),
+    ),
   };
 });
 
@@ -150,7 +158,7 @@ function checkExternalTokenOrder(clang, compilerArguments, variant, directory) {
     return `typedef char external_${index}[${enumerator} == ${index} ? 1 : -1];`;
   });
   assertions.push(
-    `typedef char external_count[TOKEN_TYPE_COUNT == ${grammar.externals.length} ? 1 : -1];`,
+    `typedef char external_count[${tokenCount} == ${grammar.externals.length} ? 1 : -1];`,
   );
   const source = join(directory, `scanner-indices-${variant.name}.c`);
   writeFileSync(
@@ -164,7 +172,7 @@ function checkDiagnostics(clang, clangd, directory) {
   for (const variant of variants) {
     const databaseDirectory = join(directory, variant.name);
     mkdirSync(databaseDirectory);
-    const sources = [variant.source, ...variant.headers, scannerContract];
+    const sources = [variant.source, ...variant.headers, ...contracts];
     const commands = sources.map((source) => ({
       arguments: [
         clang,
@@ -175,6 +183,7 @@ function checkDiagnostics(clang, clangd, directory) {
         ...warningArguments,
         // Clangd checks headers and included helpers without all their callers.
         "-Wno-unused-function",
+        ...(source === variant.source ? [] : variant.contractArguments),
         "-fsyntax-only",
         source,
       ],
@@ -239,7 +248,7 @@ function main(arguments_) {
     ...new Set([
       ...variants.flatMap((variant) => variant.headers),
       ...variants.map((variant) => variant.source),
-      scannerContract,
+      ...contracts,
     ]),
   ];
   const { clang, clangd, clangFormat } = llvmCommands();
@@ -275,23 +284,31 @@ function main(arguments_) {
           variant.includeDirectory,
         ];
         checkExternalTokenOrder(clang, compilerArguments, variant, directory);
-        for (const reuse of [false, true]) {
-          const suffix = process.platform === "win32" ? ".exe" : "";
-          const name = `${variant.name}-scanner-${standard}${reuse ? "-reuse" : ""}`;
-          const binary = join(directory, `scanner-${name}${suffix}`);
-          run(clang, [
-            ...compilerArguments,
-            ...(reuse ? ["-DTREE_SITTER_REUSE_ALLOCATOR"] : []),
-            scannerContract,
-            "-o",
-            binary,
-          ]);
-          run(binary, []);
-          process.stdout.write(
-            `${variant.name}: scanner tests passed (${standard.toUpperCase()}${reuse ? ", reused allocator" : ""})\n`,
-          );
+        for (const contract of contracts) {
+          const modes =
+            contract === scannerContract && variant.reuseAllocator
+              ? [false, true]
+              : [false];
+          for (const reuse of modes) {
+            const suffix = process.platform === "win32" ? ".exe" : "";
+            const contractName = basename(contract, ".test.c");
+            const name = `${variant.name}-${contractName}-${standard}${reuse ? "-reuse" : ""}`;
+            const binary = join(directory, `scanner-${name}${suffix}`);
+            run(clang, [
+              ...compilerArguments,
+              ...variant.contractArguments,
+              ...(reuse ? ["-DTREE_SITTER_REUSE_ALLOCATOR"] : []),
+              contract,
+              "-o",
+              binary,
+            ]);
+            run(binary, []);
+            process.stdout.write(
+              `${variant.name}: ${contractName} tests passed (${standard.toUpperCase()}${reuse ? ", reused allocator" : ""})\n`,
+            );
+          }
         }
-        if (standard === "c17")
+        if (standard === "c17" && variant.reuseAllocator)
           checkAllocatorSymbols(clang, variant, directory);
       }
     }

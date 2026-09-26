@@ -1,9 +1,9 @@
 use std::ops::Range;
 
+use konomanoasa_tree_sitter_posix_awk as grammar;
 use tree_sitter::{
   InputEdit, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
-use tree_sitter_posix_awk as grammar;
 
 struct EreCase {
   name: &'static str,
@@ -338,38 +338,58 @@ fn collect_leaves<'tree>(node: Node<'tree>, leaves: &mut Vec<Node<'tree>>) {
 }
 
 fn assert_same_cst(actual: Node<'_>, expected: Node<'_>, context: &str) {
-  assert_eq!(actual.kind(), expected.kind(), "{context}");
-  assert_eq!(actual.range(), expected.range(), "{context}");
-  assert_eq!(actual.is_named(), expected.is_named(), "{context}");
-  assert_eq!(actual.is_extra(), expected.is_extra(), "{context}");
-  assert_eq!(actual.is_error(), expected.is_error(), "{context}");
-  assert_eq!(actual.is_missing(), expected.is_missing(), "{context}");
-  assert_eq!(actual.has_error(), expected.has_error(), "{context}");
-  assert_eq!(actual.child_count(), expected.child_count(), "{context}");
-  for index in 0..actual.child_count() {
-    assert_eq!(
-      actual.field_name_for_child(index),
-      expected.field_name_for_child(index),
-      "{context}",
-    );
-    assert_same_cst(
-      actual.child(index).unwrap(),
-      expected.child(index).unwrap(),
-      context,
-    );
+  let mut pending = vec![(actual, expected)];
+  while let Some((actual, expected)) = pending.pop() {
+    assert_eq!(actual.kind(), expected.kind(), "{context}");
+    assert_eq!(actual.range(), expected.range(), "{context}");
+    assert_eq!(actual.is_named(), expected.is_named(), "{context}");
+    assert_eq!(actual.is_extra(), expected.is_extra(), "{context}");
+    assert_eq!(actual.is_error(), expected.is_error(), "{context}");
+    assert_eq!(actual.is_missing(), expected.is_missing(), "{context}");
+    assert_eq!(actual.has_error(), expected.has_error(), "{context}");
+    assert_eq!(actual.child_count(), expected.child_count(), "{context}");
+    for index in 0..actual.child_count() {
+      assert_eq!(
+        actual.field_name_for_child(index),
+        expected.field_name_for_child(index),
+        "{context}",
+      );
+      pending
+        .push((actual.child(index).unwrap(), expected.child(index).unwrap()));
+    }
   }
+}
+
+fn assert_fresh_cst(
+  reused: &mut Parser,
+  source: &[u8],
+  expected: &Tree,
+  context: &str,
+) {
+  for _ in 0..2 {
+    let actual = reused.parse(source, None).unwrap();
+    assert_same_cst(actual.root_node(), expected.root_node(), context);
+  }
+  reused.reset();
+  let actual = reused.parse(source, None).unwrap();
+  assert_same_cst(actual.root_node(), expected.root_node(), context);
+  let independent = parser().parse(source, None).unwrap();
+  assert_same_cst(independent.root_node(), expected.root_node(), context);
 }
 
 #[test]
 fn parses_valid_source() {
   let source = "BEGIN { print 1 }\n";
+  let language = grammar::LANGUAGE.into();
   let mut parser = Parser::new();
-  parser.set_language(&grammar::LANGUAGE.into()).unwrap();
+  parser.set_language(&language).unwrap();
   let tree = parser.parse(source, None).unwrap();
   let root = tree.root_node();
   assert_eq!(root.kind(), "program");
   assert_eq!(root.byte_range(), 0..source.len());
   assert!(!root.has_error());
+  assert!(grammar::NODE_TYPES.contains("\"program\""));
+  Query::new(&language, grammar::HIGHLIGHTS_QUERY).unwrap();
 }
 
 #[test]
@@ -786,6 +806,15 @@ fn fresh_parses_ignore_previous_recovery_and_edit_history() {
     ("unfinished equivalence class", "/[[=a", true),
     ("unfinished character class", "/[[:alpha", true),
     ("unfinished interval", "/a{1,", true),
+    ("unfinished group alternation", "/(a|", true),
+    ("unfinished negative bracket", "/[^]", true),
+    ("unfinished compound closing", "/[[.a.", true),
+    ("unfinished class closing", "/[[:alpha:", true),
+    ("raw newline in ERE", "/[a\nb]/", true),
+    ("raw newline in string", "\"a\nb\"", true),
+    ("carriage return before newline", "{ x\r\n}", true),
+    ("BOM before unfinished string", "\u{feff}\"a\\", true),
+    ("BOM inside expression", "{ x\u{feff}+ }", true),
     ("stray backslash", "{}\\", true),
     ("continued missing operand", "{ x +\\\n", true),
     ("invalid continuation", "{ x\\ \n}", true),
@@ -823,15 +852,101 @@ fn fresh_parses_ignore_previous_recovery_and_edit_history() {
       let mut previous = reused.parse(&text, None).unwrap();
       edit(&mut previous, &mut text, 0, 0, "[\\\n");
       let _edited = reused.parse(&text, Some(&previous)).unwrap();
-      for _ in 0..3 {
-        let actual = reused.parse(source, None).unwrap();
-        assert_same_cst(actual.root_node(), expected.root_node(), &context);
-        let independent = parser().parse(source, None).unwrap();
-        assert_same_cst(
-          independent.root_node(),
-          expected.root_node(),
-          &context,
-        );
+      assert_fresh_cst(&mut reused, source.as_bytes(), &expected, &context);
+    }
+  }
+}
+
+#[test]
+fn fresh_parses_of_truncated_and_mutated_tokens_are_repeatable() {
+  let cases = [
+    (
+      "conditionals, calls and updates",
+      "function f(a,b) { if (a) return a[b]++; else return $-f(b) }\n",
+    ),
+    (
+      "loop and output redirection",
+      "BEGIN { for (i in a) printf \"%s\", a[i] >> file; do i--; while(i) }\n",
+    ),
+    (
+      "input target and pipe ambiguity",
+      "{ x = getline a + b++; command | getline a[i]; getline $-x < file }\n",
+    ),
+    (
+      "division, assignment and ERE boundaries",
+      "{ x /= 2; x / 2 ~ /^(ab|c){1,3}?$/; print /[]a-z-]/ }\n",
+    ),
+    (
+      "collating symbol, equivalence class and character class",
+      "/[[.é.][=犬=][:alpha:]\\141\\/]/\n",
+    ),
+    (
+      "escaped Unicode string and octal escape",
+      "{ print \"é犬🙂\\n\\141\\\"\" }\n",
+    ),
+    (
+      "BOM, continued names and comment backslash",
+      "\u{feff}BEGIN\\\n{ fo\\\no; x\\\n++ } # \\\n",
+    ),
+    (
+      "number suffix and exponent boundaries",
+      "{ a = 1.2e-3F + .5L; a += 2E+3; a *= 7; a %= 2; a ^= 3 }\n",
+    ),
+  ];
+  let mut reused = parser();
+  let mut previous = b"/[[:".to_vec();
+  let mut malformed = 0;
+  for (name, source) in cases {
+    parse(source, name);
+    for end in 0..=source.len() {
+      let mut mutations = vec![source.as_bytes()[..end].to_vec()];
+      if end < source.len() {
+        let mut deleted = source.as_bytes().to_vec();
+        deleted.remove(end);
+        mutations.push(deleted);
+        for inserted in [b"\0".as_slice(), b"\\\n", b"\r\n", b"[", b"\""] {
+          let mut mutated = source.as_bytes().to_vec();
+          mutated.splice(end..end, inserted.iter().copied());
+          mutations.push(mutated);
+        }
+      }
+      for (mutation, text) in mutations.into_iter().enumerate() {
+        let context =
+          format!("{name}, byte {end}, mutation {mutation}: {text:?}");
+        let expected = parser().parse(&text, None).unwrap();
+        malformed += usize::from(expected.root_node().has_error());
+        let _previous = reused.parse(&previous, None).unwrap();
+        assert_fresh_cst(&mut reused, &text, &expected, &context);
+        previous = text;
+      }
+    }
+  }
+  assert!(
+    malformed > 1_000,
+    "must exercise malformed and incomplete input"
+  );
+}
+
+#[test]
+fn fresh_parses_remain_repeatable_after_long_unterminated_constructs() {
+  let mut reused = parser();
+  for length in [255, 256, 1_023, 1_024, 1_025] {
+    for (name, opening, content, closing) in [
+      ("string", "{ print \"", "é", "\" }\n"),
+      ("ERE", "/", "a", "/\n"),
+      ("collating symbol", "/[[.", "a", ".]]/\n"),
+      ("equivalence class", "/[[=", "a", "=]]/\n"),
+      ("word", "{ ", "a", " }\n"),
+      ("comment", "{ #", "a", "\n}\n"),
+      ("nested unary fields", "{ ", "$+", "a }\n"),
+    ] {
+      let unfinished = format!("{opening}{}", content.repeat(length));
+      let complete = format!("{unfinished}{closing}");
+      for source in [unfinished, complete] {
+        let context =
+          format!("{name}, length {length}, {} bytes", source.len());
+        let expected = parser().parse(&source, None).unwrap();
+        assert_fresh_cst(&mut reused, source.as_bytes(), &expected, &context);
       }
     }
   }
@@ -940,6 +1055,7 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
     "", "[", "]", "(", ")", "++", "--", "x", " ", ";", "\n", "+", "?", "~",
     "<", "\\\n",
   ];
+  let mut independent = parser();
   for history in 0..5_000 {
     let source = seeds[history % seeds.len()];
     let mut parser = parser();
@@ -966,11 +1082,13 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
       edit(&mut tree, &mut text, start, deleted, &inserted);
       tree = parser.parse(&text, Some(&tree)).unwrap();
       let fresh = parser.parse(&text, None).unwrap();
+      let expected = independent.parse(&text, None).unwrap();
+      let context = format!(
+        "history {history}, step {step}, source {source:?}, edits {steps:?}, final {:?}",
+        String::from_utf8_lossy(&text)
+      );
+      assert_same_cst(fresh.root_node(), expected.root_node(), &context);
       if !fresh.root_node().has_error() {
-        let context = format!(
-          "history {history}, step {step}, source {source:?}, edits {steps:?}, final {:?}",
-          String::from_utf8_lossy(&text)
-        );
         assert_same_cst(tree.root_node(), fresh.root_node(), &context);
       }
     }

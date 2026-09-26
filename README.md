@@ -1,6 +1,7 @@
 # tree-sitter-posix-awk
 
 [![CI](https://github.com/konomanoasa/tree-sitter-posix-awk/actions/workflows/ci.yaml/badge.svg)](https://github.com/konomanoasa/tree-sitter-posix-awk/actions/workflows/ci.yaml)
+[![crates.io](https://img.shields.io/crates/v/konomanoasa-tree-sitter-posix-awk)](https://crates.io/crates/konomanoasa-tree-sitter-posix-awk)
 [![npm](https://img.shields.io/npm/v/@konomanoasa/tree-sitter-posix-awk)](https://www.npmjs.com/package/@konomanoasa/tree-sitter-posix-awk)
 
 [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar for
@@ -12,15 +13,9 @@ POSIX.1-2024 AWK.
 npm install @konomanoasa/tree-sitter-posix-awk
 ```
 
-## Grammar
-
-| Grammar | Description | Rust constant |
-| --- | --- | --- |
-| `posix_awk` | POSIX.1-2024 AWK | `LANGUAGE` |
-
 ## Development
 
-Development requires Node.js 24.2.0 or later.
+Development uses Node.js 24 or later.
 
 ```sh
 npm install

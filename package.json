@@ -1,6 +1,6 @@
 {
   "name": "@konomanoasa/tree-sitter-posix-awk",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "type": "module",
   "description": "Tree-sitter grammar for POSIX awk.",
   "license": "MIT",

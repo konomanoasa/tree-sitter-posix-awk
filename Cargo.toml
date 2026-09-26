@@ -1,6 +1,6 @@
 [package]
 name = "konomanoasa-tree-sitter-posix-awk"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2024"
 description = "Tree-sitter grammar for POSIX awk."
 readme = "README.md"

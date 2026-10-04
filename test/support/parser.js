@@ -164,10 +164,10 @@ function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
 
   const incremental = captureParse(initialPath, edits);
   const fresh = captureParse(finalPath);
-  for (const [label, result] of [
-    ["native incremental parse", incremental],
-    ["native fresh parse", fresh],
-  ]) {
+  for (const [label, result] of Object.entries({
+    "native incremental parse": incremental,
+    "native fresh parse": fresh,
+  })) {
     assertStatus(`${testName} ${label}`, result, 0);
     clean(result.tree);
   }
@@ -260,9 +260,11 @@ function freshTest(name, source, assertions) {
   test(`posix_awk: ${name}`, () => assertions(assertFresh(name, source)));
 }
 
-function determinismTest(name, initial, final, edits, assertions = () => {}) {
-  test(`posix_awk: ${name}`, () =>
-    assertions(assertDeterministicEdit(name, initial, final, edits)));
+function determinismTest(name, initial, final, edits, assertions) {
+  test(`posix_awk: ${name}`, () => {
+    const tree = assertDeterministicEdit(name, initial, final, edits);
+    assertions?.(tree);
+  });
 }
 
 function editHistoryTest(name, source, edits) {

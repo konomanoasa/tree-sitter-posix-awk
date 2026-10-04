@@ -13,6 +13,7 @@ const generatedPaths = [
   "grammar.json",
   "node-types.json",
   "parser.c",
+  "scanner.c",
   join("tree_sitter", "alloc.h"),
   join("tree_sitter", "array.h"),
   join("tree_sitter", "parser.h"),
@@ -37,7 +38,8 @@ function different(left, right) {
   try {
     return !readFileSync(left).equals(readFileSync(right));
   } catch (error) {
-    if (error.code === "ENOENT") return true;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT")
+      return true;
     throw error;
   }
 }
@@ -195,6 +197,6 @@ function main(arguments_) {
 try {
   process.exitCode = main(process.argv.slice(2));
 } catch (error) {
-  console.error(error.message);
+  console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }

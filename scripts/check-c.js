@@ -39,18 +39,15 @@ const variants = grammars.map((grammar) => {
   };
 });
 
-function run(
-  command,
-  arguments_,
-  { stdio = "inherit", timeout = 60_000 } = {},
-) {
+function run(command, arguments_, options = {}) {
   const result = spawnSync(command, arguments_, {
     cwd: root,
     encoding: "utf8",
-    timeout,
+    timeout: 60_000,
     killSignal: "SIGKILL",
     maxBuffer: 64 * 1024 * 1024,
-    stdio,
+    stdio: "inherit",
+    ...options,
   });
   if (result.error) {
     throw new Error(
@@ -320,6 +317,6 @@ function main(arguments_) {
 try {
   main(process.argv.slice(2));
 } catch (error) {
-  console.error(error.message);
+  console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }

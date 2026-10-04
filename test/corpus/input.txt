@@ -703,3 +703,761 @@ getline prefers a target when a following update can start a concatenated operan
                     (incr)
                     (lvalue
                       (name))))))))))))
+
+==================
+targetless getline follows a unary sign before a postfix update
+==================
+{ -getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (unary_expr
+                  (unary_expr
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+targetless getline is an addition operand before a postfix update
+==================
+{ a + getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+targetless getline follows a concatenation operand before a postfix update
+==================
+{ a getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (non_unary_expr
+                      (non_unary_input_function
+                        (simple_get
+                          (getline_keyword)))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+targetless getline occurs in an assigned unary field before a postfix update
+==================
+{ q = $-getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (name))
+                  (expr
+                    (non_unary_expr
+                      (non_unary_expr
+                        (lvalue
+                          (expr
+                            (unary_expr
+                              (expr
+                                (non_unary_expr
+                                  (non_unary_input_function
+                                    (simple_get
+                                      (getline_keyword)))))))))
+                      (non_unary_expr
+                        (lvalue
+                          (name))
+                        (incr)))))))))))))
+
+==================
+targetless getline is an exponent before a postfix update
+==================
+{ a ^ getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+targetless getline occurs in another getline field target before a postfix update
+==================
+{ getline $-getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (expr
+                            (unary_expr
+                              (expr
+                                (non_unary_expr
+                                  (non_unary_input_function
+                                    (simple_get
+                                      (getline_keyword)))))))))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+targetless getline occurs in a prefix-updated field before a postfix update
+==================
+{ ++$getline x-- }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (incr)
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword)))))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (decr)))))))))))
+
+==================
+targetless getline occurs in a printed unary field before a postfix update
+==================
+{ print $-getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (print_statement
+                (simple_print_statement
+                  (print_keyword)
+                  (print_expr_list
+                    (print_expr
+                      (non_unary_print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (unary_expr
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_input_function
+                                      (simple_get
+                                        (getline_keyword)))))))))
+                        (non_unary_print_expr
+                          (lvalue
+                            (name))
+                          (incr))))))))))))))
+
+==================
+a redirected getline field accepts a postfix update after its string source
+==================
+
+{ $getline < "f" ++ }
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (string
+                                  (string_content))))))))
+                    (incr)))))))))
+    (terminator
+      (newline))))
+
+==================
+input redirection ends a unary field target before the outer postfix update
+==================
+
+{ $getline $-x < "f" -- }
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword)
+                              (lvalue
+                                (expr
+                                  (unary_expr
+                                    (expr
+                                      (non_unary_expr
+                                        (lvalue
+                                          (name))))))))
+                            (expr
+                              (non_unary_expr
+                                (string
+                                  (string_content))))))))
+                    (decr)))))))))
+    (terminator
+      (newline))))
+
+==================
+a printed redirected getline field accepts an update after its unary source
+==================
+
+{ print $getline < -1 ++ }
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (non_unary_input_function
+                                  (simple_get
+                                    (getline_keyword))
+                                  (expr
+                                    (unary_expr
+                                      (expr
+                                        (non_unary_expr
+                                          (number)))))))))
+                          (incr))))))))))))
+    (terminator
+      (newline))))
+
+==================
+a postfix update on an input filename remains inside the source expression
+==================
+
+{ $getline < y++ }
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))
+                                (incr)))))))))))))))
+    (terminator
+      (newline))))
+
+==================
+getline input redirection takes a concatenation as its source
+==================
+{ getline line < dir "/" name }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_input_function
+                    (simple_get
+                      (getline_keyword)
+                      (lvalue
+                        (name)))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (lvalue
+                              (name)))
+                          (non_unary_expr
+                            (string
+                              (string_content))))
+                        (non_unary_expr
+                          (lvalue
+                            (name)))))))))))))))
+
+==================
+getline input redirection takes a comparison as its source
+==================
+{ getline < file > 0 }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_input_function
+                    (simple_get
+                      (getline_keyword))
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (number)))))))))))))))
+
+==================
+an update before a name stays inside the source of a redirected getline field
+==================
+{ $getline < "f" ++y }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (string
+                                  (string_content)))
+                              (non_unary_expr
+                                (incr)
+                                (lvalue
+                                  (name))))))))))))))))))
+
+==================
+a redirected getline field accepts a postfix update after a comparison source
+==================
+{ $getline < a < "f" ++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)))
+                              (expr
+                                (non_unary_expr
+                                  (string
+                                    (string_content))))))))))
+                  (incr))))))))))
+
+==================
+a postfix update on a name after getline remains inside the source expression
+==================
+{ $getline < getline x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (non_unary_input_function
+                                  (simple_get
+                                    (getline_keyword))))
+                              (non_unary_expr
+                                (lvalue
+                                  (name))
+                                (incr)))))))))))))))))
+
+==================
+an outer getline field takes the update after the source of its target
+==================
+{ $getline $getline < "f" ++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (non_unary_input_function
+                                    (simple_get
+                                      (getline_keyword))
+                                    (expr
+                                      (non_unary_expr
+                                        (string
+                                          (string_content)))))))))))))
+                  (incr))))))))))
+
+==================
+the first getline keeps its target before a prefix-updated getline field
+==================
+{ getline x++ $getline y++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_input_function
+                        (simple_get
+                          (getline_keyword)
+                          (lvalue
+                            (name)))))
+                    (non_unary_expr
+                      (incr)
+                      (lvalue
+                        (expr
+                          (non_unary_expr
+                            (non_unary_input_function
+                              (simple_get
+                                (getline_keyword))))))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr)))))))))))
+
+==================
+getline lookahead keeps the outer target when its source takes the update
+==================
+{ getline $getline < x++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_input_function
+                    (simple_get
+                      (getline_keyword)
+                      (lvalue
+                        (expr
+                          (non_unary_expr
+                            (non_unary_input_function
+                              (simple_get
+                                (getline_keyword))
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name))
+                                  (incr))))))))))))))))))
+
+==================
+getline lookahead omits the outer target for an update on the field
+==================
+{ getline $getline < x++++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))))
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))
+                                (incr)))))))
+                    (incr)))))))))))
+
+==================
+getline lookahead retains the first target before a nested prefix-updated field
+==================
+{ getline x++ $getline $getline < 1 ++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_input_function
+                        (simple_get
+                          (getline_keyword)
+                          (lvalue
+                            (name)))))
+                    (non_unary_expr
+                      (incr)
+                      (lvalue
+                        (expr
+                          (non_unary_expr
+                            (non_unary_input_function
+                              (simple_get
+                                (getline_keyword))))))))
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (number)))))))
+                    (incr)))))))))))
+
+==================
+getline lookahead prefers the first viable target over a nested target
+==================
+{ getline $getline < getline $getline < x++++ }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_input_function
+                    (simple_get
+                      (getline_keyword)
+                      (lvalue
+                        (expr
+                          (non_unary_expr
+                            (non_unary_input_function
+                              (simple_get
+                                (getline_keyword))
+                              (expr
+                                (non_unary_expr
+                                  (non_unary_expr
+                                    (non_unary_input_function
+                                      (simple_get
+                                        (getline_keyword))))
+                                  (non_unary_expr
+                                    (lvalue
+                                      (expr
+                                        (non_unary_expr
+                                          (non_unary_input_function
+                                            (simple_get
+                                              (getline_keyword))
+                                            (expr
+                                              (non_unary_expr
+                                                (lvalue
+                                                  (name))
+                                                (incr)))))))
+                                    (incr)))))))))))))))))))

@@ -1032,6 +1032,14 @@ fn removing_an_invalid_bracket_before_getline_restores_statements() {
 #[test]
 fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
   let seeds = [
+    "{ $getline < a < getline x++ < y }",
+    "{ $getline < a < getline x-- < y }",
+    "{ $getline < a < $getline < b < getline x++++ < y }",
+    "{ $getline < a < $getline < b < getline x++++++ < y }",
+    "{ getline $getline < a < getline x++ < y }",
+    "{ print ($getline < a < getline x++ < y) }",
+    "{ f($getline < a < getline x++ < y) }",
+    "{ x[$getline < a < getline x++ < y] }",
     "{ x = getline a + line b++ }",
     "{ a ? b : getline c-- ; (y) ? 1 : 2 }",
     "{ getline x++ }",
@@ -1043,6 +1051,10 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
     "{ getline $getline x < source }",
     "{ print (getline x++ + y) }",
     "{ getline x\\\n++ }",
+    "{ getline $getline < x++++ }",
+    "{ getline $getline < x | getline ++ }",
+    "{ getline $getline < a ? x : (y)++ }",
+    "{ getline $getline < getline $getline < x++++ }",
   ];
   let mut random = 0x79d07b23u32;
   let mut next = || {
@@ -1098,4 +1110,418 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
       "history {history} must restore its source"
     );
   }
+}
+
+#[test]
+fn getline_token_edit_histories_match_fresh_parses() {
+  struct History {
+    source: &'static str,
+    edits: &'static [(usize, usize, &'static str)],
+  }
+  for History { source, edits } in [
+    History {
+      source: "{ getline $ getline < \"f\" < x }",
+      edits: &[(10, 1, ""), (10, 0, "$"), (30, 0, "a[1]")],
+    },
+    History {
+      source: "{ getline x < y ++ z }",
+      edits: &[(10, 1, "getline"), (10, 7, "x")],
+    },
+    History {
+      source: "{ getline < y ++ z }",
+      edits: &[(10, 0, "a[1]")],
+    },
+    History {
+      source: "{ print $ getline x ++ $ getline y ++ }",
+      edits: &[(33, 2, "?"), (33, 1, "y ")],
+    },
+    History {
+      source: "{ getline x + y getline z ++ w }",
+      edits: &[(24, 2, "]"), (24, 1, "z ")],
+    },
+    History {
+      source: "{ $getline < \"f\" ++ | getline }",
+      edits: &[(0, 2, "tline"), (0, 5, "{ "), (20, 2, "$")],
+    },
+    History {
+      source: "{ getline a[1/2] ++ $ getline x ++ }",
+      edits: &[(18, 2, "a[1]"), (32, 0, ") "), (32, 2, "")],
+    },
+    History {
+      source: "{ getline a[ b[i,\nj] ] ++ y -- z }",
+      edits: &[(24, 2, "\"f\""), (29, 2, "]"), (29, 1, "--")],
+    },
+    History {
+      source: "{ getline $1.5 ++ $ getline $1.5 ++ y }",
+      edits: &[(16, 2, "\"f\""), (34, 2, "("), (34, 1, "++")],
+    },
+  ] {
+    let mut reused = parser();
+    let mut text = source.as_bytes().to_vec();
+    let mut tree = parse(source, source);
+    for (step, &(start, deleted, inserted)) in edits.iter().enumerate() {
+      edit(&mut tree, &mut text, start, deleted, inserted);
+      tree = reused.parse(&text, Some(&tree)).unwrap();
+      let fresh = parser().parse(&text, None).unwrap();
+      if !fresh.root_node().has_error() {
+        assert_same_cst(
+          tree.root_node(),
+          fresh.root_node(),
+          &format!("{source}: step {step}"),
+        );
+      }
+    }
+    assert!(!tree.root_node().has_error(), "{source}");
+  }
+}
+
+#[test]
+fn getline_postfix_concatenation_keeps_its_operands() {
+  for (source, concatenation, left, right) in [
+    ("{ -getline x++ }\n", "-getline x++", "-getline", "x++"),
+    (
+      "{ a + getline x++ }\n",
+      "a + getline x++",
+      "a + getline",
+      "x++",
+    ),
+    ("{ a getline x++ }\n", "a getline x++", "a getline", "x++"),
+    (
+      "{ q = $-getline x++ }\n",
+      "$-getline x++",
+      "$-getline",
+      "x++",
+    ),
+    (
+      "{ a ^ getline x++ }\n",
+      "a ^ getline x++",
+      "a ^ getline",
+      "x++",
+    ),
+    (
+      "{ getline $-getline x++ }\n",
+      "getline $-getline x++",
+      "getline $-getline",
+      "x++",
+    ),
+    (
+      "{ ++$getline x-- }\n",
+      "++$getline x--",
+      "++$getline",
+      "x--",
+    ),
+    (
+      "{ print $-getline x++ }\n",
+      "$-getline x++",
+      "$-getline",
+      "x++",
+    ),
+  ] {
+    let tree = parse(source, source);
+    let start = source.find(concatenation).unwrap();
+    let expression = tree
+      .root_node()
+      .descendant_for_byte_range(start, start + concatenation.len())
+      .unwrap();
+    assert!(
+      expression.child_by_field_name("operator").is_none(),
+      "{source}"
+    );
+    for (field, text) in [("left", left), ("right", right)] {
+      let child = expression.child_by_field_name(field).unwrap();
+      assert_eq!(&source[child.byte_range()], text, "{source}: {field}");
+    }
+    let right = expression.child_by_field_name("right").unwrap();
+    let operator = right.child_by_field_name("operator").unwrap();
+    assert!(matches!(operator.kind(), "incr" | "decr"), "{source}");
+  }
+}
+
+#[test]
+fn redirected_getline_field_updates_keep_their_source_and_target() {
+  for (source, expression, filename, target, operator) in [
+    (
+      "{ $getline < \"f\" ++ }\n",
+      "$getline < \"f\" ++",
+      "\"f\"",
+      None,
+      "++",
+    ),
+    (
+      "{ $getline x < \"f\" -- }\n",
+      "$getline x < \"f\" --",
+      "\"f\"",
+      Some("x"),
+      "--",
+    ),
+    (
+      "{ $getline $-x < \"f\" ++ }\n",
+      "$getline $-x < \"f\" ++",
+      "\"f\"",
+      Some("$-x"),
+      "++",
+    ),
+    (
+      "{ print $getline < -1 ++ }\n",
+      "$getline < -1 ++",
+      "-1",
+      None,
+      "++",
+    ),
+    (
+      "{ printf $getline < y++ -- }\n",
+      "$getline < y++ --",
+      "y++",
+      None,
+      "--",
+    ),
+    (
+      "{ $getline < f() ++ }\n",
+      "$getline < f() ++",
+      "f()",
+      None,
+      "++",
+    ),
+  ] {
+    let tree = parse(source, source);
+    let start = source.find(expression).unwrap();
+    let update = tree
+      .root_node()
+      .descendant_for_byte_range(start, start + expression.len())
+      .unwrap();
+    let update_operator = update.child_by_field_name("operator").unwrap();
+    assert_eq!(&source[update_operator.byte_range()], operator, "{source}");
+    let field = update.child_by_field_name("operand").unwrap();
+    assert_eq!(field.kind(), "lvalue", "{source}");
+    assert_eq!(field.start_byte(), start, "{source}");
+    assert_eq!(
+      field.end_byte(),
+      update_operator.start_byte() - 1,
+      "{source}"
+    );
+    let input = field
+      .child_by_field_name("operand")
+      .unwrap()
+      .named_child(0)
+      .unwrap()
+      .named_child(0)
+      .unwrap();
+    assert_eq!(input.kind(), "non_unary_input_function", "{source}");
+    let file = input.child_by_field_name("source").unwrap();
+    assert_eq!(&source[file.byte_range()], filename, "{source}");
+    let get = input.child_by_field_name("get").unwrap();
+    assert_eq!(
+      get
+        .child_by_field_name("target")
+        .map(|node| &source[node.byte_range()]),
+      target,
+      "{source}"
+    );
+  }
+}
+
+#[test]
+fn getline_source_lookahead_preserves_target_ownership() {
+  for (expression, target) in [
+    ("getline $getline < \"f\"", Some("$getline < \"f\"")),
+    ("getline $getline < \"f\" ++", None),
+    ("getline $getline < x++", Some("$getline < x++")),
+    ("getline $getline < a < getline x++ < y", None),
+    ("getline $getline < x++++", None),
+    ("getline $getline $-x < \"f\" ++", None),
+    ("getline $getline < x | getline ++", None),
+    (
+      "getline $getline < a ? x : y++",
+      Some("$getline < a ? x : y++"),
+    ),
+    ("getline $getline < a ? x : (y)++", None),
+    ("getline $getline < 1e++", Some("$getline < 1e++")),
+    ("getline x++ $getline $getline < 1 ++", Some("x")),
+    ("getline $getline < $getline < 1 in a 1++", None),
+    ("getline $getline < $getline < x in a < \"f\" ++", None),
+    ("getline $getline < x < y < z | getline ++", None),
+    ("getline $getline < x ~ y ~ 1 | getline ++", None),
+    ("getline $getline < x ~ y | getline z ~ \"f\" ++", None),
+    ("getline $getline $-x < x | getline ++", None),
+    (
+      "getline $getline < getline $getline < x++++",
+      Some("$getline < getline $getline < x++++"),
+    ),
+  ] {
+    let source = format!("{{ {expression} }}\n");
+    let tree = parse(&source, expression);
+    let keyword = tree.root_node().descendant_for_byte_range(2, 8).unwrap();
+    assert_eq!(keyword.kind(), "getline_keyword", "{expression}");
+    let get = keyword.parent().unwrap();
+    assert_eq!(get.kind(), "simple_get", "{expression}");
+    assert_eq!(
+      get
+        .child_by_field_name("target")
+        .map(|node| &source[node.byte_range()]),
+      target,
+      "{expression}",
+    );
+  }
+}
+
+#[test]
+fn source_getline_targets_can_leave_postfix_updates_for_enclosing_fields() {
+  for (source, targets, operands) in [
+    (
+      "{ $getline < a < getline x++ < y }",
+      vec![None, Some("x")],
+      vec!["$getline < a < getline x"],
+    ),
+    (
+      "{ $getline < a < getline x-- < y }",
+      vec![None, Some("x")],
+      vec!["$getline < a < getline x"],
+    ),
+    (
+      "{ $getline < a < $getline < b < getline x++++ < y }",
+      vec![None, None, Some("x")],
+      vec![
+        "$getline < a < $getline < b < getline x++",
+        "$getline < b < getline x",
+      ],
+    ),
+    (
+      "{ getline $getline < a < getline x++ < y }",
+      vec![None, None, Some("x")],
+      vec!["$getline < a < getline x"],
+    ),
+    ("{ $getline < getline x++ }", vec![None, None], vec!["x"]),
+    (
+      "{ $getline < f(getline x++)++ < y }",
+      vec![None, None],
+      vec!["$getline < f(getline x++)", "x"],
+    ),
+  ] {
+    let tree = parse(source, source);
+    let mut pending = vec![tree.root_node()];
+    let mut actual_targets = Vec::new();
+    let mut actual_operands = Vec::new();
+    while let Some(node) = pending.pop() {
+      if node.kind() == "simple_get" {
+        actual_targets.push(
+          node
+            .child_by_field_name("target")
+            .map(|target| &source[target.byte_range()]),
+        );
+      }
+      if let Some(operator) = node.child_by_field_name("operator")
+        && matches!(operator.kind(), "incr" | "decr")
+      {
+        let operand = node.child_by_field_name("operand").unwrap();
+        assert_eq!(operand.kind(), "lvalue", "{source}");
+        actual_operands.push(&source[operand.byte_range()]);
+      }
+      for index in (0..node.child_count()).rev() {
+        pending.push(node.child(index).unwrap());
+      }
+    }
+    assert_eq!(actual_targets, targets, "{source}: targets");
+    assert_eq!(actual_operands, operands, "{source}: update operands");
+  }
+}
+
+#[test]
+fn getline_expression_edit_histories_restore_fresh_csts() {
+  let mut sources = vec![
+    "{ print $-getline x++ tline y-- z }\n".to_string(),
+    "{ x getline y++ | getline }\n".to_string(),
+    "{ print $-getline a[1]-- ++y z }\n".to_string(),
+    "{ getline $ getline < \"f\" < x a[1]}\n".to_string(),
+    "{ getline $getline < \"f\" ++ }\n".to_string(),
+    "{ getline $getline < x++ }\n".to_string(),
+    "{ getline $getline < x++++ }\n".to_string(),
+    "{ getline $getline < x | getline ++ }\n".to_string(),
+    "{ getline $getline < a ? x : (y)++ }\n".to_string(),
+    "{ getline $getline < a && # source\n x++ }\n".to_string(),
+    "{ getline x++ $getline $getline < 1 ++ }\n".to_string(),
+    "{ getline $getline < getline $getline < x++++ }\n".to_string(),
+    "{ getline $getline < $getline < 1 in a 1++ }\n".to_string(),
+    "{ getline $getline < x < y < z | getline ++ }\n".to_string(),
+  ];
+  for prefix in [
+    "",
+    "-",
+    "+",
+    "!",
+    "a + ",
+    "a - ",
+    "a * ",
+    "a / ",
+    "a % ",
+    "a ^ ",
+    "a ",
+    "q = ",
+    "$",
+    "$-",
+    "$!",
+    "++$",
+    "--$",
+    "getline $-",
+    "print $",
+    "print $-",
+    "printf $-",
+  ] {
+    for updated in ["x++", "x--", "a[1]++", "$x--"] {
+      for tail in ["", " y", " * n + z", " tline y-- z"] {
+        sources.push(format!("{{ {prefix}getline {updated}{tail} }}\n"));
+      }
+    }
+  }
+  for context in ["", "print ", "printf ", "a + ", "a ", "q = "] {
+    for target in ["", " x", " $-x"] {
+      for source in ["\"f\"", "-1", "(f)", "f()", "/f/", "++y", "y++", "y + 1"]
+      {
+        for update in ["++", "--"] {
+          for tail in ["", " z", " ++z", " | getline"] {
+            sources.push(format!(
+              "{{ {context}$getline{target} < {source} {update}{tail} }}\n"
+            ));
+          }
+        }
+      }
+    }
+  }
+  let mut state = 0x917a_b065_u64;
+  let mut next = || {
+    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+    state as usize
+  };
+  let mut histories = 0;
+  for source in sources {
+    let expected = parse(&source, &source);
+    for history in 0..50 {
+      let mut reused = parser();
+      let mut text = source.as_bytes().to_vec();
+      let mut tree = reused.parse(&text, None).unwrap();
+      let mut reversals = Vec::new();
+      for _ in 0..5 {
+        let start = next() % (text.len() + 1);
+        let removed = usize::from(start < text.len() && next() % 2 == 0);
+        let inserted =
+          ["", "x", "+", "-", "$", " ", "getline", "("][next() % 8];
+        let deleted =
+          String::from_utf8(text[start..start + removed].to_vec()).unwrap();
+        edit(&mut tree, &mut text, start, removed, inserted);
+        tree = reused.parse(&text, Some(&tree)).unwrap();
+        reversals.push((start, inserted.len(), deleted));
+      }
+      for (start, removed, inserted) in reversals.into_iter().rev() {
+        edit(&mut tree, &mut text, start, removed, &inserted);
+        tree = reused.parse(&text, Some(&tree)).unwrap();
+      }
+      assert_eq!(text, source.as_bytes());
+      assert_same_cst(
+        tree.root_node(),
+        expected.root_node(),
+        &format!("{source}: history {history}"),
+      );
+      histories += 1;
+    }
+  }
+  eprintln!("checked {histories} getline edit histories");
 }

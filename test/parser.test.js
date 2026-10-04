@@ -185,6 +185,7 @@ test("posix_awk: actions, EREs and strings require one opening and closing token
   ]) {
     const node = nodeTypes.find((node) => node.named && node.type === type);
     assert.ok(node, type);
+    assert.ok(node.fields, type);
     for (const [field, token] of [
       ["opening", opening],
       ["closing", closing],
@@ -443,6 +444,7 @@ test("posix_awk: range patterns expose one optional separator and two optional o
     (node) => node.named && node.type === "normal_pattern",
   );
   assert.ok(node);
+  assert.ok(node.fields);
   assert.deepEqual(Object.keys(node.fields).sort(), [
     "left",
     "right",
@@ -934,6 +936,18 @@ test("posix_awk: large tokens, statement lists and nested blocks parse through E
     ],
     ["wide statement list", `BEGIN { ${"x++;".repeat(16_000)} }\n`],
     ["deep blocks", `BEGIN ${"{".repeat(2000)}print 1;${"}".repeat(2000)}\n`],
+    [
+      "getline fields chained by prefix updates",
+      `{ ${"getline x ++ $ ".repeat(2000)}getline y }\n`,
+    ],
+    [
+      "a long concatenated getline source without a pipe",
+      `{ getline $getline < ${"a ".repeat(32_000)}x }\n`,
+    ],
+    [
+      "a long additive getline source with a pipe",
+      `{ getline $getline < ${"a + ".repeat(16_000)}x | getline }\n`,
+    ],
   ]) {
     assert.equal(parseSummary(source).successful, true, name);
   }

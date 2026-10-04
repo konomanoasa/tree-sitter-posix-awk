@@ -14,7 +14,9 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { copyFiles, packageName, root } from "../scripts/tree-sitter.js";
 
-const configuration = JSON.parse(readFileSync(join(root, "tree-sitter.json")));
+const configuration = JSON.parse(
+  readFileSync(join(root, "tree-sitter.json"), "utf8"),
+);
 const grammars = configuration.grammars.map((grammar) => ({
   ...grammar,
   externalFiles: [].concat(grammar["external-files"] ?? []),
@@ -33,7 +35,6 @@ test(`${language}: generated checks reject stale and missing files without rewri
         "package.json",
         "tree-sitter.json",
         "scripts",
-        ...(existsSync(join(root, "common")) ? ["common"] : []),
         ...grammars.flatMap(({ path, externalFiles }) => [
           join(path, "grammar.js"),
           join(path, "src"),
@@ -67,6 +68,15 @@ test(`${language}: generated checks reject stale and missing files without rewri
       const changed = `${readFileSync(join(directory, nodeTypes), "utf8")}\n`;
       writeFileSync(join(directory, nodeTypes), changed);
       changedFiles.push([nodeTypes, changed]);
+      const scanner = join(path, "src", "scanner.c");
+      const original = readFileSync(join(directory, scanner), "utf8");
+      const staleScanner = original.replace(
+        "EXPR_ASSIGNMENT = 2,",
+        "EXPR_ASSIGNMENT = 999,",
+      );
+      assert.notEqual(staleScanner, original);
+      writeFileSync(join(directory, scanner), staleScanner);
+      changedFiles.push([scanner, staleScanner]);
       const parser = join(path, "src", "parser.c");
       rmSync(join(directory, parser));
       missingFiles.push(parser);
@@ -97,7 +107,6 @@ test(`${language}: Rust rebuilds grammars after source or header changes`, () =>
         "Cargo.lock",
         "bindings/rust",
         "test",
-        ...(existsSync(join(root, "common")) ? ["common"] : []),
         ...grammars.flatMap(({ path, externalFiles, highlights }) => [
           join(path, "src"),
           ...externalFiles,
@@ -253,7 +262,7 @@ syncBuiltinESMExports();
 
 test(`${language}: package metadata matches the grammar and license`, () => {
   const { metadata } = configuration;
-  const pkg = JSON.parse(readFileSync(join(root, "package.json")));
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   for (const key of ["version", "license", "description"])
     assert.equal(pkg[key], metadata[key]);
   assert.equal(pkg.repository, `git+${metadata.links.repository}.git`);

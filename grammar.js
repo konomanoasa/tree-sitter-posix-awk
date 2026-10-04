@@ -1,15 +1,42 @@
-const PRECEDENCE = {
-  assignment: 2,
-  logicalOr: 4,
-  logicalAnd: 6,
-  membership: 8,
-  match: 10,
-  comparison: 12,
-  concatenation: 14,
-  additive: 16,
-  multiplicative: 18,
-  field: 22,
+export const EXPRESSION = {
+  assignment: { precedence: 2, associativity: "right" },
+  conditional: { precedence: 3, associativity: "right" },
+  logical_or: { precedence: 4, associativity: "left" },
+  logical_and: { precedence: 6, associativity: "left" },
+  membership: { precedence: 8, associativity: "left" },
+  match: { precedence: 10, associativity: "none" },
+  comparison: { precedence: 12, associativity: "none" },
+  concatenation: { precedence: 14, associativity: "left" },
+  additive: { precedence: 16, associativity: "left" },
+  multiplicative: { precedence: 18, associativity: "left" },
+  unary: { precedence: 20, associativity: "right" },
+  exponentiation: {
+    precedence: 21,
+    associativity: "right",
+    rightOperand: "unary",
+  },
+  postfix: { precedence: 23, associativity: "left" },
+  field: { precedence: 24, associativity: "right" },
 };
+
+function nextExpressionTier(tier, comparison) {
+  return Object.keys(EXPRESSION)
+    .filter((name) => comparison || name !== "comparison")
+    .filter((name) => EXPRESSION[name].precedence > EXPRESSION[tier].precedence)
+    .sort(
+      (left, right) =>
+        EXPRESSION[left].precedence - EXPRESSION[right].precedence,
+    )[0];
+}
+
+const bind = ({ precedence, associativity }, rule) =>
+  associativity === "left"
+    ? prec.left(precedence, rule)
+    : associativity === "right"
+      ? prec.right(precedence, rule)
+      : prec(precedence, rule);
+
+const OPERAND_PRECEDENCE = 2;
 
 const KEYWORDS = [
   "begin",
@@ -64,7 +91,7 @@ const SINGLE_CHARACTER_OPERATORS = {
 };
 
 // Skipping blanks can reach a backslash the external scanner never saw.
-const continuationMarker = token.immediate("\\");
+const continuationMarker = () => token.immediate("\\");
 
 const singleOperator = ($, character) =>
   alias($[`_${SINGLE_CHARACTER_OPERATORS[character]}_operator`], character);
@@ -72,6 +99,13 @@ const singleOperator = ($, character) =>
 const twoCharacterTokenRules = Object.fromEntries(
   TWO_CHARACTER_TOKENS.map((name) => [name, ($) => $[`_${name}_operator`]]),
 );
+
+// The scanner yields an update operator only before an lvalue, where it can
+// start a prefix update. Every other spelling is an internal token.
+const trailingUpdateOperators = ($) => [
+  alias($.trailing_incr, $.incr),
+  alias($.trailing_decr, $.decr),
+];
 
 const newlineLayout = ($) => optional($.newline_opt);
 
@@ -219,27 +253,46 @@ const callArguments = ($) => parenthesized(optional($.expr_list));
 
 const subscript = (subscripts) => seq("[", subscripts, "]");
 
-const directInputFunction = ($, get) =>
-  choice(
-    field("get", get),
-    prec.right(
-      PRECEDENCE.field,
-      seq(field("get", get), singleOperator($, "<"), field("source", $.expr)),
-    ),
+const redirectedInput = ($, get, source = $.expr) =>
+  prec.right(
+    EXPRESSION.field.precedence,
+    seq(field("get", get), singleOperator($, "<"), field("source", source)),
   );
-
-const getWithTarget = ($, target) =>
-  prec(1, prec.dynamic(1, seq($.getline_keyword, field("target", target))));
 
 const pipedInput = ($, source, get) =>
   prec.right(
-    PRECEDENCE.field,
+    EXPRESSION.field.precedence,
     seq(field("source", source), singleOperator($, "|"), field("get", get)),
   );
 
-const omittedGet = ($) => alias($.postfix_omitted_get, $.simple_get);
-
 const rawNewlines = ($) => repeat1($.newline);
+
+const simpleGet = ($, sourceContext = false) => {
+  const keyword = (rule) => alias(rule, $.getline_keyword);
+  return choice(
+    $.getline_keyword,
+    keyword($.omitted_getline_keyword),
+    keyword($.preferred_omitted_getline_keyword),
+    seq(
+      choice(
+        keyword($.target_getline_keyword),
+        keyword($.preferred_target_getline_keyword),
+      ),
+      field("target", $._lvalue),
+    ),
+    prec.dynamic(-1, keyword($.preferred_target_getline_keyword)),
+    prec.dynamic(
+      -1,
+      seq(
+        choice(
+          keyword($.preferred_omitted_getline_keyword),
+          ...(sourceContext ? [keyword($.omitted_getline_keyword)] : []),
+        ),
+        field("target", $._lvalue),
+      ),
+    ),
+  );
+};
 
 const EXPRESSION_CONTEXT = {
   normal: {
@@ -250,10 +303,25 @@ const EXPRESSION_CONTEXT = {
     comparison: true,
     input: ($) =>
       choice(
-        $._direct_input_function,
+        alias($.direct_input_function, $.non_unary_input_function),
         alias($.piped_input_function, $.non_unary_input_function),
       ),
-    unaryInput: true,
+    unaryInput: ($) => $.unary_input_function,
+  },
+  source: {
+    prefix: "source",
+    expression: "source_expr",
+    publicExpression: "expr",
+    unaryExpression: "unary_expr",
+    nonUnaryExpression: "non_unary_expr",
+    comparison: true,
+    input: ($) =>
+      choice(
+        alias($.source_direct_input_function, $.non_unary_input_function),
+        alias($.source_piped_input_function, $.non_unary_input_function),
+      ),
+    unaryInput: ($) =>
+      alias($.source_unary_input_function, $.unary_input_function),
   },
   print: {
     prefix: "print",
@@ -267,7 +335,7 @@ const EXPRESSION_CONTEXT = {
     expression: "expr",
     unaryExpression: "unary_expr",
     nonUnaryExpression: "non_unary_expr",
-    input: ($) => $._direct_input_function,
+    input: ($) => alias($.direct_input_function, $.non_unary_input_function),
   },
 };
 
@@ -304,7 +372,10 @@ const tierHelpers = (context, rules) => ({
 });
 
 const aliasedAnyTier = ($, context, tier) =>
-  alias($[anyTierName(context, tier)], $[context.expression]);
+  alias(
+    $[anyTierName(context, tier)],
+    $[context.publicExpression ?? context.expression],
+  );
 
 const nonUnaryAtom = ($, context, lvalue = $._lvalue) => {
   const atoms = [
@@ -325,7 +396,7 @@ const nonUnaryAtom = ($, context, lvalue = $._lvalue) => {
 
 const classOperandRules = (context, classification, tier) => ({
   [classOperandName(context, classification, tier)]: ($) =>
-    prec(1, classTier($, context, classification, tier)),
+    prec(OPERAND_PRECEDENCE, classTier($, context, classification, tier)),
 });
 
 const anyTierRules = (context, tier) => ({
@@ -339,7 +410,8 @@ const anyTierRules = (context, tier) => ({
 });
 
 const unaryExpressionRules = (context) => {
-  const rules = anyTierRules(context, "unary");
+  const rules = {};
+  Object.assign(rules, anyTierRules(context, "unary"));
   const { unary, nonUnary, addOperand } = tierHelpers(context, rules);
   const not = `_${context.prefix}_not_expr`;
   rules[unary("unary")] = ($) =>
@@ -366,7 +438,10 @@ const unaryExpressionRules = (context) => {
   rules[exponentiationTail] = ($) =>
     seq(
       $._exponentiation_operator,
-      field("right", aliasedAnyTier($, context, "unary")),
+      field(
+        "right",
+        aliasedAnyTier($, context, EXPRESSION.exponentiation.rightOperand),
+      ),
     );
   const exponentiationClassifications = context.unaryInput
     ? CLASSIFICATIONS
@@ -383,7 +458,7 @@ const unaryExpressionRules = (context) => {
       );
   }
   if (context.unaryInput) {
-    rules[unary("update")] = ($) => $.unary_input_function;
+    rules[unary("update")] = context.unaryInput;
   }
 
   rules[nonUnary("update")] = ($) =>
@@ -392,7 +467,14 @@ const unaryExpressionRules = (context) => {
       $._prefix_update_expr,
       seq(
         field("operand", alias($.postfix_lvalue, $.lvalue)),
-        field("operator", choice($.incr, $.decr)),
+        field(
+          "operator",
+          choice($.incr, $.decr, ...trailingUpdateOperators($)),
+        ),
+      ),
+      seq(
+        field("operand", alias($.redirected_field, $.lvalue)),
+        field("operator", choice(...trailingUpdateOperators($))),
       ),
     );
 
@@ -407,7 +489,10 @@ const tieredExpressionRules = (context) => {
   const rules = {};
   const { unary, nonUnary, addOperand } = tierHelpers(context, rules);
   const conditionalTail = `_${context.prefix}_conditional_tail`;
-  const expression = ($) => $[context.expression];
+  const expression = ($) =>
+    context.publicExpression
+      ? alias($[context.expression], $[context.publicExpression])
+      : $[context.expression];
   rules[conditionalTail] = ($) =>
     seq(
       "?",
@@ -421,11 +506,12 @@ const tieredExpressionRules = (context) => {
 
   const addBinaryTier = (
     tier,
-    nextTier,
     operator,
-    precedence,
-    { leftAssociative, newlineAfterOperator = false },
+    { newlineAfterOperator = false } = {},
   ) => {
+    const binding = EXPRESSION[tier];
+    const nextTier = nextExpressionTier(tier, context.comparison);
+    const leftAssociative = binding.associativity === "left";
     addAnyTier(nextTier);
     const tail = `_${context.prefix}_${tier}_tail`;
     rules[tail] = ($) => {
@@ -455,9 +541,7 @@ const tieredExpressionRules = (context) => {
       rules[classTierName(context, classification, tier)] = ($) =>
         choice(
           classTier($, context, classification, nextTier),
-          leftAssociative
-            ? prec.left(precedence, operation($))
-            : prec(precedence, operation($)),
+          bind(binding, operation($)),
         );
     }
   };
@@ -467,8 +551,8 @@ const tieredExpressionRules = (context) => {
   rules[nonUnary("assignment")] = ($) =>
     choice(
       classTier($, context, "non_unary", "conditional"),
-      prec.right(
-        PRECEDENCE.assignment,
+      bind(
+        EXPRESSION.assignment,
         seq(
           field("left", $._lvalue),
           field(
@@ -504,21 +588,13 @@ const tieredExpressionRules = (context) => {
       );
   }
 
-  addBinaryTier(
-    "logical_or",
-    "logical_and",
-    ($) => $._logical_or_operator,
-    PRECEDENCE.logicalOr,
-    { leftAssociative: true, newlineAfterOperator: true },
-  );
+  addBinaryTier("logical_or", ($) => $._logical_or_operator, {
+    newlineAfterOperator: true,
+  });
 
-  addBinaryTier(
-    "logical_and",
-    "membership",
-    ($) => $._logical_and_operator,
-    PRECEDENCE.logicalAnd,
-    { leftAssociative: true, newlineAfterOperator: true },
-  );
+  addBinaryTier("logical_and", ($) => $._logical_and_operator, {
+    newlineAfterOperator: true,
+  });
 
   const membershipTail = `_${context.prefix}_membership_tail`;
   rules[membershipTail] = ($) =>
@@ -527,8 +603,8 @@ const tieredExpressionRules = (context) => {
     rules[classTierName(context, classification, "membership")] = ($) => {
       const members = [
         classTier($, context, classification, "match"),
-        prec.left(
-          PRECEDENCE.membership,
+        bind(
+          EXPRESSION.membership,
           seq(
             field(
               "left",
@@ -551,92 +627,28 @@ const tieredExpressionRules = (context) => {
     };
   }
 
-  const comparisonTier = context.comparison ? "comparison" : "concatenation";
-  addBinaryTier(
-    "match",
-    comparisonTier,
-    ($) => $._match_operator,
-    PRECEDENCE.match,
-    { leftAssociative: false },
-  );
+  addBinaryTier("match", ($) => $._match_operator);
 
   if (context.comparison) {
-    addBinaryTier(
-      "comparison",
-      "concatenation",
-      ($) => $._comparison_operator,
-      PRECEDENCE.comparison,
-      { leftAssociative: false },
-    );
+    addBinaryTier("comparison", ($) => $._comparison_operator);
   }
 
-  // A following postfix update still needs the targetless getline path.
-  if (context.prefix === "normal") {
-    const prefix = "getline_updated";
-    const name = (tier) => `_${prefix}_${tier}`;
-    const operand = (tier) => `${prefix}_${tier}_operand`;
-    const wrapped = ($, tier) => alias($[operand(tier)], $.non_unary_expr);
-    rules[name("update")] = ($) =>
-      seq(
-        field("operand", alias($.postfix_lvalue, $.lvalue)),
-        field("operator", choice($.incr, $.decr)),
-      );
-    rules[operand("update")] = ($) => prec(1, $[name("update")]);
-    rules[name("exponentiation")] = ($) =>
-      choice(
-        $[name("update")],
-        seq(field("left", wrapped($, "update")), $._normal_exponentiation_tail),
-      );
-    for (const [tier, next, precedence] of [
-      ["multiplicative", "exponentiation", PRECEDENCE.multiplicative],
-      ["additive", "multiplicative", PRECEDENCE.additive],
-    ]) {
-      rules[name(tier)] = ($) =>
-        choice(
-          $[name(next)],
-          prec.left(
-            precedence,
-            seq(field("left", wrapped($, tier)), $[`_normal_${tier}_tail`]),
-          ),
-        );
-      rules[operand(tier)] = ($) => prec(1, $[name(tier)]);
-    }
-  }
   const concatenationTail = `_${context.prefix}_concatenation_tail`;
+  // Reusing an arithmetic left operand here can bypass postfix lookahead.
+  const concatenationOperand = `${context.prefix}_concatenation_operand`;
+  rules[concatenationOperand] = ($) =>
+    prec(1, classTier($, context, "non_unary", "additive"));
   rules[concatenationTail] = ($) =>
-    field("right", aliasedClassTier($, context, "non_unary", "additive"));
+    field(
+      "right",
+      alias($[concatenationOperand], $[context.nonUnaryExpression]),
+    );
   for (const classification of CLASSIFICATIONS) {
     rules[classTierName(context, classification, "concatenation")] = ($) =>
       choice(
         classTier($, context, classification, "additive"),
-        ...(context.prefix === "normal"
-          ? [
-              prec.left(
-                PRECEDENCE.concatenation,
-                seq(
-                  field(
-                    "left",
-                    alias(
-                      classification === "unary"
-                        ? $.omitted_unary_get_operand
-                        : $.omitted_get_operand,
-                      $[
-                        classification === "unary"
-                          ? "unary_expr"
-                          : "non_unary_expr"
-                      ],
-                    ),
-                  ),
-                  field(
-                    "right",
-                    alias($.getline_updated_additive_operand, $.non_unary_expr),
-                  ),
-                ),
-              ),
-            ]
-          : []),
-        prec.left(
-          PRECEDENCE.concatenation,
+        bind(
+          EXPRESSION.concatenation,
           seq(
             field(
               "left",
@@ -648,33 +660,23 @@ const tieredExpressionRules = (context) => {
       );
   }
 
-  addBinaryTier(
-    "additive",
-    "multiplicative",
-    ($) => $._additive_operator,
-    PRECEDENCE.additive,
-    { leftAssociative: true },
-  );
+  addBinaryTier("additive", ($) => $._additive_operator);
 
-  addBinaryTier(
-    "multiplicative",
-    "unary",
-    ($) => $._multiplicative_operator,
-    PRECEDENCE.multiplicative,
-    { leftAssociative: true },
-  );
+  addBinaryTier("multiplicative", ($) => $._multiplicative_operator);
 
   return { ...rules, ...unaryExpressionRules(context) };
 };
 
 const normalExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.normal);
+const sourceExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.source);
 const printExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.print);
 const fieldExpressionRules = unaryExpressionRules(EXPRESSION_CONTEXT.field);
 
 const listElementTail = ($, element) =>
   seq(",", afterOptionalNewline($, element));
 
-export default grammar({
+// Build tooling imports EXPRESSION without installing the Tree-sitter DSL.
+export default globalThis.grammar?.({
   name: "posix_awk",
 
   externals: ($) => [
@@ -682,6 +684,11 @@ export default grammar({
     $._name_word,
     $._for_in_variable_word,
     $._getline_word,
+    $._getline_target_word,
+    $._getline_omitted_word,
+    $._getline_field_word,
+    $._getline_prefer_target_word,
+    $._getline_prefer_omitted_word,
     $._in_word,
     $._builtin_func_name_word,
     $._builtin_call_word,
@@ -714,8 +721,9 @@ export default grammar({
     $._ere_class_name,
     $._ere_dup_count,
     $.comment,
-    continuationMarker,
+    continuationMarker(),
     $._continuation_newline,
+    $._literal_break,
     $._stray_backslash,
     $._error_sentinel,
   ],
@@ -723,14 +731,16 @@ export default grammar({
   extras: ($) => [
     token(repeat1(choice(" ", "\t"))),
     $.comment,
-    continuationMarker,
+    continuationMarker(),
     $._continuation_newline,
+    // Zero-width; the scanner emits it where a raw newline ends an
+    // unterminated string or ERE so the mode never leaks past the line.
+    $._literal_break,
   ],
 
   inline: ($) => [
     $._lvalue,
-    $._simple_get,
-    $._direct_input_function,
+    $._field_simple_get,
     $._item,
     // A recovered tail can retain errors when reused after its prefix changes.
     $._normal_conditional_tail,
@@ -741,13 +751,18 @@ export default grammar({
     $._normal_unary_assignment_expr,
     $._normal_unary_update_expr,
     $._print_unary_assignment_expr,
+    $._source_non_unary_update_expr,
+    $._source_unary_assignment_expr,
+    $._source_unary_update_expr,
+    $._source_conditional_tail,
   ],
 
   conflicts: ($) => [
-    [$.postfix_omitted_get, $.postfix_simple_get],
-    [$.postfix_omitted_get, $.nonpostfix_simple_get, $.postfix_simple_get],
     // The final item joins item_list only after its terminator is known.
     [$.item_list, $._item_list],
+    // Only source-dependent target choices retain a fallback interpretation.
+    [$.simple_get],
+    [$.source_simple_get],
   ],
 
   rules: {
@@ -992,10 +1007,22 @@ export default grammar({
     _prefix_update_expr: ($) =>
       seq(
         field("operator", choice($.incr, $.decr)),
-        field("operand", $._lvalue),
+        field("operand", choice($._lvalue, alias($.prefix_field, $.lvalue))),
       ),
 
     ...normalExpressionRules,
+
+    source_expr: ($) =>
+      choice(
+        alias($.source_full_unary_expr, $.unary_expr),
+        alias($.source_full_non_unary_expr, $.non_unary_expr),
+      ),
+
+    source_full_unary_expr: ($) => $._source_unary_assignment_expr,
+
+    source_full_non_unary_expr: ($) => $._source_non_unary_assignment_expr,
+
+    ...sourceExpressionRules,
 
     ...printExpressionRules,
 
@@ -1009,16 +1036,16 @@ export default grammar({
       ),
 
     normal_unary_field_expr: ($) =>
-      prec(PRECEDENCE.field, $._field_unary_unary_expr),
+      prec(EXPRESSION.field.precedence, $._field_unary_unary_expr),
 
     nonpostfix_non_unary_field_expr: ($) =>
       prec(
-        PRECEDENCE.field,
+        EXPRESSION.field.precedence,
         choice(
           $._field_not_expr,
           $._prefix_update_expr,
           alias($.nonpostfix_lvalue, $.lvalue),
-          alias($.nonpostfix_direct_input_function, $.non_unary_input_function),
+          alias($.nonpostfix_field_input_function, $.non_unary_input_function),
         ),
       ),
 
@@ -1058,69 +1085,156 @@ export default grammar({
 
     postfix_non_unary_field_expr: ($) =>
       prec(
-        PRECEDENCE.field,
+        EXPRESSION.field.precedence,
         nonUnaryAtom(
           $,
           {
             ...EXPRESSION_CONTEXT.field,
             input: ($) =>
-              alias(
-                $.postfix_direct_input_function,
-                $.non_unary_input_function,
-              ),
+              alias($.postfix_field_input_function, $.non_unary_input_function),
           },
           alias($.postfix_lvalue, $.lvalue),
         ),
       ),
 
-    _direct_input_function: ($) =>
-      choice(
-        alias($.postfix_direct_input_function, $.non_unary_input_function),
-        alias($.nonpostfix_direct_input_function, $.non_unary_input_function),
+    // The operand of a prefix update takes no postfix update, so a getline
+    // directly under its `$` keeps the scanner's reading of the next lvalue.
+    prefix_field: ($) =>
+      seq(
+        field("operator", "$"),
+        field("operand", alias($.prefix_field_expr, $.expr)),
       ),
 
-    nonpostfix_direct_input_function: ($) =>
-      directInputFunction($, alias($.nonpostfix_simple_get, $.simple_get)),
+    prefix_field_expr: ($) =>
+      alias($.prefix_non_unary_field_expr, $.non_unary_expr),
 
-    postfix_direct_input_function: ($) =>
-      directInputFunction($, alias($.postfix_simple_get, $.simple_get)),
-
-    piped_input_function: ($) => pipedInput($, $.non_unary_expr, $._simple_get),
-
-    unary_input_function: ($) => pipedInput($, $.unary_expr, $._simple_get),
-
-    _simple_get: ($) =>
-      choice(
-        alias($.postfix_simple_get, $.simple_get),
-        alias($.nonpostfix_simple_get, $.simple_get),
+    prefix_non_unary_field_expr: ($) =>
+      prec(
+        EXPRESSION.field.precedence,
+        choice(
+          alias($.direct_input_function, $.non_unary_input_function),
+          alias($.prefix_field, $.lvalue),
+        ),
       ),
 
-    nonpostfix_simple_get: ($) =>
-      getWithTarget($, alias($.nonpostfix_lvalue, $.lvalue)),
-
-    postfix_simple_get: ($) =>
-      choice(
-        $.getline_keyword,
-        getWithTarget($, alias($.postfix_lvalue, $.lvalue)),
+    // Only this field takes the update that follows a getline source.
+    redirected_field: ($) =>
+      seq(
+        field("operator", "$"),
+        field("operand", alias($.redirected_field_expr, $.expr)),
       ),
 
-    omitted_get_operand: ($) =>
-      alias($.omitted_get_input, $.non_unary_input_function),
+    redirected_field_expr: ($) =>
+      alias($.redirected_non_unary_field_expr, $.non_unary_expr),
 
-    omitted_get_input: ($) =>
-      choice(
-        field("get", omittedGet($)),
-        pipedInput($, $.non_unary_expr, omittedGet($)),
+    redirected_non_unary_field_expr: ($) =>
+      prec(
+        EXPRESSION.field.precedence,
+        choice(
+          alias($.redirected_field_input_function, $.non_unary_input_function),
+          alias($.redirected_field, $.lvalue),
+        ),
       ),
 
-    omitted_unary_get_operand: ($) =>
-      alias($.omitted_unary_get_input, $.unary_input_function),
+    // The field ends in a getline source, its own or that of its target, and
+    // the innermost such field takes the update.
+    redirected_field_input_function: ($) =>
+      choice(
+        prec(1, $._redirected_field_input),
+        field("get", alias($.redirected_field_simple_get, $.simple_get)),
+      ),
 
-    omitted_unary_get_input: ($) => pipedInput($, $.unary_expr, omittedGet($)),
+    redirected_field_simple_get: ($) =>
+      seq(
+        alias($.field_getline_keyword, $.getline_keyword),
+        field("target", alias($.redirected_field, $.lvalue)),
+      ),
 
-    postfix_omitted_get: ($) => prec(1, $.getline_keyword),
+    _redirected_field_input: ($) =>
+      redirectedInput($, $._field_simple_get, alias($.source_expr, $.expr)),
+
+    nonpostfix_field_input_function: ($) =>
+      choice(
+        field("get", alias($.nonpostfix_field_simple_get, $.simple_get)),
+        $._redirected_field_input,
+      ),
+
+    postfix_field_input_function: ($) =>
+      field("get", alias($.postfix_field_simple_get, $.simple_get)),
+
+    _field_simple_get: ($) =>
+      choice(
+        alias($.postfix_field_simple_get, $.simple_get),
+        alias($.nonpostfix_field_simple_get, $.simple_get),
+      ),
+
+    nonpostfix_field_simple_get: ($) =>
+      seq(
+        alias($.field_getline_keyword, $.getline_keyword),
+        field("target", alias($.nonpostfix_lvalue, $.lvalue)),
+      ),
+
+    // A postfix update after the target belongs to the field, so a getline
+    // directly under `$` always takes a following lvalue.
+    postfix_field_simple_get: ($) =>
+      choice(
+        prec(-1, alias($.field_getline_keyword, $.getline_keyword)),
+        seq(
+          alias($.field_getline_keyword, $.getline_keyword),
+          field("target", alias($.postfix_lvalue, $.lvalue)),
+        ),
+      ),
+
+    direct_input_function: ($) =>
+      choice(field("get", $.simple_get), redirectedInput($, $.simple_get)),
+
+    source_direct_input_function: ($) =>
+      choice(
+        field("get", alias($.source_simple_get, $.simple_get)),
+        redirectedInput(
+          $,
+          alias($.source_simple_get, $.simple_get),
+          alias($.source_expr, $.expr),
+        ),
+      ),
+
+    source_piped_input_function: ($) =>
+      pipedInput(
+        $,
+        alias($.source_full_non_unary_expr, $.non_unary_expr),
+        alias($.source_simple_get, $.simple_get),
+      ),
+
+    source_unary_input_function: ($) =>
+      pipedInput(
+        $,
+        alias($.source_full_unary_expr, $.unary_expr),
+        alias($.source_simple_get, $.simple_get),
+      ),
+
+    piped_input_function: ($) => pipedInput($, $.non_unary_expr, $.simple_get),
+
+    unary_input_function: ($) => pipedInput($, $.unary_expr, $.simple_get),
+
+    simple_get: ($) => simpleGet($),
+
+    source_simple_get: ($) => simpleGet($, true),
+
+    trailing_incr: () => "++",
+
+    trailing_decr: () => "--",
 
     getline_keyword: ($) => $._getline_word,
+
+    target_getline_keyword: ($) => $._getline_target_word,
+
+    omitted_getline_keyword: ($) => $._getline_omitted_word,
+
+    field_getline_keyword: ($) => $._getline_field_word,
+
+    preferred_target_getline_keyword: ($) => $._getline_prefer_target_word,
+
+    preferred_omitted_getline_keyword: ($) => $._getline_prefer_omitted_word,
 
     in_keyword: ($) => $._in_word,
 

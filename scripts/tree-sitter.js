@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -11,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { EXPRESSION } from "../grammar.js";
 
 const root = resolve(import.meta.dirname, "..");
 const packageName = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
@@ -57,7 +57,11 @@ function treeSitterExecutable() {
       process.platform === "win32" ? "tree-sitter.exe" : "tree-sitter",
     );
   } catch (error) {
-    if (error.code === "ERR_MODULE_NOT_FOUND") {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ERR_MODULE_NOT_FOUND"
+    ) {
       throw new Error(missingCliMessage, { cause: error });
     }
     throw error;
@@ -160,6 +164,52 @@ function runChecked(runner, arguments_, options = { stdio: "inherit" }) {
   return resultStatus(runner.run(arguments_, options));
 }
 
+function scannerExpressionRules(source) {
+  const opening = "// BEGIN generated expression rules from grammar.js.";
+  const closing = "// END generated expression rules.";
+  const start = source.indexOf(opening);
+  const end = source.indexOf(closing, start + opening.length);
+  if (start < 0 || end < 0) {
+    throw new Error("src/scanner.c is missing its generated expression block.");
+  }
+  const symbol = (name) => `EXPR_${name.toUpperCase()}`;
+  const entries = Object.entries(EXPRESSION);
+  const generated = `${opening}
+enum ExpressionPrecedence {
+${entries.map(([name, { precedence }]) => `  ${symbol(name)} = ${precedence},`).join("\n")}
+};
+
+static int expression_right_precedence(int precedence) {
+  switch (precedence) {
+${entries
+  .filter(([, rule]) => rule.associativity === "right")
+  .map(
+    ([name, rule]) =>
+      `  case ${symbol(name)}:\n    return ${symbol(rule.rightOperand ?? name)};`,
+  )
+  .join("\n")}
+  default:
+    return precedence + 1;
+  }
+}
+
+static bool expression_non_associative(int precedence) {
+  switch (precedence) {
+${entries
+  .filter(([, rule]) => rule.associativity === "none")
+  .map(([name]) => `  case ${symbol(name)}:`)
+  .join("\n")}
+    return true;
+  default:
+    return false;
+  }
+}
+${closing}`;
+  return (
+    source.slice(0, start) + generated + source.slice(end + closing.length)
+  );
+}
+
 function generateParsers(outputRoot = root) {
   for (const grammar of grammars) {
     const output = join(outputRoot, grammar.path, "src");
@@ -180,6 +230,14 @@ function generateParsers(outputRoot = root) {
     );
     if (status !== 0) {
       return status;
+    }
+    const scanner = readFileSync(
+      join(root, grammar.path, "src", "scanner.c"),
+      "utf8",
+    );
+    const generated = scannerExpressionRules(scanner);
+    if (outputRoot !== root || generated !== scanner) {
+      writeFileSync(join(output, "scanner.c"), generated);
     }
   }
   return 0;
@@ -223,7 +281,6 @@ function testCorpus(arguments_) {
     copyFiles(
       [
         "package.json",
-        ...(existsSync(join(root, "common")) ? ["common"] : []),
         ...grammars.flatMap(({ path, externalFiles, highlights }) => [
           join(path, "grammar.js"),
           join(path, "src"),
@@ -318,11 +375,15 @@ function main(arguments_) {
   }
 }
 
+if (import.meta.main === undefined) {
+  throw new Error("Node.js 24.21.0 or later is required.");
+}
+
 if (import.meta.main) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    console.error(error.message);
+    console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
 }

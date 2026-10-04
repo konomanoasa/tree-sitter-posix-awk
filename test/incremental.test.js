@@ -1489,28 +1489,103 @@ continuationHistoryTest(
   ],
 );
 
-for (const [name, before, after, valid] of [
-  ["keyword", "BE", "GIN {}\n", true],
-  ["name", "BEGIN { print va", "lue }\n", true],
-  ["built-in name", "BEGIN { print len", "gth(x) }\n", true],
-  ["assignment operator", "BEGIN { x +", "= 1 }\n", false],
-  ["unary field assignment name", "BEGIN { $-na", "me = value }\n", false],
-  [
-    "unary field assignment operator",
-    "BEGIN { print $!array[index] +",
-    "= value }\n",
-    false,
-  ],
-  ["exponent", "BEGIN { print 1e+", "2 }\n", true],
-  ["number suffix", "BEGIN { print 1.0", "F }\n", true],
-  ["string", 'BEGIN { print "a', 'b" }\n', false],
-  ["ERE bracket", "BEGIN { print /[a", "-z]/ }\n", false],
-  ["string escape", 'BEGIN { print "\\', 'n" }\n', false],
-  ["octal escape", 'BEGIN { print "\\1', '23" }\n', false],
-  ["ERE escaped delimiter", "BEGIN { print /a\\", "/b/ }\n", false],
-  ["ERE class name", "BEGIN { print /[[:al", "pha:]]/ }\n", false],
-  ["ERE duplication count", "BEGIN { print /a{1", "2}/ }\n", false],
-  ["ERE compound delimiter", "BEGIN { print /[[", ":alpha:]]/ }\n", false],
+for (const { name, before, after, valid } of [
+  {
+    name: "keyword",
+    before: "BE",
+    after: "GIN {}\n",
+    valid: true,
+  },
+  {
+    name: "name",
+    before: "BEGIN { print va",
+    after: "lue }\n",
+    valid: true,
+  },
+  {
+    name: "built-in name",
+    before: "BEGIN { print len",
+    after: "gth(x) }\n",
+    valid: true,
+  },
+  {
+    name: "assignment operator",
+    before: "BEGIN { x +",
+    after: "= 1 }\n",
+    valid: false,
+  },
+  {
+    name: "unary field assignment name",
+    before: "BEGIN { $-na",
+    after: "me = value }\n",
+    valid: false,
+  },
+  {
+    name: "unary field assignment operator",
+    before: "BEGIN { print $!array[index] +",
+    after: "= value }\n",
+    valid: false,
+  },
+  {
+    name: "exponent",
+    before: "BEGIN { print 1e+",
+    after: "2 }\n",
+    valid: true,
+  },
+  {
+    name: "number suffix",
+    before: "BEGIN { print 1.0",
+    after: "F }\n",
+    valid: true,
+  },
+  {
+    name: "string",
+    before: 'BEGIN { print "a',
+    after: 'b" }\n',
+    valid: false,
+  },
+  {
+    name: "ERE bracket",
+    before: "BEGIN { print /[a",
+    after: "-z]/ }\n",
+    valid: false,
+  },
+  {
+    name: "string escape",
+    before: 'BEGIN { print "\\',
+    after: 'n" }\n',
+    valid: false,
+  },
+  {
+    name: "octal escape",
+    before: 'BEGIN { print "\\1',
+    after: '23" }\n',
+    valid: false,
+  },
+  {
+    name: "ERE escaped delimiter",
+    before: "BEGIN { print /a\\",
+    after: "/b/ }\n",
+    valid: false,
+  },
+  {
+    name: "ERE class name",
+    before: "BEGIN { print /[[:al",
+    after: "pha:]]/ }\n",
+    valid: false,
+  },
+  {
+    name: "ERE duplication count",
+    before: "BEGIN { print /a{1",
+    after: "2}/ }\n",
+    valid: false,
+  },
+  {
+    name: "ERE compound delimiter",
+    before: "BEGIN { print /[[",
+    after: ":alpha:]]/ }\n",
+    valid: false,
+  },
 ]) {
   const initial = before + after;
   const split = `${before}\\\n${after}`;

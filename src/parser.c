@@ -66949,7 +66949,7 @@ TS_PUBLIC const TSLanguage *tree_sitter_posix_awk(void) {
     .max_reserved_word_set_size = 19,
     .metadata = {
       .major_version = 0,
-      .minor_version = 18,
+      .minor_version = 19,
       .patch_version = 0,
     },
   };

@@ -107,6 +107,28 @@ const LEAF_CASES: &[LeafCase] = &[
 
 const ERE_CASES: &[EreCase] = &[
   EreCase {
+    name: "an empty ERE retains only its delimiter ranges",
+    source: "//",
+    leaves: &[("/", 0, 1), ("/", 1, 2)],
+  },
+  EreCase {
+    name: "empty groups retain delimiters within nested alternation and repetition",
+    source: "/(()|())*?/",
+    leaves: &[
+      ("/", 0, 1),
+      ("(", 1, 2),
+      ("(", 2, 3),
+      (")", 3, 4),
+      ("|", 4, 5),
+      ("(", 5, 6),
+      (")", 6, 7),
+      (")", 7, 8),
+      ("*", 8, 9),
+      ("?", 9, 10),
+      ("/", 10, 11),
+    ],
+  },
+  EreCase {
     name: "ordinary characters and complete escapes retain their source ranges",
     source: r"/a é)}.\n\/\\\141\q(a*?)/",
     leaves: &[
@@ -402,6 +424,71 @@ fn ere_leaves_partition_complete_source_spellings() {
       .unwrap();
     assert_eq!(ere.kind(), "ere", "{}", case.name);
     assert_leaf_partition(ere, case.leaves, case.name);
+  }
+}
+
+#[test]
+fn empty_ere_and_groups_own_only_opening_and_closing_delimiters() {
+  for (kind, name, source, range) in [
+    ("ere", "pattern at EOF", "//", 0..2),
+    ("ere", "print expression", "BEGIN { print // }", 14..16),
+    ("ere", "match operand", "$0 ~ //", 5..7),
+    (
+      "ere",
+      "builtin argument",
+      "BEGIN { sub(//, \"x\") }",
+      12..14,
+    ),
+    ("ere", "getline source", "{ getline < // }", 12..14),
+    ("ere", "division operand", "BEGIN { print 1 / // }", 18..20),
+    (
+      "ere",
+      "following division",
+      "BEGIN { print // / 2 }",
+      14..16,
+    ),
+    ("ere_expression", "empty group", "/()/", 1..3),
+    ("ere_expression", "nested group", "/(())/", 2..4),
+    ("ere_expression", "repeated group", "/()*?/", 1..3),
+    ("ere_expression", "concatenated group", "/a()b/", 2..4),
+    ("ere_expression", "left alternation group", "/()|a/", 1..3),
+    (
+      "ere_expression",
+      "right alternation group",
+      "/(a|())/",
+      4..6,
+    ),
+    (
+      "ere_expression",
+      "group before a literal closer",
+      "/())/",
+      1..3,
+    ),
+  ] {
+    let tree = parse(source, name);
+    let owner = tree
+      .root_node()
+      .descendant_for_byte_range(range.start, range.end)
+      .unwrap();
+    assert_eq!(owner.kind(), kind, "{name}");
+    assert_eq!(owner.byte_range(), range, "{name}");
+    assert_eq!(owner.child_count(), 2, "{name}");
+    assert_eq!(owner.named_child_count(), 0, "{name}");
+    assert!(owner.child_by_field_name("expression").is_none(), "{name}");
+    let (opening, closing) = if kind == "ere" {
+      ("/", "/")
+    } else {
+      ("(", ")")
+    };
+    for (field, token, expected) in [
+      ("opening", opening, range.start..range.start + 1),
+      ("closing", closing, range.end - 1..range.end),
+    ] {
+      let delimiter = owner.child_by_field_name(field).unwrap();
+      assert_eq!(delimiter.kind(), token, "{name}: {field}");
+      assert_eq!(delimiter.byte_range(), expected, "{name}: {field}");
+      assert!(!delimiter.is_named(), "{name}: {field}");
+    }
   }
 }
 

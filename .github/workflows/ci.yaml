@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24.21.0
@@ -33,24 +33,35 @@ jobs:
             printf 'CFLAGS=-std=c17 -isysroot %s\n' "$(xcrun --sdk macosx --show-sdk-path)"
           } >>"$GITHUB_ENV"
       - run: npm ci
+      - name: Set up Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Set up Rust check tools
+        if: runner.os == 'macOS'
+        shell: sh
+        run: rustup component add --toolchain stable clippy rustfmt
+      - name: Fetch Rust dependencies
+        run: cargo fetch --locked
+      - name: Check sources
+        if: runner.os == 'macOS'
+        shell: sh
+        run: |
+          npm run check
+          node scripts/check-generated.js
+          node scripts/check-c.js
+          cargo +stable clippy --locked --all-targets -- -D warnings
+          cargo +stable fmt --all -- --check
       - uses: tree-sitter/parser-test-action@v3
         with:
           generate: false
-          test-parser-cmd: ${{ runner.os == 'macOS' && 'npm run check' || 'npm test' }}
+          test-parser-cmd: npm test
           test-rust: true
           rust-version: stable
-      - name: Check Rust bindings
-        shell: bash
-        run: |
-          rustup component add clippy rustfmt --toolchain stable
-          cargo +stable clippy --locked --all-targets -- -D warnings
-          cargo +stable fmt --all -- --check
-      - name: Build parsers
-        if: runner.os == 'macOS'
-        shell: sh
-        run: |
-          tree-sitter build --output posix_awk.so .
       - name: Validate queries
         if: runner.os == 'macOS'
         shell: sh
-        run: ts_query_ls check --format queries/
+        run: |
+          npm run build
+          npm run check:queries

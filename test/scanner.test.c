@@ -194,73 +194,13 @@ static int test_source_token_ranges(void) {
     enum TokenType token;
     size_t expected_token_end;
   } cases[] = {
-    {"keyword spelling", "END", END_KEYWORD, 3},
     {"getline spelling excludes its target", "getline value", GETLINE_WORD, 7},
-    {"name spelling", "value", NAME_WORD, 5},
-    {"built-in spelling", "length", BUILTIN_FUNC_NAME_WORD, 6},
     {"function name excludes parenthesis", "follow(", FUNC_NAME_WORD, 6},
-    {"continuation separates a name from its parenthesis",
-      "follow\\\n(",
-      NAME_WORD,
-      6},
-    {"built-in call allows blanks before the parenthesis",
-      "length (",
-      BUILTIN_CALL_WORD,
-      6},
-    {"built-in call allows a continuation before the parenthesis",
-      "length\\\n(",
-      BUILTIN_CALL_WORD,
-      6},
-    {"bare built-in before a name", "length x", BUILTIN_FUNC_NAME_WORD, 6},
-    {"for-in variable", "k in a)", FOR_IN_VARIABLE_WORD, 1},
-    {"integer spelling", "123", NUMBER, 3},
-    {"fraction spelling", ".5", NUMBER, 2},
-    {"exponent spelling", "1.5e+2", NUMBER, 6},
-    {"fraction with lowercase float suffix", "1.0f", NUMBER, 4},
-    {"leading fraction with uppercase float suffix", ".5F", NUMBER, 3},
-    {"exponent with lowercase long double suffix", "1e2l", NUMBER, 4},
-    {"trailing period with uppercase long double suffix", "1.L", NUMBER, 3},
-    {"fraction and exponent with float suffix", "1.5e+2F", NUMBER, 7},
-    {"fraction consumes only one suffix character", "1.5ff", NUMBER, 4},
-    {"exponent consumes only one suffix character", "1e2LL", NUMBER, 4},
-    {"integer does not consume a floating suffix", "1f", NUMBER, 1},
-    {"incomplete exponent keeps integer", "1e+", NUMBER, 1},
-    {"incomplete exponent and float suffix keep integer", "1ef", NUMBER, 1},
-    {"incomplete signed exponent and float suffix keep fraction",
-      "1.e+f",
-      NUMBER,
-      2},
-    {"incomplete exponent and long double suffix keep fraction",
-      ".5eL",
-      NUMBER,
-      2},
-    {"addition assignment spelling", "+=", ADD_ASSIGN_OPERATOR, 2},
-    {"logical-or spelling", "||", OR_OPERATOR, 2},
     {"single plus excludes following continuation", "+\\\nx", PLUS_OPERATOR, 1},
     {"single minus excludes following continuation",
       "-\\\nx",
       MINUS_OPERATOR,
       1},
-    {"single star excludes following continuation", "*\\\nx", STAR_OPERATOR, 1},
-    {"single percent excludes following continuation",
-      "%\\\nx",
-      PERCENT_OPERATOR,
-      1},
-    {"single caret excludes following continuation",
-      "^\\\nx",
-      CARET_OPERATOR,
-      1},
-    {"single bang excludes following continuation", "!\\\nx", BANG_OPERATOR, 1},
-    {"single less excludes following continuation", "<\\\nx", LESS_OPERATOR, 1},
-    {"single greater excludes following continuation",
-      ">\\\nx",
-      GREATER_OPERATOR,
-      1},
-    {"single equal excludes following continuation",
-      "=\\\nx",
-      EQUAL_OPERATOR,
-      1},
-    {"single pipe excludes following continuation", "|\\\nx", PIPE_OPERATOR, 1},
   };
 
   int failed = 0;
@@ -277,165 +217,28 @@ static int test_source_token_ranges(void) {
     );
   }
 
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-  valid_symbols[NAME_WORD] = true;
-  valid_symbols[FUNC_NAME_WORD] = true;
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
   failed |= expect_scan_result(
-    "function name wins over plain name",
+    "a function name cannot fall back to an ordinary name",
     "follow(",
     valid_symbols,
     true,
     FUNC_NAME_WORD,
     6
   );
-
-  valid_symbols[NAME_WORD] = false;
   failed |= expect_scan_result(
-    "plain name is not a function name",
-    "follow",
-    valid_symbols,
-    false,
-    FUNC_NAME_WORD,
-    0
-  );
-
-  valid_symbols[FUNC_NAME_WORD] = false;
-  valid_symbols[NAME_WORD] = true;
-  failed |= expect_scan_result(
-    "reserved word is not a name",
-    "END",
-    valid_symbols,
-    false,
-    NAME_WORD,
-    0
-  );
-
-  failed |= expect_scan_result(
-    "for-in shape stays a name where the parser cannot take a variable",
-    "k in a)",
+    "getline cannot fall back to an ordinary name",
+    "getline",
     valid_symbols,
     true,
-    NAME_WORD,
-    1
+    GETLINE_WORD,
+    7
   );
 
-  valid_symbols[FOR_IN_VARIABLE_WORD] = true;
-  failed |= expect_scan_result(
-    "classic for keeps the name",
-    "k in a;",
-    valid_symbols,
-    true,
-    NAME_WORD,
-    1
-  );
   return failed;
 }
 
-static int test_continuations_separate_token_spellings(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    enum TokenType expected_symbol;
-    size_t expected_token_end;
-  } cases[] = {
-    {"continuation splits a keyword into names", "BE\\\nGIN", NAME_WORD, 2},
-    {"continuation ends an identifier", "value\\\n_tail", NAME_WORD, 5},
-    {"repeated continuations do not join a builtin",
-      "len\\\n\\\ngth",
-      NAME_WORD,
-      3},
-    {"continuation prevents user call adjacency", "follow\\\n(", NAME_WORD, 6},
-    {"builtin calls permit continuation layout",
-      "length\\\n(",
-      BUILTIN_CALL_WORD,
-      6},
-    {"keyword before continuation stays reserved", "END\\\n;", END_KEYWORD, 3},
-    {"continuation ends an integer", "1\\\n2", NUMBER, 1},
-    {"continuation before decimal point ends an integer", "1\\\n.", NUMBER, 1},
-    {"continuation after decimal point ends a fraction", "1.\\\n5", NUMBER, 2},
-    {"continuation before exponent ends an integer", "1\\\ne2", NUMBER, 1},
-    {"continuation prevents exponent completion", "1e\\\n2", NUMBER, 1},
-    {"continuation prevents signed exponent completion", "1e+\\\n2", NUMBER, 1},
-    {"continuation separates a fractional suffix", "1.0\\\nF", NUMBER, 3},
-    {"continuation separates an exponent suffix", "1e2\\\nl", NUMBER, 3},
-    {"backslash does not join integer digits", "1\\2", NUMBER, 1},
-    {"backslash does not complete an exponent", "1e\\2", NUMBER, 1},
-    {"backslash does not attach a suffix", "1.0\\F", NUMBER, 3},
-  };
-  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [BEGIN_KEYWORD] = true,
-    [END_KEYWORD] = true,
-    [NAME_WORD] = true,
-    [FUNC_NAME_WORD] = true,
-    [BUILTIN_FUNC_NAME_WORD] = true,
-    [BUILTIN_CALL_WORD] = true,
-    [NUMBER] = true,
-  };
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      true,
-      cases[i].expected_symbol,
-      cases[i].expected_token_end
-    );
-  }
-  failed |= expect_scan_result(
-    "continuation cannot complete a leading fraction",
-    ".\\\n5",
-    valid_symbols,
-    false,
-    NUMBER,
-    0
-  );
-  return failed;
-}
-
-static void test_continuation_token_sequences(void) {
-  static const struct {
-    const char *source;
-    enum TokenType tokens[4];
-  } cases[] = {
-    {"a\\\nb",
-      {NAME_WORD, CONTINUATION_BACKSLASH, CONTINUATION_NEWLINE, NAME_WORD}},
-    {"1\\\n2", {NUMBER, CONTINUATION_BACKSLASH, CONTINUATION_NEWLINE, NUMBER}},
-    {"+\\\n=",
-      {PLUS_OPERATOR,
-        CONTINUATION_BACKSLASH,
-        CONTINUATION_NEWLINE,
-        EQUAL_OPERATOR}},
-  };
-  const size_t expected_starts[] = {0, 1, 2, 3};
-  const size_t expected_ends[] = {1, 2, 3, 4};
-  const LexicalMode expected_modes[] = {
-    LEXICAL_MODE_OUTSIDE,
-    LEXICAL_MODE_CONTINUED_NEWLINE,
-    LEXICAL_MODE_OUTSIDE,
-    LEXICAL_MODE_OUTSIDE,
-  };
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    MockLexer mock = make_mock_lexer(cases[i].source);
-    ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
-    for (size_t part = 0; part < ARRAY_LENGTH(cases[i].tokens); part++) {
-      bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-      valid_symbols[cases[i].tokens[part]] = true;
-      assert(tree_sitter_posix_awk_external_scanner_scan(
-        &state,
-        &mock.lexer,
-        valid_symbols
-      ));
-      assert(mock.lexer.result_symbol == cases[i].tokens[part]);
-      assert(mock.token_start == expected_starts[part]);
-      assert(mock.token_end == expected_ends[part]);
-      assert(state.mode == expected_modes[part]);
-      resume_mock_lexer(&mock);
-    }
-  }
-}
-
-static int test_composite_operator_boundaries(void) {
+static int test_update_operator_boundaries(void) {
   static const struct {
     const char *name;
     const char *source;
@@ -443,50 +246,14 @@ static int test_composite_operator_boundaries(void) {
     enum TokenType composite;
     enum TokenType single;
   } cases[] = {
-    {"division assignment",
-      "/=",
-      "/\\\n=",
-      DIV_ASSIGN_OPERATOR,
-      DIVISION_SLASH},
-    {"addition assignment", "+=", "+\\\n=", ADD_ASSIGN_OPERATOR, PLUS_OPERATOR},
-    {"subtraction assignment",
-      "-=",
-      "-\\\n=",
-      SUB_ASSIGN_OPERATOR,
-      MINUS_OPERATOR},
-    {"multiplication assignment",
-      "*=",
-      "*\\\n=",
-      MUL_ASSIGN_OPERATOR,
-      STAR_OPERATOR},
-    {"remainder assignment",
-      "%=",
-      "%\\\n=",
-      MOD_ASSIGN_OPERATOR,
-      PERCENT_OPERATOR},
-    {"exponent assignment",
-      "^=",
-      "^\\\n=",
-      POW_ASSIGN_OPERATOR,
-      CARET_OPERATOR},
-    {"logical or", "||", "|\\\n|", OR_OPERATOR, PIPE_OPERATOR},
-    {"logical and", "&&", "&\\\n&", AND_OPERATOR, ERROR_SENTINEL},
-    {"no match", "!~", "!\\\n~", NO_MATCH_OPERATOR, BANG_OPERATOR},
-    {"equality", "==", "=\\\n=", EQ_OPERATOR, EQUAL_OPERATOR},
-    {"less or equal", "<=", "<\\\n=", LE_OPERATOR, LESS_OPERATOR},
-    {"greater or equal", ">=", ">\\\n=", GE_OPERATOR, GREATER_OPERATOR},
-    {"inequality", "!=", "!\\\n=", NE_OPERATOR, BANG_OPERATOR},
     {"increment", "++x", "+\\\n+x", INCR_OPERATOR, PLUS_OPERATOR},
     {"decrement", "--x", "-\\\n-x", DECR_OPERATOR, MINUS_OPERATOR},
-    {"append", ">>", ">\\\n>", APPEND_OPERATOR, GREATER_OPERATOR},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
     bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    const bool has_single = cases[i].single != ERROR_SENTINEL;
     valid_symbols[cases[i].composite] = true;
-    if (has_single)
-      valid_symbols[cases[i].single] = true;
+    valid_symbols[cases[i].single] = true;
     failed |= expect_scan_result(
       cases[i].name,
       cases[i].source,
@@ -499,7 +266,7 @@ static int test_composite_operator_boundaries(void) {
       cases[i].name,
       cases[i].separated_source,
       valid_symbols,
-      has_single,
+      true,
       cases[i].single,
       1
     );
@@ -777,7 +544,7 @@ static void test_pending_continuation_rejects_changed_boundaries(void) {
     ));
     assert(state.mode == LEXICAL_MODE_CONTINUED_NEWLINE);
 
-    MockLexer restored = make_mock_lexer("\nname");
+    MockLexer restored = make_mock_lexer("\nname(");
     assert(tree_sitter_posix_awk_external_scanner_scan(
       &state,
       &restored.lexer,
@@ -788,13 +555,13 @@ static void test_pending_continuation_rejects_changed_boundaries(void) {
     assert(restored.token_end == 1);
     assert(state.mode == LEXICAL_MODE_OUTSIDE);
     resume_mock_lexer(&restored);
-    const bool name_valid[TOKEN_TYPE_COUNT] = {[NAME_WORD] = true};
+    const bool name_valid[TOKEN_TYPE_COUNT] = {[FUNC_NAME_WORD] = true};
     assert(tree_sitter_posix_awk_external_scanner_scan(
       &state,
       &restored.lexer,
       name_valid
     ));
-    assert(restored.lexer.result_symbol == NAME_WORD);
+    assert(restored.lexer.result_symbol == FUNC_NAME_WORD);
     assert(restored.token_start == 1);
     assert(restored.token_end == 5);
   }
@@ -809,36 +576,6 @@ static int test_literal_classification(void) {
     size_t end;
     bool accepted;
   } cases[] = {
-    {"string content ends before its quote",
-      "text\"",
-      LEXICAL_MODE_STRING,
-      STRING_CONTENT,
-      4,
-      true},
-    {"string content ends before an escape",
-      "text\\n",
-      LEXICAL_MODE_STRING,
-      STRING_CONTENT,
-      4,
-      true},
-    {"string content cannot consume a newline",
-      "text\n",
-      LEXICAL_MODE_STRING,
-      STRING_CONTENT,
-      4,
-      true},
-    {"empty content before a quote is not a token",
-      "\"",
-      LEXICAL_MODE_STRING,
-      STRING_CONTENT,
-      0,
-      false},
-    {"hash in string content is not a comment",
-      "# text\"",
-      LEXICAL_MODE_STRING,
-      STRING_CONTENT,
-      6,
-      true},
     {"backslash pair ends before the newline",
       "\\\\\nn",
       LEXICAL_MODE_ERE_BODY,
@@ -894,24 +631,6 @@ static int test_literal_classification(void) {
       STRING_ESCAPE,
       3,
       true},
-    {"class name includes digits after its initial letter",
-      "al1:",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_CLASS_NAME,
-      3,
-      true},
-    {"class name cannot begin with a digit",
-      "1alpha:",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_CLASS_NAME,
-      0,
-      false},
-    {"ERE count stops before continuation and comma",
-      "12\\\n,",
-      LEXICAL_MODE_ERE_BODY,
-      ERE_DUP_COUNT,
-      2,
-      true},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
@@ -933,106 +652,18 @@ static int test_literal_classification(void) {
 }
 
 static int test_blank_skip_token_ranges(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    enum TokenType token;
-    size_t expected_token_start;
-    size_t expected_token_end;
-  } cases[] = {
-    {"blanks precede a keyword", "  END", END_KEYWORD, 2, 5},
-    {"a tab precedes a number", "\t1.5", NUMBER, 1, 4},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[cases[i].token] = true;
-    failed |= expect_scan_result_at(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      LEXICAL_MODE_OUTSIDE,
-      true,
-      cases[i].token,
-      cases[i].expected_token_start,
-      cases[i].expected_token_end,
-      LEXICAL_MODE_OUTSIDE
-    );
-  }
-  return failed;
-}
-
-static int test_greater_dispatch(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    bool redirection_valid;
-    bool ge_valid;
-    bool append_valid;
-    bool expected_scanned;
-    enum TokenType expected_symbol;
-    size_t expected_token_end;
-  } cases[] = {
-    {"plain redirection beside GE",
-      ">f",
-      true,
-      true,
-      false,
-      true,
-      OUTPUT_GREATER,
-      1},
-    {"append is not split into a redirection token",
-      ">>f",
-      true,
-      true,
-      false,
-      false,
-      OUTPUT_GREATER,
-      0},
-    {"GE beside redirection token",
-      ">=1",
-      true,
-      true,
-      false,
-      true,
-      GE_OPERATOR,
-      2},
-    {"GE is not split into a redirection token",
-      ">=1",
-      true,
-      false,
-      false,
-      false,
-      GE_OPERATOR,
-      0},
-    {"append operator", ">>f", false, false, true, true, APPEND_OPERATOR, 2},
-    {"plain greater stays internal",
-      ">x",
-      false,
-      true,
-      false,
-      false,
-      GE_OPERATOR,
-      0},
-  };
-
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[OUTPUT_GREATER] = cases[i].redirection_valid;
-    valid_symbols[GE_OPERATOR] = cases[i].ge_valid;
-    valid_symbols[APPEND_OPERATOR] = cases[i].append_valid;
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].expected_scanned,
-      cases[i].expected_symbol,
-      cases[i].expected_token_end
-    );
-  }
-  return failed;
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {[FUNC_NAME_WORD] = true};
+  return expect_scan_result_at(
+    "blanks precede a function name",
+    "  value(",
+    valid_symbols,
+    LEXICAL_MODE_OUTSIDE,
+    true,
+    FUNC_NAME_WORD,
+    2,
+    7,
+    LEXICAL_MODE_OUTSIDE
+  );
 }
 
 static int test_slash_dispatch(void) {
@@ -1066,17 +697,6 @@ static int test_slash_dispatch(void) {
   );
 
   valid_symbols[DIVISION_SLASH] = true;
-  valid_symbols[DIV_ASSIGN_OPERATOR] = true;
-  failed |= expect_scan_result(
-    "division assignment is the longest match",
-    "/=x",
-    valid_symbols,
-    true,
-    DIV_ASSIGN_OPERATOR,
-    2
-  );
-
-  valid_symbols[DIV_ASSIGN_OPERATOR] = false;
   failed |= expect_scan_result(
     "division slash does not split division assignment",
     "/=x",
@@ -1092,73 +712,16 @@ static int test_word_boundary_lookahead(void) {
   static const struct {
     const char *name;
     const char *source;
-    enum TokenType expected_symbol;
-    size_t expected_token_end;
   } cases[] = {
-    {"repeated continuations prevent function adjacency",
-      "follow\\\n\\\n(",
-      NAME_WORD,
-      6},
-    {"blank before a continuation prevents function adjacency",
-      "follow \\\n(",
-      NAME_WORD,
-      6},
-    {"blank after a continuation prevents function adjacency",
-      "follow\\\n (",
-      NAME_WORD,
-      6},
-    {"raw newline prevents function adjacency", "follow\\\n\n(", NAME_WORD, 6},
-    {"comment prevents function adjacency",
-      "follow\\\n# note\n(",
-      NAME_WORD,
-      6},
-    {"incomplete continuation prevents function adjacency",
-      "follow\\(",
-      NAME_WORD,
-      6},
-    {"built-in call ignores mixed blank and continuation gaps",
-      "length \t\\\n \\\n\t(",
-      BUILTIN_CALL_WORD,
-      6},
-    {"raw newline prevents built-in call lookahead",
-      "length \\\n\n(",
-      BUILTIN_FUNC_NAME_WORD,
-      6},
-    {"comment prevents built-in call lookahead",
-      "length \\\n# note\n(",
-      BUILTIN_FUNC_NAME_WORD,
-      6},
-    {"incomplete continuation prevents built-in call lookahead",
-      "length \\(",
-      BUILTIN_FUNC_NAME_WORD,
-      6},
-    {"for-in lookahead ignores gaps around both words and closing parenthesis",
-      "k \\\nin \t\\\narray \\\n)",
-      FOR_IN_VARIABLE_WORD,
-      1},
-    {"raw newline prevents for-in lookahead",
-      "k in \\\n\narray)",
-      NAME_WORD,
-      1},
-    {"comment prevents for-in lookahead",
-      "k in array \\\n# note\n)",
-      NAME_WORD,
-      1},
-    {"incomplete continuation prevents for-in lookahead",
-      "k in array \\)",
-      NAME_WORD,
-      1},
-    {"reserved array word prevents for-in lookahead",
-      "k in length)",
-      NAME_WORD,
-      1},
+    {"repeated continuations prevent function adjacency", "follow\\\n\\\n("},
+    {"blank before a continuation prevents function adjacency", "follow \\\n("},
+    {"blank after a continuation prevents function adjacency", "follow\\\n ("},
+    {"raw newline prevents function adjacency", "follow\\\n\n("},
+    {"comment prevents function adjacency", "follow\\\n# note\n("},
+    {"incomplete continuation prevents function adjacency", "follow\\("},
   };
   const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [NAME_WORD] = true,
     [FUNC_NAME_WORD] = true,
-    [FOR_IN_VARIABLE_WORD] = true,
-    [BUILTIN_FUNC_NAME_WORD] = true,
-    [BUILTIN_CALL_WORD] = true,
   };
 
   int failed = 0;
@@ -1167,9 +730,9 @@ static int test_word_boundary_lookahead(void) {
       cases[i].name,
       cases[i].source,
       valid_symbols,
-      true,
-      cases[i].expected_symbol,
-      cases[i].expected_token_end
+      false,
+      FUNC_NAME_WORD,
+      0
     );
   }
   return failed;
@@ -1529,27 +1092,20 @@ static int test_linear_word_boundary_lookahead(void) {
     const char *suffix;
     enum TokenType expected_symbol;
     size_t expected_token_end;
+    bool expected_scanned;
   } cases[] = {
     {"name recognition stops before a long continuation gap",
       "follow",
       "(",
-      NAME_WORD,
-      6},
-    {"linear built-in continuation lookahead",
-      "length ",
-      "(",
-      BUILTIN_CALL_WORD,
-      6},
-    {"linear for-in continuation lookahead",
-      "k in array ",
-      ")",
-      FOR_IN_VARIABLE_WORD,
-      1},
+      FUNC_NAME_WORD,
+      6,
+      false},
     {"linear getline operand continuation lookahead",
       "getline x ",
       "++",
       GETLINE_OMITTED_WORD,
-      7},
+      7,
+      true},
   };
   const size_t continuation_count = 32768;
   int failed = 0;
@@ -1586,9 +1142,9 @@ static int test_linear_word_boundary_lookahead(void) {
       &mock.lexer,
       valid_symbols
     );
-    const bool valid_result = scanned &&
-      mock.lexer.result_symbol ==
-      cases[i].expected_symbol &&
+    const bool valid_result = scanned ==
+      cases[i].expected_scanned &&
+      (!scanned || mock.lexer.result_symbol == cases[i].expected_symbol) &&
       mock.token_start ==
       0 &&
       mock.token_end ==
@@ -1625,12 +1181,6 @@ static int test_long_token_spans(void) {
       "(",
       FUNC_NAME_WORD,
       LEXICAL_MODE_OUTSIDE},
-    {"long number is not truncated", '1', ";", NUMBER, LEXICAL_MODE_OUTSIDE},
-    {"long string content is not truncated",
-      'a',
-      "\"",
-      STRING_CONTENT,
-      LEXICAL_MODE_STRING},
   };
   const size_t token_length = 65536;
   int failed = 0;
@@ -1980,7 +1530,6 @@ static int test_newline_ends_every_literal_mode(void) {
     );
   }
   const bool content_valid[TOKEN_TYPE_COUNT] = {
-    [STRING_CONTENT] = true,
     [ERE_COMPOUND_CONTENT] = true,
   };
   failed |= expect_scan_result_at(
@@ -2028,94 +1577,22 @@ static int test_error_mode_real_tokens(void) {
     size_t expected_token_end;
     LexicalMode expected_mode;
   } cases[] = {
-    {"error mode suppresses classification of keyword",
-      "END",
-      false,
-      END_KEYWORD,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of name",
-      "value",
-      false,
-      NAME_WORD,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of function name",
+    {"error mode retains function-name classification",
       "follow(",
-      false,
+      true,
       FUNC_NAME_WORD,
-      0,
+      6,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of built-in",
-      "length",
-      false,
-      BUILTIN_FUNC_NAME_WORD,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of built-in call",
-      "length (",
-      false,
-      BUILTIN_CALL_WORD,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of getline keyword",
-      "getline x",
-      false,
+    {"error mode supplies getline without target lookahead",
+      "getline x++",
+      true,
       GETLINE_WORD,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of integer",
-      "42",
-      false,
-      NUMBER,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of fraction",
-      ".5",
-      false,
-      NUMBER,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of exponent",
-      "1.5e+2",
-      false,
-      NUMBER,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of composite operator",
-      "+=",
-      false,
-      ADD_ASSIGN_OPERATOR,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of GE",
-      ">=",
-      false,
-      GE_OPERATOR,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses classification of append",
-      ">>",
-      false,
-      APPEND_OPERATOR,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses division assignment classification",
-      "/=",
-      false,
-      DIV_ASSIGN_OPERATOR,
-      0,
+      7,
       LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses division classification",
       "/x",
       false,
       DIVISION_SLASH,
-      0,
-      LEXICAL_MODE_OUTSIDE},
-    {"error mode suppresses greater token",
-      ">",
-      false,
-      OUTPUT_GREATER,
       0,
       LEXICAL_MODE_OUTSIDE},
     {"error mode emits only the continuation backslash",
@@ -2277,27 +1754,13 @@ static void test_nul_and_eof_are_distinct(void) {
   assert(comment.token_end == 4);
   assert(comment.lexer.lookahead == '\n');
 
-  valid_symbols[COMMENT] = false;
-  valid_symbols[STRING_CONTENT] = true;
-  MockLexer nul = make_mock_lexer("\0");
-  nul.length = 1;
-  state.mode = LEXICAL_MODE_STRING;
-  assert(tree_sitter_posix_awk_external_scanner_scan(
-    &state,
-    &nul.lexer,
-    valid_symbols
-  ));
-  assert(nul.lexer.result_symbol == STRING_CONTENT);
-  assert(nul.token_end == 1);
-  assert(state.mode == LEXICAL_MODE_STRING);
-
   MockLexer eof = make_mock_lexer("");
   assert(!tree_sitter_posix_awk_external_scanner_scan(
     &state,
     &eof.lexer,
     valid_symbols
   ));
-  assert(state.mode == LEXICAL_MODE_STRING);
+  assert(state.mode == LEXICAL_MODE_OUTSIDE);
 }
 
 static void test_disabled_tokens_preserve_state(void) {
@@ -2523,9 +1986,7 @@ int main(void) {
   test_disabled_tokens_preserve_state();
   failed |= test_serialization();
   failed |= test_source_token_ranges();
-  failed |= test_continuations_separate_token_spellings();
-  test_continuation_token_sequences();
-  failed |= test_composite_operator_boundaries();
+  failed |= test_update_operator_boundaries();
   failed |= test_backslash_tokens_by_mode();
   failed |= test_escape_classification_ignores_expected_tokens();
   failed |= test_continued_newline_requires_its_marker();
@@ -2533,7 +1994,6 @@ int main(void) {
   test_pending_continuation_rejects_changed_boundaries();
   failed |= test_literal_classification();
   failed |= test_blank_skip_token_ranges();
-  failed |= test_greater_dispatch();
   failed |= test_slash_dispatch();
   failed |= test_word_boundary_lookahead();
   failed |= test_getline_operand_lookahead();

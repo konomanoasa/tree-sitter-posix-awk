@@ -38,66 +38,77 @@ const bind = ({ precedence, associativity }, rule) =>
 
 const OPERAND_PRECEDENCE = 2;
 
-const KEYWORDS = [
-  "begin",
-  "end",
-  "function",
-  "print",
-  "break",
-  "continue",
-  "delete",
-  "do",
-  "else",
-  "exit",
-  "for",
-  "if",
-  "next",
-  "nextfile",
-  "printf",
-  "return",
-  "while",
-];
-
-const TWO_CHARACTER_TOKENS = [
-  "div_assign",
-  "add_assign",
-  "sub_assign",
-  "mul_assign",
-  "mod_assign",
-  "pow_assign",
-  "or",
-  "and",
-  "no_match",
-  "eq",
-  "le",
-  "ge",
-  "ne",
-  "incr",
-  "decr",
-  "append",
-];
-
-const SINGLE_CHARACTER_OPERATORS = {
-  "+": "plus",
-  "-": "minus",
-  "*": "star",
-  "%": "percent",
-  "^": "caret",
-  "!": "bang",
-  "<": "less",
-  ">": "greater",
-  "=": "equal",
-  "|": "pipe",
+export const RESERVED_WORDS = {
+  keyword: [
+    "BEGIN",
+    "END",
+    "break",
+    "continue",
+    "delete",
+    "do",
+    "else",
+    "exit",
+    "for",
+    "function",
+    "if",
+    "next",
+    "nextfile",
+    "print",
+    "printf",
+    "return",
+    "while",
+  ],
+  membership: ["in"],
+  getline: ["getline"],
+  builtin: [
+    "atan2",
+    "close",
+    "cos",
+    "exp",
+    "fflush",
+    "gsub",
+    "index",
+    "int",
+    "length",
+    "log",
+    "match",
+    "rand",
+    "sin",
+    "split",
+    "sprintf",
+    "sqrt",
+    "srand",
+    "sub",
+    "substr",
+    "system",
+    "tolower",
+    "toupper",
+  ],
 };
 
 // Skipping blanks can reach a backslash the external scanner never saw.
 const continuationMarker = () => token.immediate("\\");
 
-const singleOperator = ($, character) =>
-  alias($[`_${SINGLE_CHARACTER_OPERATORS[character]}_operator`], character);
+const signOperator = ($, character) =>
+  alias(character === "+" ? $._plus_operator : $._minus_operator, character);
 
 const twoCharacterTokenRules = Object.fromEntries(
-  TWO_CHARACTER_TOKENS.map((name) => [name, ($) => $[`_${name}_operator`]]),
+  Object.entries({
+    add_assign: "+=",
+    sub_assign: "-=",
+    mul_assign: "*=",
+    div_assign: "/=",
+    mod_assign: "%=",
+    pow_assign: "^=",
+    or: "||",
+    and: "&&",
+    no_match: "!~",
+    eq: "==",
+    le: "<=",
+    ge: ">=",
+    ne: "!=",
+    append: ">>",
+  }).map(([name, spelling]) => [name, () => spelling]),
 );
 
 // The scanner yields an update operator only before an lvalue, where it can
@@ -185,9 +196,11 @@ const ereExpressionRules = (insideGroup) => {
         $.right_anchor,
         seq(
           field("opening", token.immediate("(")),
-          field(
-            "expression",
-            alias($.group_extended_reg_exp, $.extended_reg_exp),
+          optional(
+            field(
+              "expression",
+              alias($.group_extended_reg_exp, $.extended_reg_exp),
+            ),
           ),
           field("closing", $._ere_close_parenthesis),
         ),
@@ -256,13 +269,13 @@ const subscript = (subscripts) => seq("[", subscripts, "]");
 const redirectedInput = ($, get, source = $.expr) =>
   prec.right(
     EXPRESSION.field.precedence,
-    seq(field("get", get), singleOperator($, "<"), field("source", source)),
+    seq(field("get", get), "<", field("source", source)),
   );
 
-const pipedInput = ($, source, get) =>
+const pipedInput = (source, get) =>
   prec.right(
     EXPRESSION.field.precedence,
-    seq(field("source", source), singleOperator($, "|"), field("get", get)),
+    seq(field("source", source), "|", field("get", get)),
   );
 
 const rawNewlines = ($) => repeat1($.newline);
@@ -421,14 +434,14 @@ const unaryExpressionRules = (context) => {
         : []),
       ...["+", "-"].map((operator) =>
         seq(
-          field("operator", singleOperator($, operator)),
+          field("operator", signOperator($, operator)),
           field("operand", aliasedAnyTier($, context, "unary")),
         ),
       ),
     );
   rules[not] = ($) =>
     seq(
-      field("operator", singleOperator($, "!")),
+      field("operator", "!"),
       field("operand", aliasedAnyTier($, context, "unary")),
     );
   rules[nonUnary("unary")] = ($) =>
@@ -564,7 +577,7 @@ const tieredExpressionRules = (context) => {
               $.div_assign,
               $.add_assign,
               $.sub_assign,
-              singleOperator($, "="),
+              "=",
             ),
           ),
           field("right", expression($)),
@@ -680,27 +693,19 @@ export default globalThis.grammar?.({
   name: "posix_awk",
 
   externals: ($) => [
-    ...KEYWORDS.map((keyword) => $[`${keyword}_keyword`]),
-    $._name_word,
-    $._for_in_variable_word,
     $._getline_word,
     $._getline_target_word,
     $._getline_omitted_word,
     $._getline_field_word,
     $._getline_prefer_target_word,
     $._getline_prefer_omitted_word,
-    $._in_word,
-    $._builtin_func_name_word,
-    $._builtin_call_word,
     $._func_name_word,
-    $._number,
     $._division_slash,
     $._ere_opening_slash,
-    ...TWO_CHARACTER_TOKENS.map((name) => $[`_${name}_operator`]),
-    ...Object.values(SINGLE_CHARACTER_OPERATORS).map(
-      (name) => $[`_${name}_operator`],
-    ),
-    $._output_greater,
+    $._incr_operator,
+    $._decr_operator,
+    $._plus_operator,
+    $._minus_operator,
     $._ere_compound_opening,
     $._ere_dot_closing,
     $._ere_equal_closing,
@@ -711,15 +716,12 @@ export default globalThis.grammar?.({
     $._ere_closing,
     $._string_opening,
     $._string_closing,
-    $._string_content,
     $._string_escape,
     $._ere_named_escape,
     $._ere_quoted_escape,
     $._ere_octal_escape,
     $._ere_undefined_escape,
     $._ere_escaped_delimiter,
-    $._ere_class_name,
-    $._ere_dup_count,
     $.comment,
     continuationMarker(),
     $._continuation_newline,
@@ -727,6 +729,17 @@ export default globalThis.grammar?.({
     $._stray_backslash,
     $._error_sentinel,
   ],
+
+  word: ($) => $.name,
+
+  reserved: {
+    global: ($) => [
+      ...[...RESERVED_WORDS.keyword, ...RESERVED_WORDS.membership].map(
+        (word) => $[`${word.toLowerCase()}_keyword`],
+      ),
+      $.builtin_func_name,
+    ],
+  },
 
   extras: ($) => [
     token(repeat1(choice(" ", "\t"))),
@@ -758,6 +771,7 @@ export default globalThis.grammar?.({
   ],
 
   conflicts: ($) => [
+    [$._for_in_clause, $.postfix_lvalue],
     // The final item joins item_list only after its terminator is known.
     [$.item_list, $._item_list],
     // Only source-dependent target choices retain a fallback interpretation.
@@ -769,32 +783,15 @@ export default globalThis.grammar?.({
     program: ($) => seq(optional($.item_list), optional($._item)),
 
     _additive_operator: ($) =>
-      field("operator", choice(singleOperator($, "+"), singleOperator($, "-"))),
+      field("operator", choice(signOperator($, "+"), signOperator($, "-"))),
 
     _multiplicative_operator: ($) =>
-      field(
-        "operator",
-        choice(
-          singleOperator($, "*"),
-          alias($._division_slash, "/"),
-          singleOperator($, "%"),
-        ),
-      ),
+      field("operator", choice("*", alias($._division_slash, "/"), "%")),
 
-    _exponentiation_operator: ($) => field("operator", singleOperator($, "^")),
+    _exponentiation_operator: () => field("operator", "^"),
 
     _comparison_operator: ($) =>
-      field(
-        "operator",
-        choice(
-          singleOperator($, "<"),
-          $.le,
-          $.ne,
-          $.eq,
-          singleOperator($, ">"),
-          $.ge,
-        ),
-      ),
+      field("operator", choice("<", $.le, $.ne, $.eq, ">", $.ge)),
 
     _match_operator: ($) => field("operator", choice("~", $.no_match)),
 
@@ -899,13 +896,7 @@ export default globalThis.grammar?.({
       ),
 
     _for_in_clause: ($) =>
-      seq(
-        field("variable", alias($.for_in_variable, $.name)),
-        $.in_keyword,
-        field("array", $.name),
-      ),
-
-    for_in_variable: ($) => $._for_in_variable_word,
+      seq(field("variable", $.name), $.in_keyword, field("array", $.name)),
 
     _for_header: ($) =>
       header(
@@ -974,11 +965,7 @@ export default globalThis.grammar?.({
         parenthesizedPrintStatement($, $.printf_keyword),
       ),
 
-    output_redirection: ($) =>
-      seq(
-        choice(alias($._output_greater, ">"), $.append, singleOperator($, "|")),
-        $.expr,
-      ),
+    output_redirection: ($) => seq(choice(">", $.append, "|"), $.expr),
 
     print_expr_list: ($) =>
       seq($.print_expr, repeat(listElementTail($, $.print_expr))),
@@ -1054,9 +1041,7 @@ export default globalThis.grammar?.({
     _user_function_call: ($) => seq($.func_name, callArguments($)),
 
     _builtin_function_call: ($) =>
-      seq(alias($.builtin_call_name, $.builtin_func_name), callArguments($)),
-
-    builtin_call_name: ($) => $._builtin_call_word,
+      prec(1, seq($.builtin_func_name, callArguments($))),
 
     _lvalue: ($) =>
       choice(
@@ -1200,21 +1185,19 @@ export default globalThis.grammar?.({
 
     source_piped_input_function: ($) =>
       pipedInput(
-        $,
         alias($.source_full_non_unary_expr, $.non_unary_expr),
         alias($.source_simple_get, $.simple_get),
       ),
 
     source_unary_input_function: ($) =>
       pipedInput(
-        $,
         alias($.source_full_unary_expr, $.unary_expr),
         alias($.source_simple_get, $.simple_get),
       ),
 
-    piped_input_function: ($) => pipedInput($, $.non_unary_expr, $.simple_get),
+    piped_input_function: ($) => pipedInput($.non_unary_expr, $.simple_get),
 
-    unary_input_function: ($) => pipedInput($, $.unary_expr, $.simple_get),
+    unary_input_function: ($) => pipedInput($.unary_expr, $.simple_get),
 
     simple_get: ($) => simpleGet($),
 
@@ -1236,15 +1219,20 @@ export default globalThis.grammar?.({
 
     preferred_omitted_getline_keyword: ($) => $._getline_prefer_omitted_word,
 
-    in_keyword: ($) => $._in_word,
+    ...Object.fromEntries(
+      [...RESERVED_WORDS.keyword, ...RESERVED_WORDS.membership].map(
+        (keyword) => [`${keyword.toLowerCase()}_keyword`, () => keyword],
+      ),
+    ),
 
     func_name: ($) => $._func_name_word,
 
-    builtin_func_name: ($) => $._builtin_func_name_word,
+    builtin_func_name: () => token(choice(...RESERVED_WORDS.builtin)),
 
-    name: ($) => $._name_word,
+    name: () => /[A-Za-z_][A-Za-z0-9_]*/,
 
-    number: ($) => $._number,
+    number: () =>
+      /(([0-9]+[.][0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)[fFlL]?|[0-9]+/,
 
     string: ($) =>
       seq(
@@ -1253,16 +1241,21 @@ export default globalThis.grammar?.({
         field("closing", alias($._string_closing, '"')),
       ),
 
-    string_content: ($) => $._string_content,
+    string_content: () =>
+      token.immediate(repeat1(choice(/[^"\\\n]/, prec(1, "\0")))),
 
     escape_sequence: ($) => $._string_escape,
 
     ...twoCharacterTokenRules,
 
+    incr: ($) => $._incr_operator,
+
+    decr: ($) => $._decr_operator,
+
     ere: ($) =>
       seq(
         field("opening", alias($._ere_opening_slash, "/")),
-        field("expression", $.extended_reg_exp),
+        optional(field("expression", $.extended_reg_exp)),
         field("closing", alias($._ere_closing, "/")),
       ),
 
@@ -1302,7 +1295,7 @@ export default globalThis.grammar?.({
         $._ere_close_brace,
       ),
 
-    dup_count: ($) => $._ere_dup_count,
+    dup_count: () => token.immediate(/[0-9]+/),
 
     bracket_expression: ($) =>
       seq(
@@ -1381,7 +1374,7 @@ export default globalThis.grammar?.({
     character_class: ($) =>
       seq($._ere_open_colon, $.class_name, $._ere_colon_close),
 
-    class_name: ($) => $._ere_class_name,
+    class_name: () => token.immediate(/[A-Za-z][A-Za-z0-9]*/),
 
     meta_character: ($) => $._ere_compound_meta_character,
 

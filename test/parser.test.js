@@ -239,6 +239,202 @@ test("posix_awk: continuation markers are anonymous leaves", () => {
   assert.equal(node.children, undefined);
 });
 
+freshTest(
+  "keyword range excludes blanks and continuation",
+  "  END\\\n{}",
+  (tree) => {
+    clean(tree);
+    assert.match(tree, /^0:2 +- +0:5 +end_keyword `END`$/m);
+  },
+);
+
+freshTest(
+  "keyword prefixes remain whole identifiers",
+  "{ BEGINNING = END_value + printable + info + if_while }",
+  (tree) => {
+    clean(tree);
+    assert.deepEqual(
+      [...tree.matchAll(/name `([^`]*)`/g)].map((match) => match[1]),
+      ["BEGINNING", "END_value", "printable", "info", "if_while"],
+    );
+  },
+);
+
+freshTest(
+  "a prefix update before a spaced call spelling applies to the name",
+  "{ ++follow (x) }",
+  (tree) => {
+    contains(tree, "name `follow`");
+    assert.doesNotMatch(tree, /func_name/);
+  },
+);
+
+freshTest(
+  "for-in permits blanks and continuations at each word boundary",
+  lines("{ for (k \\", "in \t\\", "array \\", "); }"),
+  (tree) => {
+    contains(tree, "variable: name `k`");
+    contains(tree, "array: name `array`");
+  },
+);
+
+freshTest(
+  "a long continuation gap preserves a for-in header",
+  `{ for (k in array ${"\\\n".repeat(16_384)}); }`,
+  (tree) => {
+    contains(tree, "variable: name `k`");
+    contains(tree, "array: name `array`");
+  },
+);
+
+freshTest(
+  "a builtin call crosses layout without changing its name range",
+  lines("{ length \t\\", " \\", "\t(1) }"),
+  (tree) => {
+    assert.match(tree, /^0:2 +- +0:8 +builtin_func_name `length`$/m);
+    contains(tree, "expr_list");
+  },
+);
+
+for (const [name, source] of [
+  ["a raw newline", lines("{ length \\", "", "(1) }")],
+  ["a comment", lines("{ length \\", "# note", "(1) }")],
+]) {
+  freshTest(
+    `a bare builtin before ${name} does not become a call`,
+    source,
+    (tree) => {
+      contains(tree, "builtin_func_name `length`");
+      assert.doesNotMatch(tree, /expr_list/);
+    },
+  );
+}
+
+for (const { source, spelling, start = 8, end } of [
+  { source: "\t1.5", spelling: "1.5", start: 9, end: 12 },
+  { source: "123", spelling: "123", end: 11 },
+  { source: ".5", spelling: ".5", end: 10 },
+  { source: "1.5e+2", spelling: "1.5e+2", end: 14 },
+  { source: "1.0f", spelling: "1.0f", end: 12 },
+  { source: ".5F", spelling: ".5F", end: 11 },
+  { source: "1e2l", spelling: "1e2l", end: 12 },
+  { source: "1.L", spelling: "1.L", end: 11 },
+  { source: "1.5e+2F", spelling: "1.5e+2F", end: 15 },
+  { source: "1.5ff", spelling: "1.5f", end: 12 },
+  { source: "1e2LL", spelling: "1e2L", end: 12 },
+  { source: "1f", spelling: "1", end: 9 },
+  { source: "1e+ x", spelling: "1", end: 9 },
+  { source: "1ef", spelling: "1", end: 9 },
+  { source: "1.e+f", spelling: "1.", end: 10 },
+  { source: ".5eL", spelling: ".5", end: 10 },
+]) {
+  freshTest(`number boundary in ${source}`, `{ print ${source} }\n`, (tree) => {
+    const numbers = [
+      ...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +number `([^`]*)`$/gm),
+    ];
+    assert.deepEqual(
+      numbers.map((match) => [Number(match[1]), Number(match[2]), match[3]]),
+      [[start, end, spelling]],
+    );
+  });
+}
+
+freshTest(
+  "a long number remains one leaf",
+  `{ print ${"1".repeat(65_536)} }\n`,
+  (tree) => {
+    const numbers = [...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +number /gm)];
+    assert.deepEqual(
+      numbers.map((match) => [Number(match[1]), Number(match[2])]),
+      [[8, 65_544]],
+    );
+  },
+);
+
+for (const { source, number, target } of [
+  { source: "{ getline $1.5f++ }", number: "1.5f", target: false },
+  { source: "{ getline $1f++ }", number: "1", target: true },
+  { source: "{ getline $1.5e+2F++ }", number: "1.5e+2F", target: false },
+  { source: "{ getline $1e++ }", number: "1", target: true },
+  { source: "{ getline $1.0ff++ }", number: "1.0f", target: true },
+  { source: "{ getline $1.L++ }", number: "1.L", target: false },
+]) {
+  freshTest(
+    `numeric boundaries in getline lookahead: ${source}`,
+    source,
+    (tree) => {
+      assert.equal(tree.includes("target: lvalue"), target, tree);
+      assert.deepEqual(
+        [...tree.matchAll(/number `([^`]*)`/g)].map((match) => match[1]),
+        [number],
+      );
+    },
+  );
+}
+
+freshTest(
+  "NUL stays inside string content through the closing quote",
+  '{ "a\0b\\n\0c" }',
+  (tree) => {
+    const content = [
+      ...tree.matchAll(
+        /^0:([0-9]+) +- +0:([0-9]+) +string_content `([^`]*)`$/gm,
+      ),
+    ].map((match) => [Number(match[1]), Number(match[2]), match[3]]);
+    assert.deepEqual(content, [
+      [3, 6, "a\\0b"],
+      [8, 10, "\\0c"],
+    ]);
+  },
+);
+
+freshTest(
+  "an ERE class name retains trailing digits",
+  "/[[:al1:]]/",
+  (tree) => {
+    const names = [
+      ...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +class_name `([^`]*)`$/gm),
+    ].map((match) => [Number(match[1]), Number(match[2]), match[3]]);
+    assert.deepEqual(names, [[4, 7, "al1"]]);
+  },
+);
+
+for (const { source, spelling, kind, start } of [
+  { source: "{ x += y }", spelling: "+=", kind: "add_assign", start: 4 },
+  { source: "{ x -= y }", spelling: "-=", kind: "sub_assign", start: 4 },
+  { source: "{ x *= y }", spelling: "*=", kind: "mul_assign", start: 4 },
+  { source: "{ x /= y }", spelling: "/=", kind: "div_assign", start: 4 },
+  { source: "{ x %= y }", spelling: "%=", kind: "mod_assign", start: 4 },
+  { source: "{ x ^= y }", spelling: "^=", kind: "pow_assign", start: 4 },
+  { source: "{ x || y }", spelling: "||", kind: "or", start: 4 },
+  { source: "{ x && y }", spelling: "&&", kind: "and", start: 4 },
+  { source: "{ x !~ y }", spelling: "!~", kind: "no_match", start: 4 },
+  { source: "{ x == y }", spelling: "==", kind: "eq", start: 4 },
+  { source: "{ x <= y }", spelling: "<=", kind: "le", start: 4 },
+  { source: "{ x >= y }", spelling: ">=", kind: "ge", start: 4 },
+  { source: "{ x != y }", spelling: "!=", kind: "ne", start: 4 },
+  { source: "{ print x >> y }", spelling: ">>", kind: "append", start: 10 },
+]) {
+  test(`posix_awk: ${kind} is contiguous and cannot span a continuation`, () => {
+    const result = captureParse(writeSource(kind, "joined", source));
+    assertStatus(kind, result, 0);
+    clean(result.tree);
+    const leaves = [
+      ...result.tree.matchAll(
+        /^0:([0-9]+) +- +0:([0-9]+) +(?:operator: )?([a-z_]+) `([^`]*)`$/gm,
+      ),
+    ]
+      .filter((match) => match[3] === kind)
+      .map((match) => [Number(match[1]), Number(match[2]), match[4]]);
+    assert.deepEqual(leaves, [[start, start + 2, spelling]]);
+    const split = `${source.slice(0, start + 1)}\\\n${source.slice(start + 1)}`;
+    const separated = captureParse(writeSource(kind, "separated", split));
+    assert.ok(separated.status === 0 || separated.status === 1);
+    dirty(separated.tree);
+    assert.equal(separated.tree.includes(`${kind} \`${spelling}\``), false);
+  });
+}
+
 for (const [name, source, ranges] of [
   ["only a continuation", "\\\n", [[0, 0, 0, 1]]],
   [
@@ -615,16 +811,36 @@ const invalidSyntaxCases = [
     source: lines("BEGIN { print (x >\\", "= y) }"),
   },
   {
-    name: "continuations cannot supply the expression in an empty ERE",
+    name: "an empty ERE cannot span a physical newline",
     source: lines("BEGIN { print /\\", "/ }"),
   },
   {
-    name: "continuations cannot supply the expression in an empty ERE group",
+    name: "an ERE alternation requires a nonempty left branch",
+    source: lines("/|a/"),
+  },
+  {
+    name: "an ERE alternation requires a nonempty right branch",
+    source: lines("/a|/"),
+  },
+  {
+    name: "an empty ERE group cannot span a physical newline",
     source: lines("BEGIN { print /(\\", ")/ }"),
   },
   {
-    name: "an ERE closing parenthesis cannot supply an empty group expression",
-    source: lines("/())/"),
+    name: "an ERE group alternation requires a nonempty left branch",
+    source: lines("/(|a)/"),
+  },
+  {
+    name: "an ERE group alternation requires a nonempty right branch",
+    source: lines("/(a|)/"),
+  },
+  {
+    name: "an ERE group cannot contain only an alternation operator",
+    source: lines("/(|)/"),
+  },
+  {
+    name: "an ERE alternation requires a nonempty middle branch",
+    source: lines("/a||b/"),
   },
   {
     name: "an ERE closing parenthesis cannot supply an empty alternation branch",
@@ -637,6 +853,10 @@ const invalidSyntaxCases = [
   {
     name: "division without a final operand is rejected",
     source: lines("BEGIN { print x /a/ }"),
+  },
+  {
+    name: "two slashes after an operand cannot replace division with an empty ERE",
+    source: lines("BEGIN { print x // }"),
   },
   {
     name: "division assignment to an invalid lvalue is rejected",
@@ -719,8 +939,37 @@ const invalidSyntaxCases = [
     source: lines("BEGIN { length = 1 }"),
   },
   {
+    name: "getline remains reserved as an assignment target",
+    source: "{ getline = 1 }",
+  },
+  {
+    name: "getline cannot become the name operand of a prefix update",
+    source: "{ ++getline }",
+  },
+  {
+    name: "a function name cannot become the name operand of a prefix update",
+    source: "{ ++follow(x) }",
+  },
+  {
+    name: "a keyword prefix cannot split the name in a for header",
+    source: "{ for (k inarray); }",
+  },
+  ...[
+    ["increment before a number", "++1"],
+    ["decrement before a number", "--1"],
+    ["increment before a parenthesized expression", "++(x)"],
+    ["decrement before a parenthesized expression", "--(x)"],
+  ].map(([name, expression]) => ({
+    name: `${name} is not split into unary signs`,
+    source: `{ ${expression} }`,
+  })),
+  {
     name: "a non-newline backslash before a call opening is rejected",
     source: lines("BEGIN {", String.raw`  f\(value)`, "  after", "}"),
+  },
+  {
+    name: "a non-newline backslash before a builtin call opening is rejected",
+    source: String.raw`{ length \(value) }`,
   },
   {
     name: "an unparenthesized assignment in a conditional alternative is rejected",
@@ -836,6 +1085,15 @@ const invalidSyntaxCases = [
     name: "a missing for-in body is rejected",
     source: lines("BEGIN { for (key in values) }"),
   },
+  ...[
+    ["a raw newline", lines("{ for (k in \\", "", "array); }")],
+    ["a comment", lines("{ for (k in array \\", "# note", "); }")],
+    ["an incomplete continuation", "{ for (k in array \\); }"],
+    ["a reserved array name", "{ for (k in length); }"],
+  ].map(([boundary, source]) => ({
+    name: `for-in rejects ${boundary}`,
+    source,
+  })),
   {
     name: "missing nested control bodies are rejected",
     source: lines("BEGIN { if (outer) while (inner) }"),
@@ -934,6 +1192,10 @@ test("posix_awk: large tokens, statement lists and nested blocks parse through E
       "many string escapes",
       `BEGIN { print "${String.raw`\n`.repeat(16_000)}x" }\n`,
     ],
+    [
+      "a long builtin call continuation gap",
+      `{ length ${"\\\n".repeat(32_768)}(1) }`,
+    ],
     ["wide statement list", `BEGIN { ${"x++;".repeat(16_000)} }\n`],
     ["deep blocks", `BEGIN ${"{".repeat(2000)}print 1;${"}".repeat(2000)}\n`],
     [
@@ -961,3 +1223,21 @@ test("posix_awk: long unterminated strings parse through EOF with native recover
 test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
   assert.throws(() => parseSummary(`BEGIN { ${"x++;".repeat(16_000)} }\n`, 1));
 });
+
+for (const expression of [
+  "print getline x++",
+  "getline x++++",
+  "a + (1,2) in array",
+  "$getline $-x^2++",
+  'getline < "f" ++',
+  '$getline < "f" ++--',
+  "$getline < y++++++",
+]) {
+  test(`posix_awk: reject ${expression}`, () => {
+    const result = captureParse(
+      writeSource("getline-probe", "invalid", `{ ${expression} }\n`),
+    );
+    assert.ok(result.status === 0 || result.status === 1);
+    dirty(result.tree);
+  });
+}

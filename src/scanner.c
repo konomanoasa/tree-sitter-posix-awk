@@ -7,65 +7,19 @@
 #define ARRAY_LENGTH(array) (sizeof(array) / sizeof((array)[0]))
 
 enum TokenType {
-  BEGIN_KEYWORD,
-  END_KEYWORD,
-  FUNCTION_KEYWORD,
-  PRINT_KEYWORD,
-  BREAK_KEYWORD,
-  CONTINUE_KEYWORD,
-  DELETE_KEYWORD,
-  DO_KEYWORD,
-  ELSE_KEYWORD,
-  EXIT_KEYWORD,
-  FOR_KEYWORD,
-  IF_KEYWORD,
-  NEXT_KEYWORD,
-  NEXTFILE_KEYWORD,
-  PRINTF_KEYWORD,
-  RETURN_KEYWORD,
-  WHILE_KEYWORD,
-  NAME_WORD,
-  FOR_IN_VARIABLE_WORD,
   GETLINE_WORD,
   GETLINE_TARGET_WORD,
   GETLINE_OMITTED_WORD,
   GETLINE_FIELD_WORD,
   GETLINE_PREFER_TARGET_WORD,
   GETLINE_PREFER_OMITTED_WORD,
-  IN_WORD,
-  BUILTIN_FUNC_NAME_WORD,
-  BUILTIN_CALL_WORD,
   FUNC_NAME_WORD,
-  NUMBER,
   DIVISION_SLASH,
   ERE_OPENING_SLASH,
-  DIV_ASSIGN_OPERATOR,
-  ADD_ASSIGN_OPERATOR,
-  SUB_ASSIGN_OPERATOR,
-  MUL_ASSIGN_OPERATOR,
-  MOD_ASSIGN_OPERATOR,
-  POW_ASSIGN_OPERATOR,
-  OR_OPERATOR,
-  AND_OPERATOR,
-  NO_MATCH_OPERATOR,
-  EQ_OPERATOR,
-  LE_OPERATOR,
-  GE_OPERATOR,
-  NE_OPERATOR,
   INCR_OPERATOR,
   DECR_OPERATOR,
-  APPEND_OPERATOR,
   PLUS_OPERATOR,
   MINUS_OPERATOR,
-  STAR_OPERATOR,
-  PERCENT_OPERATOR,
-  CARET_OPERATOR,
-  BANG_OPERATOR,
-  LESS_OPERATOR,
-  GREATER_OPERATOR,
-  EQUAL_OPERATOR,
-  PIPE_OPERATOR,
-  OUTPUT_GREATER,
   ERE_COMPOUND_OPENING,
   ERE_DOT_CLOSING,
   ERE_EQUAL_CLOSING,
@@ -76,15 +30,12 @@ enum TokenType {
   ERE_CLOSING,
   STRING_OPENING,
   STRING_CLOSING,
-  STRING_CONTENT,
   STRING_ESCAPE,
   ERE_NAMED_ESCAPE,
   ERE_QUOTED_ESCAPE,
   ERE_OCTAL_ESCAPE,
   ERE_UNDEFINED_ESCAPE,
   ERE_ESCAPED_DELIMITER,
-  ERE_CLASS_NAME,
-  ERE_DUP_COUNT,
   COMMENT,
   CONTINUATION_BACKSLASH,
   CONTINUATION_NEWLINE,
@@ -95,7 +46,6 @@ enum TokenType {
 };
 
 enum {
-  MAX_RESERVED_WORD_LENGTH = 8,
   SERIALIZED_SCANNER_STATE_SIZE = 1,
 };
 
@@ -103,16 +53,19 @@ typedef char SerializedScannerStateFitsTreeSitterBuffer
   [SERIALIZED_SCANNER_STATE_SIZE <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE ? 1
                                                                           : -1];
 
-typedef struct {
-  const char *spelling;
-  enum TokenType token;
-} ReservedWord;
+typedef enum {
+  WORD_NONE,
+  WORD_NAME,
+  WORD_KEYWORD,
+  WORD_MEMBERSHIP,
+  WORD_GETLINE,
+  WORD_BUILTIN,
+} WordKind;
 
 typedef struct {
-  int32_t first;
-  int32_t second;
-  enum TokenType token;
-} CompositeOperator;
+  const char *spelling;
+  WordKind kind;
+} ReservedWord;
 
 typedef enum {
   LEXICAL_MODE_OUTSIDE,
@@ -128,87 +81,55 @@ typedef struct {
   LexicalMode mode;
 } ScannerState;
 
+// BEGIN generated reserved words from grammar.js.
+enum {
+  MAX_RESERVED_WORD_LENGTH = 8,
+};
+
 static const ReservedWord RESERVED_WORDS[] = {
-  {"BEGIN", BEGIN_KEYWORD},
-  {"break", BREAK_KEYWORD},
-  {"continue", CONTINUE_KEYWORD},
-  {"delete", DELETE_KEYWORD},
-  {"do", DO_KEYWORD},
-  {"else", ELSE_KEYWORD},
-  {"END", END_KEYWORD},
-  {"exit", EXIT_KEYWORD},
-  {"for", FOR_KEYWORD},
-  {"function", FUNCTION_KEYWORD},
-  {"getline", GETLINE_WORD},
-  {"if", IF_KEYWORD},
-  {"in", IN_WORD},
-  {"next", NEXT_KEYWORD},
-  {"nextfile", NEXTFILE_KEYWORD},
-  {"print", PRINT_KEYWORD},
-  {"printf", PRINTF_KEYWORD},
-  {"return", RETURN_KEYWORD},
-  {"while", WHILE_KEYWORD},
-  {"atan2", BUILTIN_FUNC_NAME_WORD},
-  {"close", BUILTIN_FUNC_NAME_WORD},
-  {"cos", BUILTIN_FUNC_NAME_WORD},
-  {"exp", BUILTIN_FUNC_NAME_WORD},
-  {"fflush", BUILTIN_FUNC_NAME_WORD},
-  {"gsub", BUILTIN_FUNC_NAME_WORD},
-  {"index", BUILTIN_FUNC_NAME_WORD},
-  {"int", BUILTIN_FUNC_NAME_WORD},
-  {"length", BUILTIN_FUNC_NAME_WORD},
-  {"log", BUILTIN_FUNC_NAME_WORD},
-  {"match", BUILTIN_FUNC_NAME_WORD},
-  {"rand", BUILTIN_FUNC_NAME_WORD},
-  {"sin", BUILTIN_FUNC_NAME_WORD},
-  {"split", BUILTIN_FUNC_NAME_WORD},
-  {"sprintf", BUILTIN_FUNC_NAME_WORD},
-  {"sqrt", BUILTIN_FUNC_NAME_WORD},
-  {"srand", BUILTIN_FUNC_NAME_WORD},
-  {"sub", BUILTIN_FUNC_NAME_WORD},
-  {"substr", BUILTIN_FUNC_NAME_WORD},
-  {"system", BUILTIN_FUNC_NAME_WORD},
-  {"tolower", BUILTIN_FUNC_NAME_WORD},
-  {"toupper", BUILTIN_FUNC_NAME_WORD},
+  {"BEGIN", WORD_KEYWORD},
+  {"END", WORD_KEYWORD},
+  {"break", WORD_KEYWORD},
+  {"continue", WORD_KEYWORD},
+  {"delete", WORD_KEYWORD},
+  {"do", WORD_KEYWORD},
+  {"else", WORD_KEYWORD},
+  {"exit", WORD_KEYWORD},
+  {"for", WORD_KEYWORD},
+  {"function", WORD_KEYWORD},
+  {"if", WORD_KEYWORD},
+  {"next", WORD_KEYWORD},
+  {"nextfile", WORD_KEYWORD},
+  {"print", WORD_KEYWORD},
+  {"printf", WORD_KEYWORD},
+  {"return", WORD_KEYWORD},
+  {"while", WORD_KEYWORD},
+  {"in", WORD_MEMBERSHIP},
+  {"getline", WORD_GETLINE},
+  {"atan2", WORD_BUILTIN},
+  {"close", WORD_BUILTIN},
+  {"cos", WORD_BUILTIN},
+  {"exp", WORD_BUILTIN},
+  {"fflush", WORD_BUILTIN},
+  {"gsub", WORD_BUILTIN},
+  {"index", WORD_BUILTIN},
+  {"int", WORD_BUILTIN},
+  {"length", WORD_BUILTIN},
+  {"log", WORD_BUILTIN},
+  {"match", WORD_BUILTIN},
+  {"rand", WORD_BUILTIN},
+  {"sin", WORD_BUILTIN},
+  {"split", WORD_BUILTIN},
+  {"sprintf", WORD_BUILTIN},
+  {"sqrt", WORD_BUILTIN},
+  {"srand", WORD_BUILTIN},
+  {"sub", WORD_BUILTIN},
+  {"substr", WORD_BUILTIN},
+  {"system", WORD_BUILTIN},
+  {"tolower", WORD_BUILTIN},
+  {"toupper", WORD_BUILTIN},
 };
-
-static const CompositeOperator COMPOSITE_OPERATORS[] = {
-  {'+', '=', ADD_ASSIGN_OPERATOR},
-  {'-', '=', SUB_ASSIGN_OPERATOR},
-  {'*', '=', MUL_ASSIGN_OPERATOR},
-  {'%', '=', MOD_ASSIGN_OPERATOR},
-  {'^', '=', POW_ASSIGN_OPERATOR},
-  {'|', '|', OR_OPERATOR},
-  {'&', '&', AND_OPERATOR},
-  {'!', '~', NO_MATCH_OPERATOR},
-  {'=', '=', EQ_OPERATOR},
-  {'<', '=', LE_OPERATOR},
-  {'>', '=', GE_OPERATOR},
-  {'!', '=', NE_OPERATOR},
-  {'+', '+', INCR_OPERATOR},
-  {'-', '-', DECR_OPERATOR},
-  {'>', '>', APPEND_OPERATOR},
-};
-
-typedef struct {
-  int32_t character;
-  enum TokenType token;
-} SingleOperator;
-
-// Redirection precedes comparison where the parser accepts both.
-static const SingleOperator SINGLE_OPERATORS[] = {
-  {'+', PLUS_OPERATOR},
-  {'-', MINUS_OPERATOR},
-  {'*', STAR_OPERATOR},
-  {'%', PERCENT_OPERATOR},
-  {'^', CARET_OPERATOR},
-  {'!', BANG_OPERATOR},
-  {'<', LESS_OPERATOR},
-  {'>', OUTPUT_GREATER},
-  {'>', GREATER_OPERATOR},
-  {'=', EQUAL_OPERATOR},
-  {'|', PIPE_OPERATOR},
-};
+// END generated reserved words.
 
 static bool is_ascii_blank(int32_t character) {
   return character == ' ' || character == '\t';
@@ -261,23 +182,23 @@ static bool emit_mode(
   return emit(lexer, token);
 }
 
-static enum TokenType classify_word(const char *word, size_t length) {
+static WordKind classify_word(const char *word, size_t length) {
   if (length > MAX_RESERVED_WORD_LENGTH) {
-    return NAME_WORD;
+    return WORD_NAME;
   }
   for (size_t i = 0; i < ARRAY_LENGTH(RESERVED_WORDS); i++) {
     if (strcmp(RESERVED_WORDS[i].spelling, word) == 0) {
-      return RESERVED_WORDS[i].token;
+      return RESERVED_WORDS[i].kind;
     }
   }
-  return NAME_WORD;
+  return WORD_NAME;
 }
 
-static enum TokenType scan_word_spelling(TSLexer *lexer) {
+static WordKind scan_word_spelling(TSLexer *lexer) {
   char spelling[MAX_RESERVED_WORD_LENGTH + 1] = {0};
   size_t length = 0;
   if (!is_word_start(lexer->lookahead)) {
-    return TOKEN_TYPE_COUNT;
+    return WORD_NONE;
   }
   do {
     if (length < MAX_RESERVED_WORD_LENGTH) {
@@ -307,16 +228,6 @@ static bool skip_token_layout(TSLexer *lexer) {
   }
 }
 
-static bool scan_for_in_shape(TSLexer *lexer) {
-  if (!skip_token_layout(lexer) || scan_word_spelling(lexer) != IN_WORD) {
-    return false;
-  }
-  if (!skip_token_layout(lexer) || scan_word_spelling(lexer) != NAME_WORD) {
-    return false;
-  }
-  return skip_token_layout(lexer) && lexer->lookahead == ')';
-}
-
 static bool scan_lvalue_start(TSLexer *lexer) {
   if (!skip_token_layout(lexer)) {
     return false;
@@ -324,7 +235,7 @@ static bool scan_lvalue_start(TSLexer *lexer) {
   if (lexer->lookahead == '$') {
     return true;
   }
-  return scan_word_spelling(lexer) == NAME_WORD && lexer->lookahead != '(';
+  return scan_word_spelling(lexer) == WORD_NAME && lexer->lookahead != '(';
 }
 
 // Skips a string or an ERE through its closing delimiter.
@@ -564,21 +475,21 @@ static int probe_token(InputProbe *probe, bool operand) {
     return skip_group(lexer) ? PROBE_VALUE : PROBE_END;
   }
   if (is_word_start(character)) {
-    const enum TokenType word = scan_word_spelling(lexer);
-    const bool call = word == NAME_WORD && lexer->lookahead == '(';
-    if (word == GETLINE_WORD) {
+    const WordKind word = scan_word_spelling(lexer);
+    const bool call = word == WORD_NAME && lexer->lookahead == '(';
+    if (word == WORD_GETLINE) {
       return PROBE_GETLINE;
     }
-    if (word == IN_WORD) {
+    if (word == WORD_MEMBERSHIP) {
       return PROBE_MEMBERSHIP;
     }
-    if (word != NAME_WORD && word != BUILTIN_FUNC_NAME_WORD) {
+    if (word != WORD_NAME && word != WORD_BUILTIN) {
       return PROBE_END;
     }
     if (!skip_token_layout(lexer)) {
       return PROBE_END;
     }
-    if (call || word == BUILTIN_FUNC_NAME_WORD) {
+    if (call || word == WORD_BUILTIN) {
       return lexer->lookahead != '(' || skip_group(lexer) ? PROBE_VALUE
                                                           : PROBE_END;
     }
@@ -1364,9 +1275,9 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
         return LVALUE_SHAPE_SETTLED;
       }
     } else {
-      const enum TokenType word = scan_word_spelling(lexer);
-      const bool call = word == NAME_WORD && lexer->lookahead == '(';
-      if (field && word == GETLINE_WORD) {
+      const WordKind word = scan_word_spelling(lexer);
+      const bool call = word == WORD_NAME && lexer->lookahead == '(';
+      if (field && word == WORD_GETLINE) {
         if (prefix_update) {
           return probe_getline_field(lexer, PROBE_PREFIX_GETLINE, deferred)
             ? LVALUE_SHAPE_SETTLED
@@ -1380,7 +1291,7 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
           continue;
         }
         input = true;
-      } else if (field && (call || word == BUILTIN_FUNC_NAME_WORD)) {
+      } else if (field && (call || word == WORD_BUILTIN)) {
         // A built-in name may omit its arguments.
         if (
           !skip_token_layout(lexer) ||
@@ -1388,7 +1299,7 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
         ) {
           return LVALUE_SHAPE_SETTLED;
         }
-      } else if (call || word != NAME_WORD) {
+      } else if (call || word != WORD_NAME) {
         // A getline field without a target precedes this word.
         return field || targeted ? LVALUE_SHAPE_SETTLED : LVALUE_SHAPE_NONE;
       } else {
@@ -1454,88 +1365,50 @@ static enum TokenType scan_getline_operand(TSLexer *lexer) {
   return token == GETLINE_OMITTED_WORD ? GETLINE_PREFER_OMITTED_WORD : token;
 }
 
-static enum TokenType
-promote_word(TSLexer *lexer, const bool *valid_symbols, enum TokenType token) {
-  switch (token) {
-  case NAME_WORD:
-    if (lexer->lookahead == '(') {
-      return FUNC_NAME_WORD;
-    }
-    if (valid_symbols[FOR_IN_VARIABLE_WORD] && scan_for_in_shape(lexer)) {
-      return FOR_IN_VARIABLE_WORD;
-    }
-    return token;
-  case BUILTIN_FUNC_NAME_WORD:
-    return skip_token_layout(lexer) && lexer->lookahead == '('
-      ? BUILTIN_CALL_WORD
-      : token;
-  case GETLINE_WORD:
-    if (valid_symbols[GETLINE_TARGET_WORD]) {
-      return scan_getline_operand(lexer);
-    }
-    return valid_symbols[GETLINE_FIELD_WORD] ? GETLINE_FIELD_WORD : token;
-  default:
-    return token;
-  }
-}
-
-static bool scan_word_token(TSLexer *lexer, const bool *valid_symbols) {
-  enum TokenType token = scan_word_spelling(lexer);
+static bool scan_contextual_word(
+  TSLexer *lexer,
+  const bool *valid_symbols,
+  bool recovering
+) {
+  const WordKind word = scan_word_spelling(lexer);
   lexer->mark_end(lexer);
-  token = promote_word(lexer, valid_symbols, token);
-  return valid_symbols[token] && emit(lexer, token);
-}
-
-static bool scan_number_token(TSLexer *lexer) {
-  return skip_number(lexer, true) != NUMBER_ABSENT && emit(lexer, NUMBER);
-}
-
-static const CompositeOperator *
-find_composite_operator(int32_t first, int32_t second) {
-  for (size_t i = 0; i < ARRAY_LENGTH(COMPOSITE_OPERATORS); i++) {
-    const CompositeOperator *entry = &COMPOSITE_OPERATORS[i];
-    if (entry->first == first && entry->second == second) {
-      return entry;
+  if (word == WORD_NAME && lexer->lookahead == '(') {
+    return emit(lexer, FUNC_NAME_WORD);
+  }
+  if (word != WORD_GETLINE) {
+    return false;
+  }
+  enum TokenType token = GETLINE_WORD;
+  if (!recovering) {
+    if (valid_symbols[GETLINE_TARGET_WORD]) {
+      token = scan_getline_operand(lexer);
+    } else if (valid_symbols[GETLINE_FIELD_WORD]) {
+      token = GETLINE_FIELD_WORD;
     }
   }
-  return NULL;
+  return emit(lexer, token);
 }
 
-static const SingleOperator *
-find_single_operator(int32_t character, const bool *valid_symbols) {
-  for (size_t i = 0; i < ARRAY_LENGTH(SINGLE_OPERATORS); i++) {
-    const SingleOperator *entry = &SINGLE_OPERATORS[i];
-    if (entry->character == character && valid_symbols[entry->token]) {
-      return entry;
-    }
-  }
-  return NULL;
-}
-
-static bool scan_operator(TSLexer *lexer, const bool *valid_symbols) {
+static bool scan_sign(TSLexer *lexer, const bool *valid_symbols) {
   const int32_t first = lexer->lookahead;
+  if (first != '+' && first != '-') {
+    return false;
+  }
   lexer->advance(lexer, false);
   lexer->mark_end(lexer);
-  const CompositeOperator *composite =
-    find_composite_operator(first, lexer->lookahead);
-  if (composite != NULL) {
+  if (lexer->lookahead == '=') {
+    return false;
+  }
+  if (lexer->lookahead == first) {
     lexer->advance(lexer, false);
     lexer->mark_end(lexer);
-    // Only an update operator before an lvalue can start a prefix update.
-    // The parser's internal tokens take the other spellings, and looking
-    // ahead in every state keeps them dependent on what follows.
-    if (
-      (
-        composite->token == INCR_OPERATOR || composite->token == DECR_OPERATOR
-      ) &&
-      !scan_lvalue_start(lexer)
-    ) {
-      return false;
-    }
-    return valid_symbols[composite->token] && emit(lexer, composite->token);
+    const enum TokenType token = first == '+' ? INCR_OPERATOR : DECR_OPERATOR;
+    return scan_lvalue_start(lexer) &&
+      valid_symbols[token] &&
+      emit(lexer, token);
   }
-  const SingleOperator *single = find_single_operator(first, valid_symbols);
-  return single != NULL && emit(lexer, single->token);
+  const enum TokenType token = first == '+' ? PLUS_OPERATOR : MINUS_OPERATOR;
+  return valid_symbols[token] && emit(lexer, token);
 }
 
 static bool scan_slash_start(
@@ -1545,15 +1418,8 @@ static bool scan_slash_start(
 ) {
   lexer->advance(lexer, false);
   lexer->mark_end(lexer);
-  if (lexer->lookahead == '=') {
-    if (valid_symbols[DIV_ASSIGN_OPERATOR]) {
-      lexer->advance(lexer, false);
-      lexer->mark_end(lexer);
-      return emit(lexer, DIV_ASSIGN_OPERATOR);
-    }
-    if (valid_symbols[DIVISION_SLASH]) {
-      return false;
-    }
+  if (lexer->lookahead == '=' && valid_symbols[DIVISION_SLASH]) {
+    return false;
   }
   if (valid_symbols[DIVISION_SLASH]) {
     return emit(lexer, DIVISION_SLASH);
@@ -1609,27 +1475,6 @@ static bool scan_backslash(ScannerState *state, TSLexer *lexer) {
     );
   }
   return scan_escape(state, lexer);
-}
-
-static bool scan_string_content(TSLexer *lexer) {
-  bool consumed = false;
-  while (!lexer->eof(lexer) && !character_in(lexer->lookahead, "\"\\\n")) {
-    consumed = true;
-    lexer->advance(lexer, false);
-  }
-  lexer->mark_end(lexer);
-  return consumed && emit(lexer, STRING_CONTENT);
-}
-
-static bool scan_ere_spelling(TSLexer *lexer, enum TokenType token) {
-  do {
-    lexer->advance(lexer, false);
-  } while (
-    is_ascii_digit(lexer->lookahead) ||
-    (token == ERE_CLASS_NAME && is_ascii_letter(lexer->lookahead))
-  );
-  lexer->mark_end(lexer);
-  return emit(lexer, token);
 }
 
 typedef struct {
@@ -1688,12 +1533,6 @@ static bool scan_ere_context(
       if (lexer->lookahead == token->first) {
         return scan_ere_compound_token(state, lexer, token, valid_symbols);
       }
-    }
-    if (valid_symbols[ERE_CLASS_NAME] && is_ascii_letter(lexer->lookahead)) {
-      return scan_ere_spelling(lexer, ERE_CLASS_NAME);
-    }
-    if (valid_symbols[ERE_DUP_COUNT] && is_ascii_digit(lexer->lookahead)) {
-      return scan_ere_spelling(lexer, ERE_DUP_COUNT);
     }
   }
   if (lexer->lookahead == '/' && valid_symbols[ERE_CLOSING]) {
@@ -1790,9 +1629,7 @@ bool tree_sitter_posix_awk_external_scanner_scan(
       lexer->mark_end(lexer);
       return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, STRING_CLOSING);
     }
-    return !recovering &&
-      valid_symbols[STRING_CONTENT] &&
-      scan_string_content(lexer);
+    return false;
   }
   if (lexer->lookahead == '#' && valid_symbols[COMMENT]) {
     return scan_comment(lexer);
@@ -1802,20 +1639,14 @@ bool tree_sitter_posix_awk_external_scanner_scan(
     lexer->mark_end(lexer);
     return emit_mode(state, lexer, LEXICAL_MODE_STRING, STRING_OPENING);
   }
+  if (is_word_start(lexer->lookahead)) {
+    return scan_contextual_word(lexer, valid_symbols, recovering);
+  }
   if (recovering) {
     return false;
-  }
-  if (is_word_start(lexer->lookahead)) {
-    return scan_word_token(lexer, valid_symbols);
-  }
-  if (
-    (is_ascii_digit(lexer->lookahead) || lexer->lookahead == '.') &&
-    valid_symbols[NUMBER]
-  ) {
-    return scan_number_token(lexer);
   }
   if (lexer->lookahead == '/') {
     return scan_slash_start(state, lexer, valid_symbols);
   }
-  return scan_operator(lexer, valid_symbols);
+  return scan_sign(lexer, valid_symbols);
 }

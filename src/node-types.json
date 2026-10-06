@@ -50,21 +50,6 @@
     }
   },
   {
-    "type": "add_assign",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "and",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "append",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "bracket_expression",
     "named": true,
     "fields": {},
@@ -99,11 +84,6 @@
     }
   },
   {
-    "type": "builtin_func_name",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "character_class",
     "named": true,
     "fields": {},
@@ -117,11 +97,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "class_name",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "collating_element",
@@ -171,16 +146,6 @@
     "fields": {}
   },
   {
-    "type": "div_assign",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "dup_count",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "end_range",
     "named": true,
     "fields": {},
@@ -198,11 +163,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "eq",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "equivalence_class",
@@ -235,7 +195,7 @@
       },
       "expression": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "extended_reg_exp",
@@ -529,17 +489,7 @@
     "fields": {}
   },
   {
-    "type": "ge",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "getline_keyword",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "in_keyword",
     "named": true,
     "fields": {}
   },
@@ -663,11 +613,6 @@
     }
   },
   {
-    "type": "le",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "lvalue",
     "named": true,
     "fields": {
@@ -728,16 +673,6 @@
     "fields": {}
   },
   {
-    "type": "mod_assign",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "mul_assign",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "multiple_expr_list",
     "named": true,
     "fields": {},
@@ -757,16 +692,6 @@
     }
   },
   {
-    "type": "name",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "ne",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "newline_opt",
     "named": true,
     "fields": {},
@@ -780,11 +705,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "no_match",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "non_unary_expr",
@@ -1346,11 +1266,6 @@
     }
   },
   {
-    "type": "number",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "one_char_or_coll_elem_ere",
     "named": true,
     "fields": {},
@@ -1380,11 +1295,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "or",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "ordinary_character",
@@ -1465,11 +1375,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "pow_assign",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "print_expr",
@@ -1794,16 +1699,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "string_content",
-    "named": true,
-    "fields": {}
-  },
-  {
-    "type": "sub_assign",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "terminatable_statement",
@@ -2617,11 +2512,31 @@
     "named": false
   },
   {
+    "type": "add_assign",
+    "named": true
+  },
+  {
+    "type": "and",
+    "named": true
+  },
+  {
+    "type": "append",
+    "named": true
+  },
+  {
     "type": "begin_keyword",
     "named": true
   },
   {
     "type": "break_keyword",
+    "named": true
+  },
+  {
+    "type": "builtin_func_name",
+    "named": true
+  },
+  {
+    "type": "class_name",
     "named": true
   },
   {
@@ -2642,7 +2557,15 @@
     "named": true
   },
   {
+    "type": "div_assign",
+    "named": true
+  },
+  {
     "type": "do_keyword",
+    "named": true
+  },
+  {
+    "type": "dup_count",
     "named": true
   },
   {
@@ -2651,6 +2574,10 @@
   },
   {
     "type": "end_keyword",
+    "named": true
+  },
+  {
+    "type": "eq",
     "named": true
   },
   {
@@ -2666,11 +2593,39 @@
     "named": true
   },
   {
+    "type": "ge",
+    "named": true
+  },
+  {
     "type": "if_keyword",
     "named": true
   },
   {
+    "type": "in_keyword",
+    "named": true
+  },
+  {
+    "type": "le",
+    "named": true
+  },
+  {
     "type": "left_anchor",
+    "named": true
+  },
+  {
+    "type": "mod_assign",
+    "named": true
+  },
+  {
+    "type": "mul_assign",
+    "named": true
+  },
+  {
+    "type": "name",
+    "named": true
+  },
+  {
+    "type": "ne",
     "named": true
   },
   {
@@ -2686,7 +2641,23 @@
     "named": true
   },
   {
+    "type": "no_match",
+    "named": true
+  },
+  {
+    "type": "number",
+    "named": true
+  },
+  {
+    "type": "or",
+    "named": true
+  },
+  {
     "type": "ordinary_character_content",
+    "named": true
+  },
+  {
+    "type": "pow_assign",
     "named": true
   },
   {
@@ -2703,6 +2674,14 @@
   },
   {
     "type": "right_anchor",
+    "named": true
+  },
+  {
+    "type": "string_content",
+    "named": true
+  },
+  {
+    "type": "sub_assign",
     "named": true
   },
   {

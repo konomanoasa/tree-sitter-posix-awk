@@ -19,25 +19,6 @@ export const EXPRESSION = {
   field: { precedence: 24, associativity: "right" },
 };
 
-function nextExpressionTier(tier, comparison) {
-  return Object.keys(EXPRESSION)
-    .filter((name) => comparison || name !== "comparison")
-    .filter((name) => EXPRESSION[name].precedence > EXPRESSION[tier].precedence)
-    .sort(
-      (left, right) =>
-        EXPRESSION[left].precedence - EXPRESSION[right].precedence,
-    )[0];
-}
-
-const bind = ({ precedence, associativity }, rule) =>
-  associativity === "left"
-    ? prec.left(precedence, rule)
-    : associativity === "right"
-      ? prec.right(precedence, rule)
-      : prec(precedence, rule);
-
-const OPERAND_PRECEDENCE = 2;
-
 export const RESERVED_WORDS = {
   keyword: [
     "BEGIN",
@@ -86,6 +67,29 @@ export const RESERVED_WORDS = {
   ],
 };
 
+const OPERAND_PRECEDENCE = 2;
+const CLASSIFICATIONS = ["unary", "non_unary"];
+
+function nextExpressionTier(tier, comparison) {
+  return Object.keys(EXPRESSION)
+    .filter(
+      (name) =>
+        (comparison || name !== "comparison") &&
+        EXPRESSION[name].precedence > EXPRESSION[tier].precedence,
+    )
+    .sort(
+      (left, right) =>
+        EXPRESSION[left].precedence - EXPRESSION[right].precedence,
+    )[0];
+}
+
+const bind = ({ precedence, associativity }, rule) =>
+  associativity === "left"
+    ? prec.left(precedence, rule)
+    : associativity === "right"
+      ? prec.right(precedence, rule)
+      : prec(precedence, rule);
+
 // Skipping blanks can reach a backslash the external scanner never saw.
 const continuationMarker = () => token.immediate("\\");
 
@@ -111,8 +115,6 @@ const twoCharacterTokenRules = Object.fromEntries(
   }).map(([name, spelling]) => [name, () => spelling]),
 );
 
-// The scanner yields an update operator only before an lvalue, where it can
-// start a prefix update. Every other spelling is an internal token.
 const trailingUpdateOperators = ($) => [
   alias($.trailing_incr, $.incr),
   alias($.trailing_decr, $.decr),
@@ -122,13 +124,7 @@ const newlineLayout = ($) => optional($.newline_opt);
 
 const afterOptionalNewline = ($, member) => seq(newlineLayout($), member);
 
-// A separate closing-hyphen token avoids competing with range separators.
 const ereClosingHyphen = ($) => alias($._ere_closing_hyphen, "-");
-
-const ereBracketListAlternatives = ($, followList) => [
-  followList,
-  seq(followList, ereClosingHyphen($)),
-];
 
 const ereRangeExpressionWith = ($, startRange) =>
   seq(
@@ -240,13 +236,6 @@ const controlStatements = ($, body) => [
   seq($._for_header, field("body", body)),
 ];
 
-const statementTerminatedBy = ($, terminator) =>
-  seq(
-    field("statement", $.terminatable_statement),
-    field("terminator", terminator),
-    newlineLayout($),
-  );
-
 const parenthesized = (member) => seq("(", member, ")");
 
 const parenthesizedPrintStatement = ($, keyword) =>
@@ -262,10 +251,14 @@ const redirectedInput = ($, get, source = $.expr) =>
     seq(field("get", get), "<", field("source", source)),
   );
 
-const pipedInput = (source, get) =>
+const pipedInput = ($, source, get) =>
   prec.right(
     EXPRESSION.field.precedence,
-    seq(field("source", source), "|", field("get", get)),
+    seq(
+      field("source", source),
+      alias($._getline_pipe, "|"),
+      field("get", get),
+    ),
   );
 
 const rawNewlines = ($) => repeat1($.newline);
@@ -345,8 +338,7 @@ const EXPRESSION_CONTEXT = {
 const classTierName = (context, classification, tier) =>
   `_${context.prefix}_${classification}_${tier}_expr`;
 
-// Hidden operand rules leak inner fields into the parent; aliased visible rules
-// prevent this.
+// Hidden operand rules leak inner fields into the parent.
 const classOperandName = (context, classification, tier) =>
   `${context.prefix}_${classification}_${tier}_operand`;
 
@@ -364,8 +356,6 @@ const aliasedClassTier = ($, context, classification, tier) =>
         : context.nonUnaryExpression
     ],
   );
-
-const CLASSIFICATIONS = ["unary", "non_unary"];
 
 const tierHelpers = (context, rules) => ({
   unary: (tier) => classTierName(context, "unary", tier),
@@ -481,7 +471,6 @@ const unaryExpressionRules = (context) => {
       ),
     );
 
-  // A postfix update must win over forwarding its lvalue as a complete atom.
   rules[nonUnary("atom")] = ($) =>
     nonUnaryAtom($, context, prec(-1, $._lvalue));
 
@@ -670,15 +659,9 @@ const tieredExpressionRules = (context) => {
   return { ...rules, ...unaryExpressionRules(context) };
 };
 
-const normalExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.normal);
-const sourceExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.source);
-const printExpressionRules = tieredExpressionRules(EXPRESSION_CONTEXT.print);
-const fieldExpressionRules = unaryExpressionRules(EXPRESSION_CONTEXT.field);
-
 const listElementTail = ($, element) =>
   seq(",", afterOptionalNewline($, element));
 
-// Build tooling imports EXPRESSION without installing the Tree-sitter DSL.
 export default globalThis.grammar?.({
   name: "posix_awk",
 
@@ -696,6 +679,7 @@ export default globalThis.grammar?.({
     $._decr_operator,
     $._plus_operator,
     $._minus_operator,
+    $._getline_pipe,
     $._ere_compound_opening,
     $._ere_escaped_compound_opening,
     $._ere_compound_single,
@@ -739,18 +723,25 @@ export default globalThis.grammar?.({
     $.comment,
     continuationMarker(),
     $._continuation_newline,
-    // Zero-width; the scanner emits it where a raw newline ends an
-    // unterminated string or ERE so the mode never leaks past the line.
     $._literal_break,
   ],
 
   inline: ($) => [
+    // Shared operator reductions can freeze reused operands after edits.
+    $._additive_operator,
+    $._multiplicative_operator,
+    $._exponentiation_operator,
+    $._comparison_operator,
+    $._match_operator,
+    $._membership_operator,
+    $._logical_and_operator,
+    $._logical_or_operator,
     $._lvalue,
     $._field_simple_get,
     $._item,
     // A recovered tail can retain errors when reused after its prefix changes.
     $._normal_conditional_tail,
-    // Unit-reduction merging must not inherit update fields through atom children.
+    // Unit-reduction merging can leak update fields through atom children.
     $._normal_non_unary_update_expr,
     $._print_non_unary_update_expr,
     $._field_non_unary_update_expr,
@@ -765,9 +756,7 @@ export default globalThis.grammar?.({
 
   conflicts: ($) => [
     [$._for_in_clause, $.postfix_lvalue],
-    // The final item joins item_list only after its terminator is known.
     [$.item_list, $._item_list],
-    // Only source-dependent target choices retain a fallback interpretation.
     [$.simple_get],
     [$.source_simple_get],
   ],
@@ -834,8 +823,7 @@ export default globalThis.grammar?.({
         ")",
       ),
 
-    param_list: ($) =>
-      seq($.name, repeat(seq(",", afterOptionalNewline($, $.name)))),
+    param_list: ($) => seq($.name, repeat(listElementTail($, $.name))),
 
     pattern: ($) => choice($.normal_pattern, $.special_pattern),
 
@@ -906,8 +894,11 @@ export default globalThis.grammar?.({
         seq($.action, newlineLayout($)),
         $._self_terminating_statement,
         seq(field("terminator", ";"), newlineLayout($)),
-        statementTerminatedBy($, $.newline),
-        statementTerminatedBy($, ";"),
+        seq(
+          field("statement", $.terminatable_statement),
+          field("terminator", choice($.newline, ";")),
+          newlineLayout($),
+        ),
       ),
 
     unterminated_statement: ($) =>
@@ -965,12 +956,7 @@ export default globalThis.grammar?.({
 
     expr_list: ($) => choice($.expr, $.multiple_expr_list),
 
-    multiple_expr_list: ($) =>
-      seq(
-        $.expr,
-        listElementTail($, $.expr),
-        repeat(listElementTail($, $.expr)),
-      ),
+    multiple_expr_list: ($) => seq($.expr, repeat1(listElementTail($, $.expr))),
 
     print_expr: ($) => choice($.unary_print_expr, $.non_unary_print_expr),
 
@@ -990,7 +976,7 @@ export default globalThis.grammar?.({
         field("operand", choice($._lvalue, alias($.prefix_field, $.lvalue))),
       ),
 
-    ...normalExpressionRules,
+    ...tieredExpressionRules(EXPRESSION_CONTEXT.normal),
 
     source_expr: ($) =>
       choice(
@@ -1002,12 +988,11 @@ export default globalThis.grammar?.({
 
     source_full_non_unary_expr: ($) => $._source_non_unary_assignment_expr,
 
-    ...sourceExpressionRules,
+    ...tieredExpressionRules(EXPRESSION_CONTEXT.source),
 
-    ...printExpressionRules,
+    ...tieredExpressionRules(EXPRESSION_CONTEXT.print),
 
-    // A pending field operand cannot start a competing pipe source.
-    ...fieldExpressionRules,
+    ...unaryExpressionRules(EXPRESSION_CONTEXT.field),
 
     nonpostfix_field_expr: ($) =>
       choice(
@@ -1034,7 +1019,10 @@ export default globalThis.grammar?.({
     _user_function_call: ($) => seq($.func_name, callArguments($)),
 
     _builtin_function_call: ($) =>
-      prec(1, seq($.builtin_func_name, callArguments($))),
+      prec(
+        EXPRESSION.field.precedence + 1,
+        seq($.builtin_func_name, callArguments($)),
+      ),
 
     _lvalue: ($) =>
       choice(
@@ -1050,8 +1038,7 @@ export default globalThis.grammar?.({
 
     postfix_lvalue: ($) =>
       choice(
-        $.name,
-        seq($.name, subscript($.expr_list)),
+        seq($.name, optional(subscript($.expr_list))),
         seq(
           field("operator", "$"),
           field("operand", alias($.postfix_field_expr, $.expr)),
@@ -1075,8 +1062,6 @@ export default globalThis.grammar?.({
         ),
       ),
 
-    // The operand of a prefix update takes no postfix update, so a getline
-    // directly under its `$` keeps the scanner's reading of the next lvalue.
     prefix_field: ($) =>
       seq(
         field("operator", "$"),
@@ -1095,7 +1080,6 @@ export default globalThis.grammar?.({
         ),
       ),
 
-    // Only this field takes the update that follows a getline source.
     redirected_field: ($) =>
       seq(
         field("operator", "$"),
@@ -1114,8 +1098,6 @@ export default globalThis.grammar?.({
         ),
       ),
 
-    // The field ends in a getline source, its own or that of its target, and
-    // the innermost such field takes the update.
     redirected_field_input_function: ($) =>
       choice(
         prec(1, $._redirected_field_input),
@@ -1152,8 +1134,6 @@ export default globalThis.grammar?.({
         field("target", alias($.nonpostfix_lvalue, $.lvalue)),
       ),
 
-    // A postfix update after the target belongs to the field, so a getline
-    // directly under `$` always takes a following lvalue.
     postfix_field_simple_get: ($) =>
       choice(
         prec(-1, alias($.field_getline_keyword, $.getline_keyword)),
@@ -1178,19 +1158,21 @@ export default globalThis.grammar?.({
 
     source_piped_input_function: ($) =>
       pipedInput(
+        $,
         alias($.source_full_non_unary_expr, $.non_unary_expr),
         alias($.source_simple_get, $.simple_get),
       ),
 
     source_unary_input_function: ($) =>
       pipedInput(
+        $,
         alias($.source_full_unary_expr, $.unary_expr),
         alias($.source_simple_get, $.simple_get),
       ),
 
-    piped_input_function: ($) => pipedInput($.non_unary_expr, $.simple_get),
+    piped_input_function: ($) => pipedInput($, $.non_unary_expr, $.simple_get),
 
-    unary_input_function: ($) => pipedInput($.unary_expr, $.simple_get),
+    unary_input_function: ($) => pipedInput($, $.unary_expr, $.simple_get),
 
     simple_get: ($) => simpleGet($),
 
@@ -1311,16 +1293,13 @@ export default globalThis.grammar?.({
     nonmatching_list: ($) => seq(token.immediate(prec(1, "^")), $.bracket_list),
 
     bracket_list: ($) =>
-      choice(
-        ...ereBracketListAlternatives($, $.follow_list),
-        ...ereBracketListAlternatives(
-          $,
+      seq(
+        choice(
+          $.follow_list,
           alias($._initial_close_follow_list, $.follow_list),
-        ),
-        ...ereBracketListAlternatives(
-          $,
           alias($._initial_hyphen_follow_list, $.follow_list),
         ),
+        optional(ereClosingHyphen($)),
       ),
 
     ...initialFollowListRules("close", ($) => $._ere_initial_close),
@@ -1460,8 +1439,7 @@ export default globalThis.grammar?.({
         $._ere_undefined_escape,
       ),
 
-    // Tree-sitter rejects the POSIX bracket spelling for these excluded
-    // delimiters.
+    // Tree-sitter rejects POSIX bracket spelling for these delimiters.
     _ordinary_character: () => token.immediate(/[^.\x5B\x5C*^$+?{|}()/\n]/),
 
     _ere_close_parenthesis: () => token.immediate(prec(1, ")")),

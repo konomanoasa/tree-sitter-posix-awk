@@ -74,9 +74,9 @@ function lines(...sourceLines) {
   return `${sourceLines.join("\n")}\n`;
 }
 
-function writeSource(testName, label, source) {
+function writeSource(label, source) {
   sourceSequence += 1;
-  const filename = `${String(sourceSequence).padStart(3, "0")}-${testName}-${label}.awk`;
+  const filename = `${String(sourceSequence).padStart(3, "0")}-${label}.awk`;
   const sourcePath = path.join(runtime.directory, filename);
   fs.writeFileSync(sourcePath, source);
   return sourcePath;
@@ -146,7 +146,7 @@ function assertStatus(label, result, expectedStatus) {
 }
 
 function assertFresh(testName, source, expectedStatus = 0) {
-  const sourcePath = writeSource(testName, "fresh", source);
+  const sourcePath = writeSource("fresh", source);
   const native = captureParse(sourcePath);
   assertStatus(`${testName} native fresh parse`, native, expectedStatus);
   if (expectedStatus === 0) clean(native.tree);
@@ -154,8 +154,8 @@ function assertFresh(testName, source, expectedStatus = 0) {
 }
 
 function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
-  const initialPath = writeSource(testName, "initial", initialSource);
-  const finalPath = writeSource(testName, "final", finalSource);
+  const initialPath = writeSource("initial", initialSource);
+  const finalPath = writeSource("final", finalSource);
   assert.deepEqual(
     applyEdits(initialSource, edits),
     Buffer.from(finalSource),
@@ -284,7 +284,7 @@ function editHistoryTest(name, source, edits) {
 }
 
 function parseSummary(source, timeout = 10_000_000) {
-  const sourcePath = writeSource("summary", "source", source);
+  const sourcePath = writeSource("summary", source);
   const result = runtime.run(
     [
       "parse",

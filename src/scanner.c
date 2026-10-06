@@ -20,6 +20,7 @@ enum TokenType {
   DECR_OPERATOR,
   PLUS_OPERATOR,
   MINUS_OPERATOR,
+  GETLINE_PIPE,
   ERE_COMPOUND_OPENING,
   ERE_ESCAPED_COMPOUND_OPENING,
   ERE_COMPOUND_SINGLE,
@@ -241,7 +242,6 @@ static bool scan_lvalue_start(TSLexer *lexer) {
   return scan_word_spelling(lexer) == WORD_NAME && lexer->lookahead != '(';
 }
 
-// Skips a string or an ERE through its closing delimiter.
 static bool skip_literal(TSLexer *lexer) {
   const int32_t delimiter = lexer->lookahead;
   for (;;) {
@@ -264,8 +264,7 @@ typedef enum {
   NUMBER_BEFORE_WORD,
 } NumberExtent;
 
-// Skips a number and, for a token, marks its end. A BEFORE_WORD number ends
-// in front of an exponent marker that was consumed in search of its digits.
+// BEFORE_WORD consumes an incomplete exponent beyond the token end.
 static NumberExtent skip_number(TSLexer *lexer, bool token) {
   bool digits = false;
   bool floating = false;
@@ -312,10 +311,7 @@ static NumberExtent skip_number(TSLexer *lexer, bool token) {
   return NUMBER_WHOLE;
 }
 
-// Skips a bracketed group. A slash opens an ERE behind an operator and
-// divides behind an operand, which includes an update operator: a prefix
-// update is followed by an lvalue, never by a slash. A raw newline is only
-// valid behind a comma or a logical operator.
+// A slash after an update is division: prefix updates require an lvalue.
 static bool skip_group(TSLexer *lexer) {
   bool operand = false;
   bool separated = false;
@@ -378,9 +374,7 @@ static bool skip_group(TSLexer *lexer) {
   return true;
 }
 
-// This cursor can revisit a prospective target without rewinding Tree-sitter's
-// lexer. Only the real lexer's furthest lookahead matters to token
-// invalidation.
+// Restoring this cursor must preserve the source lexer's furthest lookahead.
 typedef struct {
   TSLexer lexer;
   TSLexer *source;
@@ -537,8 +531,7 @@ static int probe_token(InputProbe *probe, bool operand) {
 typedef struct {
   bool valid;
   bool lvalue;
-  // A surrounding field can finish before a postfix update; unary operands
-  // cannot.
+  // Allows a surrounding field to take the next postfix update.
   bool postfix;
   bool redirected;
 } ProbeExpression;
@@ -695,7 +688,6 @@ enum ProbeStep {
   PROBE_GET_REDIRECTED,
   PROBE_EXPR_OPERAND,
   PROBE_EXPR_NEXT,
-  PROBE_EXPR_UPDATE,
   PROBE_EXPR_OPERATOR,
   PROBE_EXPR_CONSEQUENCE,
   PROBE_EXPR_RIGHT,
@@ -785,7 +777,6 @@ static bool probe_memo_reserve(ProbeParser *parser) {
   return true;
 }
 
-// Enclosing rules request every other rule again at the same position.
 static bool probe_memoizes(ProbeRule rule) {
   return rule != PROBE_PREFIX && rule != PROBE_GET;
 }
@@ -832,9 +823,6 @@ static void probe_return(ProbeParser *parser, ProbeExpression result) {
   }
 }
 
-// The explicit call stack and memo table are local to this one lookahead.
-// Nested input functions must neither exhaust the C stack nor repeatedly
-// explore the same target after its enclosing getline omits that target.
 static ProbeExpression
 probe_parse(InputProbe *input, ProbeRule rule, int argument) {
   ProbeParser parser = {.input = input};
@@ -957,19 +945,16 @@ probe_parse(InputProbe *input, ProbeRule rule, int argument) {
         break;
       case PROBE_GET_TARGET:
         frame->target = parser.result;
+        frame->stage = PROBE_GET_SOURCE;
         if (!frame->target.valid) {
           probe_restore(input, frame->key.position);
-          frame->stage = PROBE_GET_SOURCE;
-        } else if (frame->key.argument & PROBE_FIELD_GET) {
-          frame->stage = PROBE_GET_SOURCE;
-        } else {
+        } else if (!(frame->key.argument & PROBE_FIELD_GET)) {
           frame->stage = PROBE_GET_TAIL;
           probe_call(&parser, PROBE_TARGET_TAIL, 0);
         }
         break;
       case PROBE_GET_TAIL:
         if (!parser.result.valid) {
-          // An enclosing field may take this update instead of the target.
           input->deferred_target = true;
           probe_restore(input, frame->key.position);
           frame->target = (ProbeExpression){0};
@@ -1033,33 +1018,26 @@ probe_parse(InputProbe *input, ProbeRule rule, int argument) {
             probe_call(&parser, PROBE_GET, 0);
           }
         } else if (frame->token == PROBE_UPDATE) {
-          frame->operand = input->position;
-          parser.result = (ProbeExpression){
-            .valid = scan_lvalue_start(&input->lexer),
-          };
-          frame->stage = PROBE_EXPR_UPDATE;
+          const size_t operand = input->position;
+          const bool prefix = scan_lvalue_start(&input->lexer);
+          probe_restore(input, operand);
+          if (
+            (frame->key.argument & ~PROBE_NO_PIPE) <=
+            EXPR_POSTFIX &&
+            frame->left.lvalue &&
+            frame->left.postfix &&
+            (!frame->left.redirected || !prefix)
+          ) {
+            frame->left = (ProbeExpression){.valid = true};
+            frame->stage = PROBE_EXPR_NEXT;
+          } else {
+            frame->precedence = prefix ? EXPR_CONCATENATION : 0;
+            frame->stage = PROBE_EXPR_OPERATOR;
+          }
         } else {
           frame->stage = PROBE_EXPR_OPERATOR;
         }
         break;
-      case PROBE_EXPR_UPDATE: {
-        const bool prefix = parser.result.valid;
-        probe_restore(input, frame->operand);
-        if (
-          (frame->key.argument & ~PROBE_NO_PIPE) <=
-          EXPR_POSTFIX &&
-          frame->left.lvalue &&
-          frame->left.postfix &&
-          (!frame->left.redirected || !prefix)
-        ) {
-          frame->left = (ProbeExpression){.valid = true};
-          frame->stage = PROBE_EXPR_NEXT;
-        } else {
-          frame->precedence = prefix ? EXPR_CONCATENATION : 0;
-          frame->stage = PROBE_EXPR_OPERATOR;
-        }
-        break;
-      }
       case PROBE_EXPR_OPERATOR: {
         const int precedence = frame->precedence;
         if (
@@ -1208,8 +1186,6 @@ probe_getline_field(TSLexer *lexer, ProbeContext context, bool *deferred) {
       source = probe_token(&probe, false) == '<';
     }
   } else if (context == PROBE_PREFIX_GETLINE) {
-    // This getline can hand its target the next update, so an update strands
-    // only behind its own source or where it has no target.
     const bool targeted = probe_parse(&probe, PROBE_LVALUE, false).valid;
     const size_t end = probe.position;
     source = probe_token(&probe, false) == '<';
@@ -1236,9 +1212,8 @@ typedef enum {
   LVALUE_SHAPE_OPEN,
 } LvalueShape;
 
-// OPEN lvalues accept a postfix update. SETTLED lvalues leave no update
-// operator to place: they end in a unary operand, precede another operand, or
-// are malformed. POSTFIX fields leave an update outside their getline source.
+// POSTFIX leaves an update outside a getline source; OPEN may accept one.
+// SETTLED leaves no update to place, including malformed input.
 static LvalueShape
 skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
   bool targeted = false;
@@ -1254,7 +1229,6 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
         return LVALUE_SHAPE_SETTLED;
       }
       if (character_in(lexer->lookahead, "+-!")) {
-        // A source may follow the unary operand of a getline target.
         return targeted &&
             !probe_getline_field(lexer, PROBE_UNARY_TARGET, deferred)
           ? LVALUE_SHAPE_POSTFIX
@@ -1295,7 +1269,6 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
         }
         input = true;
       } else if (field && (call || word == WORD_BUILTIN)) {
-        // A built-in name may omit its arguments.
         if (
           !skip_token_layout(lexer) ||
           (lexer->lookahead == '(' && !skip_group(lexer))
@@ -1303,7 +1276,6 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
           return LVALUE_SHAPE_SETTLED;
         }
       } else if (call || word != WORD_NAME) {
-        // A getline field without a target precedes this word.
         return field || targeted ? LVALUE_SHAPE_SETTLED : LVALUE_SHAPE_NONE;
       } else {
         name = true;
@@ -1319,7 +1291,6 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
     }
     if ((input || targeted) && lexer->lookahead == '<') {
       lexer->advance(lexer, false);
-      // A source extends the field beyond what can be delimited here.
       if (lexer->lookahead != '=') {
         return probe_getline_field(lexer, PROBE_SOURCE, deferred)
           ? LVALUE_SHAPE_SETTLED
@@ -1330,11 +1301,6 @@ skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
   }
 }
 
-// The lvalue after getline is its target unless that strands an update
-// operator: behind the target, each update must prefix the next lvalue.
-// `x++ y` keeps the target while `x++` and `x++ y++` leave only postfix
-// updates. Prefix-updated getline fields also check whether their own target
-// must be omitted to accommodate the next update.
 static enum TokenType probe_getline_operand(TSLexer *lexer, bool *deferred) {
   for (bool updated = false;; updated = true) {
     const LvalueShape shape = skip_lvalue(lexer, updated, deferred);
@@ -1381,13 +1347,15 @@ static bool scan_contextual_word(
   if (word != WORD_GETLINE) {
     return false;
   }
+  // Returning GETLINE_WORD here makes repeated recovery quadratic.
+  if (recovering) {
+    return emit(lexer, ERROR_SENTINEL);
+  }
   enum TokenType token = GETLINE_WORD;
-  if (!recovering) {
-    if (valid_symbols[GETLINE_TARGET_WORD]) {
-      token = scan_getline_operand(lexer);
-    } else if (valid_symbols[GETLINE_FIELD_WORD]) {
-      token = GETLINE_FIELD_WORD;
-    }
+  if (valid_symbols[GETLINE_TARGET_WORD]) {
+    token = scan_getline_operand(lexer);
+  } else if (valid_symbols[GETLINE_FIELD_WORD]) {
+    token = GETLINE_FIELD_WORD;
   }
   return emit(lexer, token);
 }
@@ -1414,6 +1382,19 @@ static bool scan_sign(TSLexer *lexer, const bool *valid_symbols) {
   return valid_symbols[token] && emit(lexer, token);
 }
 
+// Read past output pipes too, so later edits invalidate reused nodes.
+static bool
+scan_getline_pipe(TSLexer *lexer, const bool *valid_symbols, bool recovering) {
+  lexer->advance(lexer, false);
+  lexer->mark_end(lexer);
+  const bool getline =
+    skip_token_layout(lexer) && scan_word_spelling(lexer) == WORD_GETLINE;
+  return getline &&
+    !recovering &&
+    valid_symbols[GETLINE_PIPE] &&
+    emit(lexer, GETLINE_PIPE);
+}
+
 static bool scan_slash_start(
   ScannerState *state,
   TSLexer *lexer,
@@ -1421,11 +1402,8 @@ static bool scan_slash_start(
 ) {
   lexer->advance(lexer, false);
   lexer->mark_end(lexer);
-  if (lexer->lookahead == '=' && valid_symbols[DIVISION_SLASH]) {
-    return false;
-  }
   if (valid_symbols[DIVISION_SLASH]) {
-    return emit(lexer, DIVISION_SLASH);
+    return lexer->lookahead != '=' && emit(lexer, DIVISION_SLASH);
   }
   return valid_symbols[ERE_OPENING_SLASH] &&
     emit_mode(state, lexer, LEXICAL_MODE_ERE_BODY, ERE_OPENING_SLASH);
@@ -1687,8 +1665,7 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   if (lexer->lookahead == '\\') {
     return scan_backslash(state, lexer);
   }
-  // A STRING or ERE token cannot contain a newline, so its lexical mode ends
-  // there; the zero-width token hands the newline back to the parser.
+  // Save the mode change without consuming the newline.
   if (lexer->lookahead == '\n' && state->mode != LEXICAL_MODE_OUTSIDE) {
     return valid_symbols[LITERAL_BREAK] &&
       emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, LITERAL_BREAK);
@@ -1714,6 +1691,9 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   }
   if (is_word_start(lexer->lookahead)) {
     return scan_contextual_word(lexer, valid_symbols, recovering);
+  }
+  if (lexer->lookahead == '|') {
+    return scan_getline_pipe(lexer, valid_symbols, recovering);
   }
   if (recovering) {
     return false;

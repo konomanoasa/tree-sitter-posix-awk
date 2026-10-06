@@ -1339,6 +1339,18 @@ editHistoryTest(
   ],
 );
 
+determinismTest(
+  "a getline after a reused output pipe returns it to the getline source",
+  lines("", "BEGIN {", '  print $getline < "f" | "cmd"', "}"),
+  lines("", "BEGIN {", '  print $getline < "f" | getline "cmd"', "}"),
+  [
+    { byte: 0, deleteBytes: 7, insert: "" },
+    { byte: 0, deleteBytes: 0, insert: "\nBEGIN " },
+    { byte: 34, deleteBytes: 0, insert: "getline " },
+  ],
+  (tree) => excludes(tree, "output_redirection"),
+);
+
 editHistoryTest(
   "a builtin call keeps its parenthesis after an edit history that split the name",
   lines(
@@ -1497,7 +1509,7 @@ determinismTest(
 
 function continuationHistoryTest(name, initialSource, steps) {
   test(`posix_awk: ${name}`, () => {
-    const initial = writeSource(name, "initial", initialSource);
+    const initial = writeSource("initial", initialSource);
     const edits = [];
     for (const [index, step] of steps.entries()) {
       edits.push(...step.edits);
@@ -1507,7 +1519,7 @@ function continuationHistoryTest(name, initialSource, steps) {
         Buffer.from(step.source),
         label,
       );
-      const fresh = captureParse(writeSource(name, "expected", step.source));
+      const fresh = captureParse(writeSource("expected", step.source));
       const incremental = captureParse(initial, edits);
       for (const result of [fresh, incremental]) {
         if (step.valid === false) {
@@ -1953,8 +1965,8 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
     fuzzInsertions,
     (parts) => lines(...parts),
   )) {
-    const initial = writeSource("generated", "initial", history.initial);
-    const final = writeSource("generated", "final", history.source);
+    const initial = writeSource("initial", history.initial);
+    const final = writeSource("final", history.source);
     const fresh = captureParse(final);
     const repeated = captureParse(final);
     const incremental = captureParse(initial, history.edits);
@@ -1984,7 +1996,7 @@ test("posix_awk: every byte inside a Unicode payload can be deleted and repaired
   const source = 'BEGIN { print "é😀" }\n';
   const changed = 'BEGIN { print "x" }\n';
   const payloadByte = 15;
-  const initial = writeSource("utf8-history", "initial", source);
+  const initial = writeSource("initial", source);
   const brokenPayloads = [
     [0xa9, 0xf0, 0x9f, 0x98, 0x80],
     [0xc3, 0xf0, 0x9f, 0x98, 0x80],
@@ -2014,7 +2026,7 @@ test("posix_awk: every byte inside a Unicode payload can be deleted and repaired
       const history = edits.slice(0, step + 1);
       const label = `UTF-8 byte ${removedByte}, edit ${step + 1}`;
       assert.deepEqual(applyEdits(source, history), expectedSource, label);
-      const final = writeSource("utf8-history", "expected", expectedSource);
+      const final = writeSource("expected", expectedSource);
       const fresh = captureParse(final);
       const incremental = captureParse(initial, history);
       for (const result of [fresh, incremental]) {
@@ -2036,6 +2048,27 @@ test("posix_awk: every byte inside a Unicode payload can be deleted and repaired
     }
   }
 });
+
+for (const { operator, replacementByte, end } of [
+  { operator: "<", replacementByte: 47, end: 54 },
+  { operator: "~", replacementByte: 47, end: 54 },
+  { operator: "&&", replacementByte: 48, end: 55 },
+  { operator: "||", replacementByte: 48, end: 55 },
+]) {
+  determinismTest(
+    `replacing an update extends the ${operator} operand inside a getline source`,
+    `{ getline $getline < x ~ y | getline z ${operator} "f" ++ }\n`,
+    `{ getline $getline < x ~ y | getline z++ ${operator} "f" getline }\n`,
+    [
+      { byte: 38, deleteBytes: 0, insert: "++" },
+      { byte: replacementByte, deleteBytes: 2, insert: "getline" },
+    ],
+    (tree) => {
+      assert.match(tree, new RegExp(`^0:21 +- +0:${end} +source: expr$`, "m"));
+      assert.equal(matchingLineCount(tree, /target: lvalue$/), 1);
+    },
+  );
+}
 
 const validExpressions = [
   "-getline x++",
@@ -2110,7 +2143,7 @@ const validExpressions = [
 for (const expression of validExpressions) {
   test(`posix_awk: each single-byte repair restores ${expression}`, () => {
     const source = `{ ${expression} }\n`;
-    const fresh = captureParse(writeSource("getline-probe", "fresh", source));
+    const fresh = captureParse(writeSource("fresh", source));
     assertStatus(expression, fresh, 0);
     clean(fresh.tree);
     for (let byte = 0; byte < source.length; byte += 1) {

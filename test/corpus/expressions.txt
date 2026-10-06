@@ -202,6 +202,73 @@ BEGIN {
       (newline))))
 
 ==================
+a field reference applies to a builtin call
+==================
+
+BEGIN {
+  $length(name) = $substr(name, 1)
+  $rand()++
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (builtin_func_name)
+                          (expr_list
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))))))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (expr
+                            (non_unary_expr
+                              (builtin_func_name)
+                              (expr_list
+                                (multiple_expr_list
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (name))))
+                                  (expr
+                                    (non_unary_expr
+                                      (number))))))))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (builtin_func_name))))
+                    (incr)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
 multiple expressions form a membership key
 ==================
 

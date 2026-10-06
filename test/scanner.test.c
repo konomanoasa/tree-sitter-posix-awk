@@ -708,6 +708,69 @@ static int test_slash_dispatch(void) {
   return failed;
 }
 
+static int test_getline_pipe_lookahead(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    bool expected_scanned;
+  } cases[] = {
+    {"a pipe before getline continues a getline source", "| getline", true},
+    {"a pipe adjacent to getline continues a getline source", "|getline", true},
+    {"a pipe before a continued getline excludes the layout",
+      "| \\\ngetline",
+      true},
+    {"a pipe before a command leaves an output redirection",
+      "| \"cmd\"",
+      false},
+    {"a pipe before a longer word leaves an output redirection",
+      "| getlinex",
+      false},
+    {"a getline inside a comment does not follow a pipe", "| # getline", false},
+    {"logical or is not a getline pipe", "|| getline", false},
+  };
+  int failed = 0;
+  bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+  valid_symbols[GETLINE_PIPE] = true;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].expected_scanned,
+      GETLINE_PIPE,
+      1
+    );
+  }
+  static const struct {
+    const char *name;
+    bool recovering;
+  } read_cases[] = {
+    {"an output redirection reads the getline after its pipe", false},
+    {"error mode reads the getline after a pipe", true},
+  };
+  for (size_t i = 0; i < ARRAY_LENGTH(read_cases); i++) {
+    bool symbols[TOKEN_TYPE_COUNT] = {false};
+    if (read_cases[i].recovering) {
+      set_all_symbols_valid(symbols);
+    }
+    MockLexer mock = make_mock_lexer("| getline x");
+    ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
+    const bool scanned =
+      tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, symbols);
+    if (scanned || mock.offset != strlen("| getline")) {
+      fprintf(
+        stderr,
+        "%s: scanned=%u offset=%zu\n",
+        read_cases[i].name,
+        scanned,
+        mock.offset
+      );
+      failed = 1;
+    }
+  }
+  return failed;
+}
+
 static int test_word_boundary_lookahead(void) {
   static const struct {
     const char *name;
@@ -1134,7 +1197,6 @@ static int test_linear_word_boundary_lookahead(void) {
     ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
     bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
     valid_symbols[cases[i].expected_symbol] = true;
-    // The getline lookahead runs where the parser accepts a target.
     valid_symbols[GETLINE_TARGET_WORD] =
       cases[i].expected_symbol == GETLINE_OMITTED_WORD;
     const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
@@ -1583,10 +1645,10 @@ static int test_error_mode_real_tokens(void) {
       FUNC_NAME_WORD,
       6,
       LEXICAL_MODE_OUTSIDE},
-    {"error mode supplies getline without target lookahead",
+    {"error mode prevents getline from restarting an input expression",
       "getline x++",
       true,
-      GETLINE_WORD,
+      ERROR_SENTINEL,
       7,
       LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses division classification",
@@ -2072,6 +2134,7 @@ int main(void) {
   failed |= test_literal_classification();
   failed |= test_blank_skip_token_ranges();
   failed |= test_slash_dispatch();
+  failed |= test_getline_pipe_lookahead();
   failed |= test_word_boundary_lookahead();
   failed |= test_getline_operand_lookahead();
   failed |= test_update_operator_lookahead();

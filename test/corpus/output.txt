@@ -836,6 +836,88 @@ BEGIN {
       (newline))))
 
 ==================
+a pipe after a getline field source redirects print output
+==================
+
+BEGIN {
+  print $getline < "f" | "cmd"
+  print $getline < getline x++ | "cmd"
+}
+
+---
+
+(program
+  (item_list
+    (newline_opt
+      (newline))
+    (item
+      (pattern
+        (special_pattern
+          (begin_keyword)))
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (non_unary_input_function
+                                  (simple_get
+                                    (getline_keyword))
+                                  (expr
+                                    (non_unary_expr
+                                      (string
+                                        (string_content))))))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (string
+                          (string_content))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (non_unary_input_function
+                                  (simple_get
+                                    (getline_keyword))
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_expr
+                                        (non_unary_input_function
+                                          (simple_get
+                                            (getline_keyword))))
+                                      (non_unary_expr
+                                        (lvalue
+                                          (name))
+                                        (incr))))))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (string
+                          (string_content))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+==================
 output redirection owns a comparison in its target expression
 ==================
 
@@ -1240,5 +1322,131 @@ destination
                         (lvalue
                           (name))))))))
             (newline)))))
+    (terminator
+      (newline))))
+
+==================
+a comparison after getline stays inside its source in print
+==================
+{ print $getline < "f" > "out" }
+
+---
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (lvalue
+                            (expr
+                              (non_unary_expr
+                                (non_unary_input_function
+                                  (simple_get
+                                    (getline_keyword))
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_expr
+                                        (string
+                                          (string_content)))
+                                      (expr
+                                        (non_unary_expr
+                                          (string
+                                            (string_content)))))))))))))))))))))
+    (terminator
+      (newline))))
+
+==================
+parentheses end a getline before output redirection
+==================
+{ print ($getline < "f") > "out" }
+
+---
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (print_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_input_function
+                                      (simple_get
+                                        (getline_keyword))
+                                      (expr
+                                        (non_unary_expr
+                                          (string
+                                            (string_content))))))))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (string
+                          (string_content))))))))))))
+    (terminator
+      (newline))))
+
+==================
+a parenthesized getline permits a comparison in the output destination
+==================
+{ printf ($getline < "cmd") > a < x }
+
+---
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (print_statement
+                  (simple_print_statement
+                    (printf_keyword)
+                    (print_expr_list
+                      (print_expr
+                        (non_unary_print_expr
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_input_function
+                                      (simple_get
+                                        (getline_keyword))
+                                      (expr
+                                        (non_unary_expr
+                                          (string
+                                            (string_content))))))))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (non_unary_expr
+                          (lvalue
+                            (name)))
+                        (expr
+                          (non_unary_expr
+                            (lvalue
+                              (name))))))))))))))
     (terminator
       (newline))))

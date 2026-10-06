@@ -72,11 +72,7 @@ const fieldContractQuery = String.raw`(action
 
 test("posix_awk: anonymous-token field contract", () => {
   const queryPath = path.join(runtime.directory, "fields.scm");
-  const sourcePath = writeSource(
-    "anonymous-token-field-contract",
-    "source",
-    fieldContractSource,
-  );
+  const sourcePath = writeSource("source", fieldContractSource);
   fs.writeFileSync(queryPath, fieldContractQuery);
   const result = runtime.run(
     [
@@ -418,7 +414,7 @@ for (const { source, spelling, kind, start } of [
   { source: "{ print x >> y }", spelling: ">>", kind: "append", start: 10 },
 ]) {
   test(`posix_awk: ${kind} is contiguous and cannot span a continuation`, () => {
-    const result = captureParse(writeSource(kind, "joined", source));
+    const result = captureParse(writeSource("joined", source));
     assertStatus(kind, result, 0);
     clean(result.tree);
     const leaves = [
@@ -430,7 +426,7 @@ for (const { source, spelling, kind, start } of [
       .map((match) => [Number(match[1]), Number(match[2]), match[4]]);
     assert.deepEqual(leaves, [[start, start + 2, spelling]]);
     const split = `${source.slice(0, start + 1)}\\\n${source.slice(start + 1)}`;
-    const separated = captureParse(writeSource(kind, "separated", split));
+    const separated = captureParse(writeSource("separated", split));
     assert.ok(separated.status === 0 || separated.status === 1);
     dirty(separated.tree);
     assert.equal(separated.tree.includes(`${kind} \`${spelling}\``), false);
@@ -611,7 +607,7 @@ for (const [name, source] of [
   ],
 ]) {
   test(`posix_awk: a raw backslash inside ${name} requires recovery`, () => {
-    const result = captureParse(writeSource(name, "raw-backslash", source));
+    const result = captureParse(writeSource("raw-backslash", source));
     assertStatus(name, result, 1);
     dirty(result.tree);
   });
@@ -740,7 +736,7 @@ for (const {
 
 for (const { name, source } of membershipPrecedenceCases) {
   test(`posix_awk: unparenthesized membership before ${name} is rejected`, () => {
-    const result = captureParse(writeSource(name, "invalid", source));
+    const result = captureParse(writeSource("invalid", source));
     assert.ok(
       result.status === 0 || result.status === 1,
       parseDescription(name, result),
@@ -1152,7 +1148,7 @@ const invalidSyntaxCases = [
 
 for (const { name, source } of invalidSyntaxCases) {
   test(`posix_awk: ${name}; fresh recovery repeats across processes`, () => {
-    const sourcePath = writeSource(name, "invalid", source);
+    const sourcePath = writeSource("invalid", source);
     const result = captureParse(sourcePath);
     assert.ok(
       result.status === 0 || result.status === 1,
@@ -1167,11 +1163,7 @@ for (const { name, source } of invalidSyntaxCases) {
 
 test("posix_awk: Unicode source retains byte ranges without normalization", () => {
   const result = captureParse(
-    writeSource(
-      "unicode-source-ranges",
-      "source",
-      'BEGIN { print "é😀" }\n# e\u0301\n',
-    ),
+    writeSource("source", 'BEGIN { print "é😀" }\n# e\u0301\n'),
   );
   assertStatus("Unicode source", result, 0);
   clean(result.tree);
@@ -1222,12 +1214,22 @@ test("posix_awk: long unterminated strings parse through EOF with native recover
   assert.equal(parseSummary(source).successful, false);
 });
 
+test("posix_awk: repeated invalid input functions recover through EOF within one second", () => {
+  for (const source of [
+    `${") getline < ".repeat(1200)}\n`,
+    `BEGIN { ${"] ^ getline < , 1 ".repeat(1200)}}\n`,
+  ]) {
+    assert.equal(parseSummary(source, 1_000_000).successful, false);
+  }
+});
+
 test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
   assert.throws(() => parseSummary(`BEGIN { ${"x++;".repeat(16_000)} }\n`, 1));
 });
 
 for (const expression of [
   "print getline x++",
+  'print $getline < "cmd" > a < x',
   "getline x++++",
   "a + (1,2) in array",
   "$getline $-x^2++",
@@ -1236,9 +1238,7 @@ for (const expression of [
   "$getline < y++++++",
 ]) {
   test(`posix_awk: reject ${expression}`, () => {
-    const result = captureParse(
-      writeSource("getline-probe", "invalid", `{ ${expression} }\n`),
-    );
+    const result = captureParse(writeSource("invalid", `{ ${expression} }\n`));
     assert.ok(result.status === 0 || result.status === 1);
     dirty(result.tree);
   });

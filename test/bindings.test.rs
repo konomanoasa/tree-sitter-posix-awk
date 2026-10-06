@@ -100,7 +100,7 @@ const LEAF_CASES: &[LeafCase] = &[
   LeafCase {
     name: "an ERE repetition count remains one leaf",
     source: "/a{12}/\n",
-    kind: "dup_count",
+    kind: "duplication_count",
     range: 3..5,
   },
 ];
@@ -124,7 +124,7 @@ const ERE_CASES: &[EreCase] = &[
       (")", 6, 7),
       (")", 7, 8),
       ("*", 8, 9),
-      ("?", 9, 10),
+      ("repetition_modifier", 9, 10),
       ("/", 10, 11),
     ],
   },
@@ -133,21 +133,21 @@ const ERE_CASES: &[EreCase] = &[
     source: r"/a é)}.\n\/\\\141\q(a*?)/",
     leaves: &[
       ("/", 0, 1),
-      ("ordinary_character_content", 1, 2),
-      ("ordinary_character_content", 2, 3),
-      ("ordinary_character_content", 3, 5),
-      (")", 5, 6),
-      ("}", 6, 7),
+      ("ordinary_character", 1, 2),
+      ("ordinary_character", 2, 3),
+      ("ordinary_character", 3, 5),
+      ("ordinary_character", 5, 6),
+      ("ordinary_character", 6, 7),
       (".", 7, 8),
       ("escape_sequence", 8, 10),
       ("escaped_delimiter", 10, 12),
-      ("escape_sequence", 12, 14),
+      ("quoted_character", 12, 14),
       ("escape_sequence", 14, 18),
       ("escape_sequence", 18, 20),
       ("(", 20, 21),
-      ("ordinary_character_content", 21, 22),
+      ("ordinary_character", 21, 22),
       ("*", 22, 23),
-      ("?", 23, 24),
+      ("repetition_modifier", 23, 24),
       (")", 24, 25),
       ("/", 25, 26),
     ],
@@ -157,10 +157,10 @@ const ERE_CASES: &[EreCase] = &[
     source: r"/ \.[ \]][[. \..]]/",
     leaves: &[
       ("/", 0, 1),
-      ("ordinary_character_content", 1, 2),
-      ("escape_sequence", 2, 4),
+      ("ordinary_character", 1, 2),
+      ("quoted_character", 2, 4),
       ("[", 4, 5),
-      ("collating_element_content", 5, 6),
+      ("collating_element_single", 5, 6),
       ("escape_sequence", 6, 8),
       ("]", 8, 9),
       ("[", 9, 10),
@@ -206,18 +206,14 @@ const ERE_CASES: &[EreCase] = &[
     ],
   },
   EreCase {
-    name: "compound punctuation, spaces and Unicode retain individual leaves",
+    name: "raw compound punctuation, spaces and Unicode share one payload leaf",
     source: r"/[[. a-]🙂.]]/",
     leaves: &[
       ("/", 0, 1),
       ("[", 1, 2),
       ("[", 2, 3),
       (".", 3, 4),
-      ("collating_element_content", 4, 5),
-      ("collating_element_content", 5, 6),
-      ("collating_element_content", 6, 7),
-      ("collating_element_content", 7, 8),
-      ("collating_element_content", 8, 12),
+      ("collating_element_multi", 4, 12),
       (".", 12, 13),
       ("]", 13, 14),
       ("]", 14, 15),
@@ -230,9 +226,9 @@ const ERE_CASES: &[EreCase] = &[
     leaves: &[
       ("/", 0, 1),
       ("[", 1, 2),
-      ("collating_element_content", 2, 3),
-      ("collating_element_content", 3, 4),
-      ("collating_element_content", 4, 5),
+      ("collating_element_single", 2, 3),
+      ("collating_element_single", 3, 4),
+      ("collating_element_single", 4, 5),
       ("escaped_delimiter", 5, 7),
       ("escape_sequence", 7, 9),
       ("-", 9, 10),
@@ -241,15 +237,15 @@ const ERE_CASES: &[EreCase] = &[
     ],
   },
   EreCase {
-    name: "range and list hyphens retain anonymous leaves",
+    name: "a leading hyphen is a named endpoint before range and list hyphens",
     source: r"/[--ac-]/",
     leaves: &[
       ("/", 0, 1),
       ("[", 1, 2),
-      ("-", 2, 3),
+      ("collating_element_single", 2, 3),
       ("-", 3, 4),
-      ("collating_element_content", 4, 5),
-      ("collating_element_content", 5, 6),
+      ("collating_element_single", 4, 5),
+      ("collating_element_single", 5, 6),
       ("-", 6, 7),
       ("]", 7, 8),
       ("/", 8, 9),
@@ -449,7 +445,6 @@ fn empty_ere_and_groups_own_only_opening_and_closing_delimiters() {
     ),
     ("ere_expression", "empty group", "/()/", 1..3),
     ("ere_expression", "nested group", "/(())/", 2..4),
-    ("ere_expression", "repeated group", "/()*?/", 1..3),
     ("ere_expression", "concatenated group", "/a()b/", 2..4),
     ("ere_expression", "left alternation group", "/()|a/", 1..3),
     (
@@ -493,6 +488,76 @@ fn empty_ere_and_groups_own_only_opening_and_closing_delimiters() {
 }
 
 #[test]
+fn ere_fields_select_direct_source_children_in_flat_expressions() {
+  let source = r"/(a|bc){2,3}?d{4}e{5,}()[[:alpha:][.ch.][=é=][.a\nb.]]/";
+  let tree = parse(source, "shared ERE fields");
+  for (kind, text, expected) in [
+    (
+      "ere_expression",
+      "(a|bc){2,3}?",
+      vec![("opening", "("), ("expression", "a|bc"), ("closing", ")")],
+    ),
+    (
+      "ere_expression",
+      "()",
+      vec![("opening", "("), ("closing", ")")],
+    ),
+    (
+      "ere_dupl_symbol",
+      "{2,3}?",
+      vec![("minimum", "2"), ("maximum", "3"), ("modifier", "?")],
+    ),
+    ("ere_dupl_symbol", "{4}", vec![("minimum", "4")]),
+    ("ere_dupl_symbol", "{5,}", vec![("minimum", "5")]),
+    ("character_class", "[:alpha:]", vec![("name", "alpha")]),
+    ("collating_symbol", "[.ch.]", vec![("element", "ch")]),
+    ("equivalence_class", "[=é=]", vec![("element", "é")]),
+    ("collating_symbol", r"[.a\nb.]", vec![("element", r"a\nb")]),
+  ] {
+    let start = source.find(text).unwrap();
+    let node = tree
+      .root_node()
+      .descendant_for_byte_range(start, start + text.len())
+      .unwrap();
+    assert_eq!(node.kind(), kind, "{text}");
+    let mut cursor = node.walk();
+    let actual: Vec<_> = node
+      .children(&mut cursor)
+      .enumerate()
+      .filter_map(|(index, child)| {
+        node
+          .field_name_for_child(index as u32)
+          .map(|field| (field, child.utf8_text(source.as_bytes()).unwrap()))
+      })
+      .collect();
+    assert_eq!(actual, expected, "{text}");
+    for (field, value) in expected {
+      let child = node.child_by_field_name(field).unwrap();
+      assert_eq!(child.parent(), Some(node), "{text}: {field}");
+      assert_eq!(
+        child.utf8_text(source.as_bytes()).unwrap(),
+        value,
+        "{text}: {field}"
+      );
+    }
+  }
+  let tree = parse("/()*?+?/", "repeated empty group");
+  let expression = tree.root_node().descendant_for_byte_range(1, 7).unwrap();
+  assert_eq!(expression.kind(), "ere_expression");
+  assert!(expression.child_by_field_name("expression").is_none());
+  let children: Vec<_> = expression
+    .children(&mut expression.walk())
+    .map(|node| node.kind())
+    .collect();
+  assert_eq!(children, ["(", ")", "ere_dupl_symbol", "ere_dupl_symbol"]);
+  for symbol in expression.named_children(&mut expression.walk()) {
+    let modifier = symbol.child_by_field_name("modifier").unwrap();
+    assert_eq!(modifier.kind(), "repetition_modifier");
+    assert_eq!(modifier.child_count(), 0);
+  }
+}
+
+#[test]
 fn fields_belong_to_direct_children() {
   let language: tree_sitter::Language = grammar::LANGUAGE.into();
   let fields: Vec<_> = (1..=language.field_count())
@@ -525,6 +590,11 @@ fn fields_belong_to_direct_children() {
       "{$-x++; $(-x)++; $$x++; $getline x++; $getline $-x++; $getline $(x)++}\n",
     ),
     ("group alternation", "/(a|b)c/"),
+    ("ordinary source escapes", r"/a\n\//"),
+    (
+      "intervals and compound payloads",
+      r"/()[[.a.][.ch.][=é=][.a\nb.][:alpha:]]{2,3}?/",
+    ),
     ("group concatenation", "/(ab)c/"),
     ("nested group repetition", "/((a|b)+?c)d/"),
     ("ERE boundary continuation", "/(a|b)/\\\n&& /c/"),

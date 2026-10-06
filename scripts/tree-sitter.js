@@ -148,7 +148,7 @@ function createTreeSitter() {
         env: {
           ...process.env,
           ...(process.platform === "darwin"
-            ? { CC: "/opt/homebrew/opt/llvm/bin/clang" }
+            ? { CC: process.env.CC ?? "clang" }
             : {}),
           APPDATA: configDirectory,
           LOCALAPPDATA: cacheDirectory,

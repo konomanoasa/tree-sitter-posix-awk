@@ -1862,6 +1862,83 @@ static void test_reuse_allocator_contract(void) {
 }
 #endif
 
+static int test_collating_payload_classification(void) {
+  const struct {
+    const char *name;
+    const char *source;
+    LexicalMode mode;
+    enum TokenType symbol;
+    size_t end;
+    LexicalMode final_mode;
+  } cases[] = {
+    {"raw opener stops before an escape beyond its first terminator",
+      "[.a.]\\n",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_COMPOUND_OPENING,
+      1,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"escaped opener keeps its one-byte range",
+      "[.a\\n.]",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_ESCAPED_COMPOUND_OPENING,
+      1,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"nonmatching terminator remains in an escaped equivalence payload",
+      "[=a.]\\n=]",
+      LEXICAL_MODE_ERE_BODY,
+      ERE_ESCAPED_COMPOUND_OPENING,
+      1,
+      LEXICAL_MODE_ERE_EQUIVALENCE},
+    {"a single payload excludes both closing bytes",
+      "a.]",
+      LEXICAL_MODE_ERE_COLLATING,
+      ERE_COMPOUND_SINGLE,
+      1,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"a multi-character payload spans through a nonmatching terminator",
+      "a=].]",
+      LEXICAL_MODE_ERE_COLLATING,
+      ERE_COMPOUND_MULTI,
+      3,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"a multi-character equivalence payload can begin with a meta character",
+      "-a=]",
+      LEXICAL_MODE_ERE_EQUIVALENCE,
+      ERE_COMPOUND_MULTI,
+      2,
+      LEXICAL_MODE_ERE_EQUIVALENCE},
+    {"raw compound payload ends at its first matching terminator",
+      "ab.]c.]",
+      LEXICAL_MODE_ERE_COLLATING,
+      ERE_COMPOUND_MULTI,
+      2,
+      LEXICAL_MODE_ERE_COLLATING},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    if (cases[i].mode == LEXICAL_MODE_ERE_BODY) {
+      valid_symbols[ERE_COMPOUND_OPENING] = true;
+      valid_symbols[ERE_ESCAPED_COMPOUND_OPENING] = true;
+    } else {
+      valid_symbols[ERE_COMPOUND_SINGLE] = true;
+      valid_symbols[ERE_COMPOUND_MULTI] = true;
+    }
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      cases[i].mode,
+      true,
+      cases[i].symbol,
+      0,
+      cases[i].end,
+      cases[i].final_mode
+    );
+  }
+  return failed;
+}
+
 static int test_compound_terminators_do_not_become_content(void) {
   const struct {
     const char *name;
@@ -2002,6 +2079,7 @@ int main(void) {
   failed |= test_linear_word_boundary_lookahead();
   failed |= test_long_token_spans();
   failed |= test_ere_state_transitions();
+  failed |= test_collating_payload_classification();
   failed |= test_compound_terminators_do_not_become_content();
   failed |= test_string_and_comment_modes();
   failed |= test_newline_ends_every_literal_mode();

@@ -140,9 +140,9 @@ const initialFollowListRules = (prefix, firstElement) => {
   const name = (part) => `_initial_${prefix}_${part}`;
   return {
     [name("follow_list")]: ($) =>
-      choice(
+      seq(
         alias($[name("expression_term")], $.expression_term),
-        seq(alias($[name("follow_list")], $.follow_list), $.expression_term),
+        repeat($.expression_term),
       ),
     [name("expression_term")]: ($) =>
       choice(
@@ -155,12 +155,18 @@ const initialFollowListRules = (prefix, firstElement) => {
       ereRangeExpressionWith($, alias($[name("start_range")], $.start_range)),
     [name("start_range")]: ($) =>
       seq(alias($[name("end_range")], $.end_range), $._ere_bracket_hyphen),
-    [name("end_range")]: ($) => alias(firstElement($), $.collating_element),
+    [name("end_range")]: ($) => firstElement($),
   };
 };
 
-const ereCompoundOpening = ($, punctuation) =>
-  seq(alias($._ere_compound_opening, "["), token.immediate(punctuation));
+const ereCompoundOpening = ($, punctuation, escaped = false) =>
+  seq(
+    alias(
+      escaped ? $._ere_escaped_compound_opening : $._ere_compound_opening,
+      "[",
+    ),
+    token.immediate(punctuation),
+  );
 
 const ereCompoundClosing = (closing, punctuation) =>
   seq(alias(closing, punctuation), token.immediate("]"));
@@ -171,62 +177,46 @@ const ereExpressionRules = (insideGroup) => {
     insideGroup ? alias($[name(rule)], $[rule]) : $[rule];
   return {
     [name("extended_reg_exp")]: ($) =>
-      choice(
+      seq(
         member($, "ere_branch"),
-        seq(
-          field("left", member($, "extended_reg_exp")),
-          field("operator", token.immediate("|")),
-          field("right", member($, "ere_branch")),
-        ),
+        repeat(seq(token.immediate("|"), member($, "ere_branch"))),
       ),
 
-    [name("ere_branch")]: ($) =>
-      choice(
-        member($, "ere_expression"),
-        seq(
-          field("left", member($, "ere_branch")),
-          field("right", member($, "ere_expression")),
-        ),
-      ),
+    [name("ere_branch")]: ($) => repeat1(member($, "ere_expression")),
 
     [name("ere_expression")]: ($) =>
-      choice(
-        member($, "one_char_or_coll_elem_ere"),
-        $.left_anchor,
-        $.right_anchor,
-        seq(
-          field("opening", token.immediate("(")),
-          optional(
-            field(
-              "expression",
-              alias($.group_extended_reg_exp, $.extended_reg_exp),
+      seq(
+        choice(
+          member($, "one_char_or_coll_elem_ere"),
+          token.immediate("^"),
+          token.immediate("$"),
+          seq(
+            field("opening", token.immediate("(")),
+            optional(
+              field(
+                "expression",
+                alias($.group_extended_reg_exp, $.extended_reg_exp),
+              ),
             ),
+            field("closing", $._ere_close_parenthesis),
           ),
-          field("closing", $._ere_close_parenthesis),
         ),
-        seq(
-          field("operand", member($, "ere_expression")),
-          field("operator", $.ere_dupl_symbol),
-        ),
+        repeat($.ere_dupl_symbol),
       ),
 
     [name("one_char_or_coll_elem_ere")]: ($) =>
       choice(
-        member($, "ordinary_character"),
+        alias($._ordinary_character, $.ordinary_character),
+        ...(insideGroup
+          ? []
+          : [alias(token.immediate(")"), $.ordinary_character)]),
+        alias(token.immediate("}"), $.ordinary_character),
+        $.ordinary_character,
         $.quoted_character,
-        $.wildcard,
+        token.immediate("."),
         $.bracket_expression,
         alias($.ere_octal_escape_sequence, $.escape_sequence),
         alias($.ere_undefined_escape_sequence, $.escape_sequence),
-      ),
-
-    [name("ordinary_character")]: ($) =>
-      choice(
-        alias($._ordinary_character, $.ordinary_character_content),
-        ...(insideGroup ? [] : [$._ere_ordinary_close_parenthesis]),
-        $._ere_ordinary_close_brace,
-        $.escaped_delimiter,
-        alias($.ere_named_escape_sequence, $.escape_sequence),
       ),
   };
 };
@@ -707,6 +697,9 @@ export default globalThis.grammar?.({
     $._plus_operator,
     $._minus_operator,
     $._ere_compound_opening,
+    $._ere_escaped_compound_opening,
+    $._ere_compound_single,
+    $._ere_compound_multi,
     $._ere_dot_closing,
     $._ere_equal_closing,
     $._ere_colon_closing,
@@ -1262,15 +1255,16 @@ export default globalThis.grammar?.({
     ...ereExpressionRules(false),
     ...ereExpressionRules(true),
 
-    quoted_character: ($) =>
-      alias($.ere_quoted_escape_sequence, $.escape_sequence),
+    quoted_character: ($) => $._ere_quoted_escape,
 
-    // Aliasing preserves the wrapper even when no other rule shares the token.
-    wildcard: () => alias(token.immediate("."), "."),
-
-    left_anchor: () => token.immediate("^"),
-
-    right_anchor: () => token.immediate("$"),
+    ordinary_character: ($) =>
+      field(
+        "escape",
+        choice(
+          $.escaped_delimiter,
+          alias($.ere_named_escape_sequence, $.escape_sequence),
+        ),
+      ),
 
     ere_dupl_symbol: ($) =>
       prec.right(
@@ -1281,21 +1275,29 @@ export default globalThis.grammar?.({
             token.immediate("?"),
             $._ere_interval,
           ),
-          optional(field("modifier", $.repetition_modifier)),
+          optional(
+            field(
+              "modifier",
+              alias(token.immediate("?"), $.repetition_modifier),
+            ),
+          ),
         ),
       ),
-
-    repetition_modifier: () => alias(token.immediate("?"), "?"),
 
     _ere_interval: ($) =>
       seq(
         token.immediate("{"),
-        $.dup_count,
-        optional(seq(token.immediate(","), optional($.dup_count))),
+        field("minimum", $.duplication_count),
+        optional(
+          seq(
+            token.immediate(","),
+            optional(field("maximum", $.duplication_count)),
+          ),
+        ),
         $._ere_close_brace,
       ),
 
-    dup_count: () => token.immediate(/[0-9]+/),
+    duplication_count: () => token.immediate(/[0-9]+/),
 
     bracket_expression: ($) =>
       seq(
@@ -1326,14 +1328,14 @@ export default globalThis.grammar?.({
     ...initialFollowListRules("hyphen", ($) => $._ere_initial_hyphen),
 
     _ere_initial_close: ($) =>
-      alias(token.immediate("]"), $.collating_element_content),
-
-    // Inlining lets the hyphen alias replace the collating_element wrapper.
+      alias(token.immediate("]"), $.collating_element_single),
     _ere_initial_hyphen: ($) =>
-      choice($._ere_bracket_hyphen, ereClosingHyphen($)),
+      choice(
+        alias(token.immediate("-"), $.collating_element_single),
+        alias($._ere_closing_hyphen, $.collating_element_single),
+      ),
 
-    follow_list: ($) =>
-      choice($.expression_term, seq($.follow_list, $.expression_term)),
+    follow_list: ($) => repeat1($.expression_term),
 
     expression_term: ($) => choice($.single_expression, $.range_expression),
 
@@ -1344,35 +1346,67 @@ export default globalThis.grammar?.({
 
     start_range: ($) => seq($.end_range, $._ere_bracket_hyphen),
 
-    end_range: ($) => choice($.collating_element, $.collating_symbol),
+    end_range: ($) =>
+      choice(
+        alias($._ere_bracket_character, $.collating_element_single),
+        alias($._ere_bracket_literal_open, $.collating_element_single),
+        $.collating_element,
+        $.collating_symbol,
+      ),
 
     collating_element: ($) =>
       choice(
-        alias($._ere_bracket_character, $.collating_element_content),
-        alias($._ere_bracket_literal_open, $.collating_element_content),
         $.escaped_delimiter,
         alias($.ere_bracket_escape_sequence, $.escape_sequence),
       ),
 
     collating_symbol: ($) =>
       seq(
-        $._ere_open_dot,
         choice(
-          alias($._ere_compound_collating_element, $.collating_element),
-          $.meta_character,
+          seq(
+            ereCompoundOpening($, "."),
+            field(
+              "element",
+              choice($._ere_raw_collating_element, $.meta_character),
+            ),
+          ),
+          seq(
+            ereCompoundOpening($, ".", true),
+            field(
+              "element",
+              alias($._ere_compound_collating_element, $.collating_element),
+            ),
+          ),
         ),
         $._ere_dot_close,
       ),
 
     equivalence_class: ($) =>
       seq(
-        $._ere_open_equal,
-        alias($._ere_compound_collating_element, $.collating_element),
+        choice(
+          seq(
+            ereCompoundOpening($, "="),
+            field("element", $._ere_raw_collating_element),
+          ),
+          seq(
+            ereCompoundOpening($, "=", true),
+            field(
+              "element",
+              alias($._ere_compound_collating_element, $.collating_element),
+            ),
+          ),
+        ),
         $._ere_equal_close,
       ),
 
     character_class: ($) =>
-      seq($._ere_open_colon, $.class_name, $._ere_colon_close),
+      seq($._ere_open_colon, field("name", $.class_name), $._ere_colon_close),
+
+    _ere_raw_collating_element: ($) =>
+      choice(
+        alias($._ere_compound_single, $.collating_element_single),
+        alias($._ere_compound_multi, $.collating_element_multi),
+      ),
 
     class_name: () => token.immediate(/[A-Za-z][A-Za-z0-9]*/),
 
@@ -1402,11 +1436,7 @@ export default globalThis.grammar?.({
         alias($.ere_bracket_escape_sequence, $.escape_sequence),
       ),
 
-    _ere_open_dot: ($) => ereCompoundOpening($, "."),
-
     _ere_dot_close: ($) => ereCompoundClosing($._ere_dot_closing, "."),
-
-    _ere_open_equal: ($) => ereCompoundOpening($, "="),
 
     _ere_equal_close: ($) => ereCompoundClosing($._ere_equal_closing, "="),
 
@@ -1417,8 +1447,6 @@ export default globalThis.grammar?.({
     escaped_delimiter: ($) => $._ere_escaped_delimiter,
 
     ere_named_escape_sequence: ($) => $._ere_named_escape,
-
-    ere_quoted_escape_sequence: ($) => $._ere_quoted_escape,
 
     ere_octal_escape_sequence: ($) => $._ere_octal_escape,
 
@@ -1435,10 +1463,6 @@ export default globalThis.grammar?.({
     // Tree-sitter rejects the POSIX bracket spelling for these excluded
     // delimiters.
     _ordinary_character: () => token.immediate(/[^.\x5B\x5C*^$+?{|}()/\n]/),
-
-    _ere_ordinary_close_parenthesis: () => token.immediate(")"),
-
-    _ere_ordinary_close_brace: () => token.immediate("}"),
 
     _ere_close_parenthesis: () => token.immediate(prec(1, ")")),
 

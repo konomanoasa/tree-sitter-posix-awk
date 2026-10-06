@@ -47,9 +47,6 @@ const fieldContractQuery = String.raw`(action
   opening: "(" @ere-expression.opening
   closing: ")" @ere-expression.closing)
 
-(extended_reg_exp
-  operator: "|" @extended-reg-exp.operator)
-
 (lvalue
   operator: "$" @lvalue.operator)
 
@@ -112,7 +109,6 @@ test("posix_awk: anonymous-token field contract", () => {
     "ere.closing",
     "ere.opening",
     "ere.opening",
-    "extended-reg-exp.operator",
     "lvalue.operator",
     "non-unary-expr.operator",
     "non-unary-expr.operator",
@@ -223,7 +219,11 @@ test("posix_awk: lexical tokens expose contiguous leaves", () => {
     "escape_sequence",
     "escaped_delimiter",
     "class_name",
-    "dup_count",
+    "duplication_count",
+    "quoted_character",
+    "collating_element_single",
+    "collating_element_multi",
+    "repetition_modifier",
   ]) {
     const node = nodeTypes.find((node) => node.type === kind);
     assert.ok(node, kind);
@@ -393,7 +393,9 @@ freshTest(
   "/[[:al1:]]/",
   (tree) => {
     const names = [
-      ...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +class_name `([^`]*)`$/gm),
+      ...tree.matchAll(
+        /^0:([0-9]+) +- +0:([0-9]+) +name: class_name `([^`]*)`$/gm,
+      ),
     ].map((match) => [Number(match[1]), Number(match[2]), match[3]]);
     assert.deepEqual(names, [[4, 7, "al1"]]);
   },
@@ -683,7 +685,7 @@ for (const [name, source, kind] of [
 ]) {
   freshTest(name, source, (tree) => {
     contains(tree, kind);
-    contains(tree, "collating_element_content `]`");
+    contains(tree, "element: collating_element_multi");
   });
 }
 

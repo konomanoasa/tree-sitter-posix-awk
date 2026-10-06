@@ -146,35 +146,24 @@ an ERE pattern accepts an action
               (ere
                 (extended_reg_exp
                   (ere_branch
-                    (ere_branch
-                      (ere_branch
-                        (ere_branch
-                          (ere_branch
-                            (ere_branch
-                              (ere_expression
-                                (one_char_or_coll_elem_ere
-                                  (ordinary_character
-                                    (ordinary_character_content)))))
-                            (ere_expression
-                              (one_char_or_coll_elem_ere
-                                (ordinary_character
-                                  (ordinary_character_content)))))
-                          (ere_expression
-                            (one_char_or_coll_elem_ere
-                              (ordinary_character
-                                (ordinary_character_content)))))
-                        (ere_expression
-                          (one_char_or_coll_elem_ere
-                            (ordinary_character
-                              (ordinary_character_content)))))
-                      (ere_expression
-                        (one_char_or_coll_elem_ere
-                          (ordinary_character
-                            (ordinary_character_content)))))
                     (ere_expression
                       (one_char_or_coll_elem_ere
-                        (ordinary_character
-                          (ordinary_character_content)))))))))))
+                        (ordinary_character)))
+                    (ere_expression
+                      (one_char_or_coll_elem_ere
+                        (ordinary_character)))
+                    (ere_expression
+                      (one_char_or_coll_elem_ere
+                        (ordinary_character)))
+                    (ere_expression
+                      (one_char_or_coll_elem_ere
+                        (ordinary_character)))
+                    (ere_expression
+                      (one_char_or_coll_elem_ere
+                        (ordinary_character)))
+                    (ere_expression
+                      (one_char_or_coll_elem_ere
+                        (ordinary_character))))))))))
       (action))
     (terminator
       (newline))))

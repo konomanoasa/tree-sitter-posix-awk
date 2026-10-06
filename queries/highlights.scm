@@ -6,7 +6,7 @@
 
 [
   (number)
-  (dup_count)
+  (duplication_count)
 ] @number
 
 (name) @variable
@@ -54,8 +54,6 @@
   (or)
   (pow_assign)
   (sub_assign)
-  (left_anchor)
-  (right_anchor)
   "!"
   "$"
   "%"
@@ -103,22 +101,22 @@
 (ere
   "/" @punctuation.delimiter)
 
-(ordinary_character_content) @string.regexp
+(ordinary_character
+  !escape) @string.regexp
 
 [
+  (collating_element_single)
+  (collating_element_multi)
   (collating_element_content)
   (meta_character)
   (class_name)
 ] @character.special
 
-(wildcard
+(one_char_or_coll_elem_ere
   "." @character.special)
 
 (start_range
   "-" @operator)
-
-(collating_element
-  "-" @string.regexp)
 
 (bracket_list
   "-" @string.regexp)
@@ -160,15 +158,12 @@
   "=" @punctuation.delimiter)
 
 [
+  (quoted_character)
   (escaped_delimiter)
   (escape_sequence)
 ] @string.escape
 
-(ordinary_character
-  [
-    ")"
-    "}"
-  ] @string.regexp)
+(repetition_modifier) @operator
 
 (item
   name: [

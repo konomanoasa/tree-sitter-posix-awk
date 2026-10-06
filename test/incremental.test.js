@@ -387,7 +387,7 @@ determinismTest(
       "Expected one range expression ending at the inserted hyphen",
     );
     assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+collating_element$/),
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element_single `/),
       2,
       "Expected the range start and the following element only",
     );
@@ -401,7 +401,7 @@ determinismTest(
   [{ byte: 18, deleteBytes: 1, insert: "" }],
   (tree) => {
     assert.equal(
-      matchingLineCount(tree, /^[ \t0-9:-]+collating_element$/),
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element_single `/),
       2,
       "Expected a plain range between two collating elements",
     );
@@ -551,7 +551,7 @@ determinismTest(
   [{ byte: 18, deleteBytes: 0, insert: "3" }],
   (tree) => {
     contains(tree, "escape_sequence");
-    assert.match(tree, /^[ \t0-9:-]+ordinary_character$/m);
+    assert.match(tree, /^[ \t0-9:-]+ordinary_character `/m);
   },
 );
 
@@ -603,7 +603,7 @@ determinismTest(
   [{ byte: 4, deleteBytes: 1, insert: "^" }],
   (tree) => {
     contains(tree, "equivalence_class");
-    contains(tree, "collating_element_content `^`");
+    contains(tree, "collating_element_single `^`");
     excludes(tree, "meta_character");
   },
 );
@@ -615,10 +615,45 @@ determinismTest(
   [{ byte: 5, deleteBytes: 0, insert: "a" }],
   (tree) => {
     contains(tree, "equivalence_class");
-    assert.match(tree, /^[ \t0-9:-]+collating_element$/m);
+    contains(tree, "collating_element_multi");
     excludes(tree, "meta_character");
   },
 );
+
+for (const marker of [".", "="]) {
+  const plain = lines(`/[[${marker}aé日${marker}]]/`);
+  const escaped = lines(`/[[${marker}a\\né日${marker}]]/`);
+  determinismTest(
+    `inserting the first ${marker} compound escape splits the raw payload`,
+    plain,
+    escaped,
+    [{ byte: 5, deleteBytes: 0, insert: String.raw`\n` }],
+    (tree) => {
+      contains(tree, "element: collating_element\n");
+      contains(tree, "collating_element_content `a`");
+      contains(tree, "collating_element_content `é`");
+      contains(tree, "collating_element_content `日`");
+      excludes(tree, "collating_element_multi");
+    },
+  );
+  determinismTest(
+    `deleting the last ${marker} compound escape restores one raw payload leaf`,
+    escaped,
+    plain,
+    [{ byte: 5, deleteBytes: 2, insert: "" }],
+    (tree) => {
+      contains(tree, "element: collating_element_multi `aé日`");
+      excludes(tree, "collating_element_content");
+    },
+  );
+  determinismTest(
+    `extending a single Unicode ${marker} compound payload changes its lexical class`,
+    lines(`/[[${marker}é${marker}]]/`),
+    lines(`/[[${marker}é日${marker}]]/`),
+    [{ byte: 6, deleteBytes: 0, insert: "日" }],
+    (tree) => contains(tree, "element: collating_element_multi `é日`"),
+  );
+}
 
 for (const { name, escaped, plain } of [
   {
@@ -769,7 +804,7 @@ determinismTest(
   literalOpenBracketEre,
   [{ byte: 17, deleteBytes: 4, insert: "" }],
   (tree) => {
-    assert.match(tree, /^[ \t0-9:-]+collating_element$/m);
+    contains(tree, "collating_element_single");
     excludes(tree, "collating_symbol");
   },
 );
@@ -1126,7 +1161,7 @@ determinismTest(
   hashEre,
   [{ byte: 14, deleteBytes: 0, insert: "/" }],
   (tree) => {
-    assert.match(tree, /^[ \t0-9:-]+ordinary_character$/m);
+    assert.match(tree, /^[ \t0-9:-]+ordinary_character `/m);
     excludes(tree, "comment");
   },
 );

@@ -21,6 +21,9 @@ enum TokenType {
   PLUS_OPERATOR,
   MINUS_OPERATOR,
   ERE_COMPOUND_OPENING,
+  ERE_ESCAPED_COMPOUND_OPENING,
+  ERE_COMPOUND_SINGLE,
+  ERE_COMPOUND_MULTI,
   ERE_DOT_CLOSING,
   ERE_EQUAL_CLOSING,
   ERE_COLON_CLOSING,
@@ -1491,6 +1494,57 @@ static const EreCompoundToken ERE_COMPOUND_TOKENS[] = {
   {ERE_COLON_CLOSING, ERE_COMPOUND_CONTENT, ':', LEXICAL_MODE_ERE_CLASS},
 };
 
+static bool compound_has_escape(TSLexer *lexer, int32_t marker) {
+  lexer->advance(lexer, false);
+  while (
+    !lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '/'
+  ) {
+    const int32_t character = lexer->lookahead;
+    if (character == '\\') {
+      return true;
+    }
+    lexer->advance(lexer, false);
+    if (character == marker && lexer->lookahead == ']') {
+      break;
+    }
+  }
+  return false;
+}
+
+static bool scan_ere_collating_element(
+  const ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+  const int32_t marker = state->mode == LEXICAL_MODE_ERE_COLLATING ? '.' : '=';
+  const int32_t first = lexer->lookahead;
+  unsigned count = 0;
+  while (
+    !lexer->eof(lexer) &&
+    lexer->lookahead !=
+    '\n' &&
+    lexer->lookahead !=
+    '/' &&
+    lexer->lookahead != '\\'
+  ) {
+    lexer->mark_end(lexer);
+    const int32_t character = lexer->lookahead;
+    lexer->advance(lexer, false);
+    if (character == marker && lexer->lookahead == ']') {
+      if (count == 0 || (count == 1 && character_in(first, "-]"))) {
+        return false;
+      }
+      const enum TokenType token =
+        count == 1 ? ERE_COMPOUND_SINGLE : ERE_COMPOUND_MULTI;
+      return valid_symbols[token] && emit(lexer, token);
+    }
+    if (count < 2) {
+      count++;
+    }
+  }
+  return false;
+}
+
 static bool scan_ere_compound_token(
   ScannerState *state,
   TSLexer *lexer,
@@ -1506,10 +1560,14 @@ static bool scan_ere_compound_token(
   if (!terminates) {
     return valid_symbols[token->content] && emit(lexer, token->content);
   }
-  if (!valid_symbols[token->delimiter]) {
+  if (
+    !valid_symbols[token->delimiter] &&
+    !(opening && valid_symbols[ERE_ESCAPED_COMPOUND_OPENING])
+  ) {
     return false;
   }
   LexicalMode mode = LEXICAL_MODE_ERE_BODY;
+  enum TokenType delimiter = token->delimiter;
   if (opening) {
     for (size_t i = 1; i < ARRAY_LENGTH(ERE_COMPOUND_TOKENS); i++) {
       if (ERE_COMPOUND_TOKENS[i].first == lexer->lookahead) {
@@ -1517,8 +1575,15 @@ static bool scan_ere_compound_token(
         break;
       }
     }
+    if (
+      mode !=
+      LEXICAL_MODE_ERE_CLASS &&
+      compound_has_escape(lexer, lexer->lookahead)
+    ) {
+      delimiter = ERE_ESCAPED_COMPOUND_OPENING;
+    }
   }
-  return emit_mode(state, lexer, mode, token->delimiter);
+  return valid_symbols[delimiter] && emit_mode(state, lexer, mode, delimiter);
 }
 
 static bool scan_ere_context(
@@ -1528,6 +1593,14 @@ static bool scan_ere_context(
   bool recovering
 ) {
   if (!recovering) {
+    if (
+      (state->mode ==
+        LEXICAL_MODE_ERE_COLLATING ||
+        state->mode == LEXICAL_MODE_ERE_EQUIVALENCE) &&
+      (valid_symbols[ERE_COMPOUND_SINGLE] || valid_symbols[ERE_COMPOUND_MULTI])
+    ) {
+      return scan_ere_collating_element(state, lexer, valid_symbols);
+    }
     for (size_t i = 0; i < ARRAY_LENGTH(ERE_COMPOUND_TOKENS); i++) {
       const EreCompoundToken *token = &ERE_COMPOUND_TOKENS[i];
       if (lexer->lookahead == token->first) {

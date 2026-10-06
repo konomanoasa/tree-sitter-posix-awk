@@ -609,12 +609,12 @@ const finalCaptureCases = [
     ],
   },
   {
-    name: "a lone bracket hyphen keeps its literal capture",
+    name: "a leading bracket hyphen is a collating element",
     source: "/[-]/ { print }\n",
     captures: [
       [0, 1, "punctuation.delimiter"],
       [1, 2, "punctuation.bracket"],
-      [2, 3, "string.regexp"],
+      [2, 3, "character.special"],
       [3, 4, "punctuation.bracket"],
       [4, 5, "punctuation.delimiter"],
       [6, 7, "punctuation.bracket"],

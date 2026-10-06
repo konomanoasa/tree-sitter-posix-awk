@@ -86,16 +86,17 @@
   {
     "type": "character_class",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "class_name",
-          "named": true
-        }
-      ]
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "class_name",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -104,7 +105,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "collating_element_content",
@@ -124,20 +125,29 @@
   {
     "type": "collating_symbol",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "collating_element",
-          "named": true
-        },
-        {
-          "type": "meta_character",
-          "named": true
-        }
-      ]
+    "fields": {
+      "element": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "collating_element",
+            "named": true
+          },
+          {
+            "type": "collating_element_multi",
+            "named": true
+          },
+          {
+            "type": "collating_element_single",
+            "named": true
+          },
+          {
+            "type": "meta_character",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -158,6 +168,10 @@
           "named": true
         },
         {
+          "type": "collating_element_single",
+          "named": true
+        },
+        {
           "type": "collating_symbol",
           "named": true
         }
@@ -167,16 +181,25 @@
   {
     "type": "equivalence_class",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "collating_element",
-          "named": true
-        }
-      ]
+    "fields": {
+      "element": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "collating_element",
+            "named": true
+          },
+          {
+            "type": "collating_element_multi",
+            "named": true
+          },
+          {
+            "type": "collating_element_single",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -218,31 +241,10 @@
   {
     "type": "ere_branch",
     "named": true,
-    "fields": {
-      "left": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "ere_branch",
-            "named": true
-          }
-        ]
-      },
-      "right": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "ere_expression",
-            "named": true
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
-      "multiple": false,
-      "required": false,
+      "multiple": true,
+      "required": true,
       "types": [
         {
           "type": "ere_expression",
@@ -255,6 +257,26 @@
     "type": "ere_dupl_symbol",
     "named": true,
     "fields": {
+      "maximum": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "duplication_count",
+            "named": true
+          }
+        ]
+      },
+      "minimum": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "duplication_count",
+            "named": true
+          }
+        ]
+      },
       "modifier": {
         "multiple": false,
         "required": false,
@@ -265,16 +287,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "dup_count",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -310,42 +322,18 @@
             "named": false
           }
         ]
-      },
-      "operand": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "ere_expression",
-            "named": true
-          }
-        ]
-      },
-      "operator": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "ere_dupl_symbol",
-            "named": true
-          }
-        ]
       }
     },
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "types": [
         {
-          "type": "left_anchor",
+          "type": "ere_dupl_symbol",
           "named": true
         },
         {
           "type": "one_char_or_coll_elem_ere",
-          "named": true
-        },
-        {
-          "type": "right_anchor",
           "named": true
         }
       ]
@@ -421,41 +409,10 @@
   {
     "type": "extended_reg_exp",
     "named": true,
-    "fields": {
-      "left": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "extended_reg_exp",
-            "named": true
-          }
-        ]
-      },
-      "operator": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "|",
-            "named": false
-          }
-        ]
-      },
-      "right": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "ere_branch",
-            "named": true
-          }
-        ]
-      }
-    },
+    "fields": {},
     "children": {
-      "multiple": false,
-      "required": false,
+      "multiple": true,
+      "required": true,
       "types": [
         {
           "type": "ere_branch",
@@ -474,10 +431,6 @@
       "types": [
         {
           "type": "expression_term",
-          "named": true
-        },
-        {
-          "type": "follow_list",
           "named": true
         }
       ]
@@ -1271,7 +1224,7 @@
     "fields": {},
     "children": {
       "multiple": false,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "bracket_expression",
@@ -1288,10 +1241,6 @@
         {
           "type": "quoted_character",
           "named": true
-        },
-        {
-          "type": "wildcard",
-          "named": true
         }
       ]
     }
@@ -1299,24 +1248,21 @@
   {
     "type": "ordinary_character",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": false,
-      "types": [
-        {
-          "type": "escape_sequence",
-          "named": true
-        },
-        {
-          "type": "escaped_delimiter",
-          "named": true
-        },
-        {
-          "type": "ordinary_character_content",
-          "named": true
-        }
-      ]
+    "fields": {
+      "escape": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "escape_sequence",
+            "named": true
+          },
+          {
+            "type": "escaped_delimiter",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1463,17 +1409,7 @@
   {
     "type": "quoted_character",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "escape_sequence",
-          "named": true
-        }
-      ]
-    }
+    "fields": {}
   },
   {
     "type": "range_expression",
@@ -1493,11 +1429,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "repetition_modifier",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "simple_get",
@@ -2418,11 +2349,6 @@
     }
   },
   {
-    "type": "wildcard",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "!",
     "named": false
   },
@@ -2544,6 +2470,14 @@
     "named": true
   },
   {
+    "type": "collating_element_multi",
+    "named": true
+  },
+  {
+    "type": "collating_element_single",
+    "named": true
+  },
+  {
     "type": "comment",
     "named": true,
     "extra": true
@@ -2565,7 +2499,7 @@
     "named": true
   },
   {
-    "type": "dup_count",
+    "type": "duplication_count",
     "named": true
   },
   {
@@ -2609,10 +2543,6 @@
     "named": true
   },
   {
-    "type": "left_anchor",
-    "named": true
-  },
-  {
     "type": "mod_assign",
     "named": true
   },
@@ -2653,10 +2583,6 @@
     "named": true
   },
   {
-    "type": "ordinary_character_content",
-    "named": true
-  },
-  {
     "type": "pow_assign",
     "named": true
   },
@@ -2669,11 +2595,11 @@
     "named": true
   },
   {
-    "type": "return_keyword",
+    "type": "repetition_modifier",
     "named": true
   },
   {
-    "type": "right_anchor",
+    "type": "return_keyword",
     "named": true
   },
   {

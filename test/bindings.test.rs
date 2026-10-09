@@ -1187,16 +1187,45 @@ fn removing_an_invalid_bracket_before_getline_restores_statements() {
 }
 
 #[test]
+fn editing_a_field_getline_lookahead_during_recovery_restores_its_target() {
+  let mut parser = parser();
+  let source = "{ getline x $ getline y ++ $ getline z ++ }";
+  let mut text = source.as_bytes().to_vec();
+  let mut tree = parser.parse(&text, None).unwrap();
+  assert!(!tree.root_node().has_error());
+  for (start, deleted, inserted) in [
+    (0, 1, "( "),
+    (25, 3, ""),
+    (3, 0, "++ "),
+    (26, 1, ","),
+    (26, 1, "y"),
+    (3, 3, ""),
+    (25, 0, "++ "),
+    (0, 2, "{"),
+  ] {
+    edit(&mut tree, &mut text, start, deleted, inserted);
+    tree = parser.parse(&text, Some(&tree)).unwrap();
+  }
+  assert_eq!(text, source.as_bytes());
+  let expected = parser.parse(&text, None).unwrap();
+  assert_same_cst(
+    tree.root_node(),
+    expected.root_node(),
+    "repair after the token behind a field getline changed",
+  );
+}
+
+#[test]
 fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
   let seeds = [
-    "{ $getline < a < getline x++ < y }",
-    "{ $getline < a < getline x-- < y }",
-    "{ $getline < a < $getline < b < getline x++++ < y }",
-    "{ $getline < a < $getline < b < getline x++++++ < y }",
-    "{ getline $getline < a < getline x++ < y }",
-    "{ print ($getline < a < getline x++ < y) }",
-    "{ f($getline < a < getline x++ < y) }",
-    "{ x[$getline < a < getline x++ < y] }",
+    "{ $getline < (a < getline x++) < y }",
+    "{ $getline < (a < getline x--) < y }",
+    "{ $getline < $getline < getline x++++ < y }",
+    "{ $getline < $getline < $getline < getline x++++++ < y }",
+    "{ getline $getline < (a < getline x++) < y }",
+    "{ print ($getline < (a < getline x++) < y) }",
+    "{ f($getline < (a < getline x++) < y) }",
+    "{ x[$getline < (a < getline x++) < y] }",
     "{ x = getline a + line b++ }",
     "{ a ? b : getline c-- ; (y) ? 1 : 2 }",
     "{ getline x++ }",
@@ -1209,8 +1238,8 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
     "{ print (getline x++ + y) }",
     "{ getline x\\\n++ }",
     "{ getline $getline < x++++ }",
-    "{ getline $getline < x | getline ++ }",
-    "{ getline $getline < a ? x : (y)++ }",
+    "{ getline $getline < (x | getline) ++ }",
+    "{ getline $getline < (a ? x : (y))++ }",
     "{ getline $getline < getline $getline < x++++ }",
   ];
   let mut random = 0x79d07b23u32;
@@ -1483,26 +1512,26 @@ fn getline_source_lookahead_preserves_target_ownership() {
     ("getline $getline < \"f\"", Some("$getline < \"f\"")),
     ("getline $getline < \"f\" ++", None),
     ("getline $getline < x++", Some("$getline < x++")),
-    ("getline $getline < a < getline x++ < y", None),
+    (
+      "getline $getline < a < getline x++ < y",
+      Some("$getline < a"),
+    ),
     ("getline $getline < x++++", None),
     ("getline $getline $-x < \"f\" ++", None),
-    ("getline $getline < x | getline ++", None),
-    (
-      "getline $getline < a ? x : y++",
-      Some("$getline < a ? x : y++"),
-    ),
-    ("getline $getline < a ? x : (y)++", None),
-    ("getline $getline < 1e++", Some("$getline < 1e++")),
+    ("getline $getline < (x | getline) ++", None),
+    ("getline $getline < a ? x : y++", Some("$getline < a")),
+    ("getline $getline < (a ? x : (y))++", None),
+    ("getline $getline < 1e++", Some("$getline < 1")),
     ("getline x++ $getline $getline < 1 ++", Some("x")),
-    ("getline $getline < $getline < 1 in a 1++", None),
-    ("getline $getline < $getline < x in a < \"f\" ++", None),
-    ("getline $getline < x < y < z | getline ++", None),
-    ("getline $getline < x ~ y ~ 1 | getline ++", None),
-    ("getline $getline < x ~ y | getline z ~ \"f\" ++", None),
-    ("getline $getline $-x < x | getline ++", None),
+    ("getline $getline < (($getline < 1 in a) 1)++", None),
+    ("getline $getline < (($getline < x in a) < \"f\") ++", None),
+    ("getline $getline < (x < (y < z | getline)) ++", None),
+    ("getline $getline < (x ~ (y ~ 1 | getline)) ++", None),
+    ("getline $getline < (x ~ y | getline z ~ \"f\") ++", None),
+    ("getline $getline $-x < (x | getline) ++", None),
     (
       "getline $getline < getline $getline < x++++",
-      Some("$getline < getline $getline < x++++"),
+      Some("$getline < getline"),
     ),
   ] {
     let source = format!("{{ {expression} }}\n");
@@ -1522,32 +1551,90 @@ fn getline_source_lookahead_preserves_target_ownership() {
 }
 
 #[test]
+fn nested_getline_sources_prefer_the_innermost_input_through_unary_fields() {
+  for (source, get, filename) in [
+    ("{ $-getline $-getline < a }", "getline", "a"),
+    ("{ $-getline $-getline y < a }", "getline y", "a"),
+    ("{ $-getline $-getline < a ++ }", "getline", "a ++"),
+    ("{ $getline $-getline $-getline < a }", "getline", "a"),
+    ("{ $!getline $!getline < a }", "getline", "a"),
+    ("{ $!getline $-getline y < a }", "getline y", "a"),
+    ("{ $+getline $!getline < a ++ }", "getline", "a ++"),
+    ("{ $getline $!getline $-getline < a }", "getline", "a"),
+  ] {
+    let tree = parse(source, source);
+    let mut pending = vec![tree.root_node()];
+    let mut sources = Vec::new();
+    while let Some(node) = pending.pop() {
+      if let Some(input) = node.child_by_field_name("get")
+        && let Some(file) = node.child_by_field_name("source")
+      {
+        sources.push((
+          input.start_byte(),
+          &source[input.byte_range()],
+          &source[file.byte_range()],
+        ));
+      }
+      for index in (0..node.child_count()).rev() {
+        pending.push(node.child(index).unwrap());
+      }
+    }
+    assert_eq!(
+      sources,
+      vec![(source.rfind("getline").unwrap(), get, filename)],
+      "{source}"
+    );
+  }
+}
+
+#[test]
 fn source_getline_targets_can_leave_postfix_updates_for_enclosing_fields() {
   for (source, targets, operands) in [
     (
-      "{ $getline < a < getline x++ < y }",
+      "{ $getline $-getline < 1 ++ }",
+      vec![Some("$-getline"), None],
+      vec!["$getline $-getline < 1"],
+    ),
+    (
+      "{ $getline $!getline < x -- ++ }",
+      vec![Some("$!getline"), None],
+      vec!["$getline $!getline < x --", "x"],
+    ),
+    (
+      "{ $getline $--$getline < 1 ++ }",
+      vec![Some("$--$getline"), None],
+      vec!["$getline $--$getline < 1", "$getline"],
+    ),
+    (
+      "{ $getline < ((x) in a) -- x ++ }",
+      vec![None],
+      vec!["$getline < ((x) in a)", "x"],
+    ),
+    (
+      "{ $getline < getline x++ < y }",
       vec![None, Some("x")],
-      vec!["$getline < a < getline x"],
+      vec!["$getline < getline x"],
     ),
     (
-      "{ $getline < a < getline x-- < y }",
+      "{ $getline < getline x-- < y }",
       vec![None, Some("x")],
-      vec!["$getline < a < getline x"],
+      vec!["$getline < getline x"],
     ),
     (
-      "{ $getline < a < $getline < b < getline x++++ < y }",
+      "{ $getline < $getline < getline x++++ < y }",
       vec![None, None, Some("x")],
-      vec![
-        "$getline < a < $getline < b < getline x++",
-        "$getline < b < getline x",
-      ],
+      vec!["$getline < $getline < getline x++", "$getline < getline x"],
     ),
     (
-      "{ getline $getline < a < getline x++ < y }",
-      vec![None, None, Some("x")],
-      vec!["$getline < a < getline x"],
+      "{ getline $getline < getline x++ < y }",
+      vec![Some("$getline < getline"), None, None],
+      vec!["x"],
     ),
-    ("{ $getline < getline x++ }", vec![None, None], vec!["x"]),
+    (
+      "{ $getline < getline x++ }",
+      vec![None, Some("x")],
+      vec!["$getline < getline x"],
+    ),
     (
       "{ $getline < f(getline x++)++ < y }",
       vec![None, None],
@@ -1592,13 +1679,20 @@ fn getline_expression_edit_histories_restore_fresh_csts() {
     "{ getline $getline < \"f\" ++ }\n".to_string(),
     "{ getline $getline < x++ }\n".to_string(),
     "{ getline $getline < x++++ }\n".to_string(),
-    "{ getline $getline < x | getline ++ }\n".to_string(),
-    "{ getline $getline < a ? x : (y)++ }\n".to_string(),
+    "{ getline $getline < (x | getline) ++ }\n".to_string(),
+    "{ getline $getline < (a ? x : (y))++ }\n".to_string(),
     "{ getline $getline < a && # source\n x++ }\n".to_string(),
     "{ getline x++ $getline $getline < 1 ++ }\n".to_string(),
     "{ getline $getline < getline $getline < x++++ }\n".to_string(),
-    "{ getline $getline < $getline < 1 in a 1++ }\n".to_string(),
-    "{ getline $getline < x < y < z | getline ++ }\n".to_string(),
+    "{ getline $getline < (($getline < 1 in a) 1)++ }\n".to_string(),
+    "{ getline $getline < (x < (y < z | getline)) ++ }\n".to_string(),
+    "{ $-getline $-getline < a }\n".to_string(),
+    "{ $-getline $-getline y < a }\n".to_string(),
+    "{ $-getline $-getline < a ++ }\n".to_string(),
+    "{ $getline $-getline $-getline < a }\n".to_string(),
+    "{ $getline $-getline < 1 ++ }\n".to_string(),
+    "{ $getline $!getline < x -- ++ }\n".to_string(),
+    "{ $getline $--$getline < 1 ++ }\n".to_string(),
   ];
   for prefix in [
     "",

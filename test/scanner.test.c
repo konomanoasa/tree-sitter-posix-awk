@@ -201,6 +201,11 @@ static int test_source_token_ranges(void) {
       "-\\\nx",
       MINUS_OPERATOR,
       1},
+    {"field operator excludes following continuation",
+      "$\\\nx",
+      FIELD_OPERATOR,
+      1},
+    {"negation excludes following continuation", "!\\\nx", NOT_OPERATOR, 1},
   };
 
   int failed = 0;
@@ -277,6 +282,49 @@ static int test_update_operator_boundaries(void) {
       valid_symbols,
       false,
       cases[i].single,
+      0
+    );
+  }
+  return failed;
+}
+
+static int test_prefix_operator_boundaries(void) {
+  static const struct {
+    const char *name;
+    const char *source;
+    const char *separated_source;
+    enum TokenType token;
+  } cases[] = {
+    {"inequality", "!=x", "!\\\n=x", NOT_OPERATOR},
+    {"negated match", "!~x", "!\\\n~x", NOT_OPERATOR},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+    valid_symbols[cases[i].token] = true;
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      false,
+      cases[i].token,
+      0
+    );
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].separated_source,
+      valid_symbols,
+      true,
+      cases[i].token,
+      1
+    );
+    set_all_symbols_valid(valid_symbols);
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid_symbols,
+      false,
+      cases[i].token,
       0
     );
   }
@@ -807,13 +855,13 @@ static int test_getline_operand_lookahead(void) {
     const char *source;
     enum TokenType expected_symbol;
   } cases[] = {
-    {"no operand follows at the end", "getline", GETLINE_WORD},
-    {"a terminator is no operand", "getline;", GETLINE_WORD},
-    {"a source is no operand", "getline < file", GETLINE_WORD},
-    {"a grouping is no lvalue", "getline (x)", GETLINE_WORD},
-    {"a call is no lvalue", "getline f(x)", GETLINE_WORD},
-    {"a built-in name is no lvalue", "getline length", GETLINE_WORD},
-    {"a prefix update is no lvalue", "getline ++x", GETLINE_WORD},
+    {"no operand follows at the end", "getline", GETLINE_OMITTED_WORD},
+    {"a terminator is no operand", "getline;", GETLINE_OMITTED_WORD},
+    {"a source is no operand", "getline < file", GETLINE_OMITTED_WORD},
+    {"a grouping is no lvalue", "getline (x)", GETLINE_OMITTED_WORD},
+    {"a call is no lvalue", "getline f(x)", GETLINE_OMITTED_WORD},
+    {"a built-in name is no lvalue", "getline length", GETLINE_OMITTED_WORD},
+    {"a prefix update is no lvalue", "getline ++x", GETLINE_OMITTED_WORD},
     {"a name is the target", "getline x", GETLINE_TARGET_WORD},
     {"a source follows the target", "getline x < file", GETLINE_TARGET_WORD},
     {"an operator follows the target", "getline x + 1", GETLINE_TARGET_WORD},
@@ -870,13 +918,13 @@ static int test_getline_operand_lookahead(void) {
       GETLINE_OMITTED_WORD},
     {"a raw newline behind an operand breaks the subscript",
       "getline a[i\n]++",
-      GETLINE_TARGET_WORD},
+      GETLINE_OMITTED_WORD},
     {"a comment behind an operand breaks the subscript",
       "getline a[i # c\n]++",
-      GETLINE_TARGET_WORD},
-    {"an unterminated subscript stays the target",
+      GETLINE_OMITTED_WORD},
+    {"an unterminated subscript preserves the keyword range",
       "getline a[i",
-      GETLINE_TARGET_WORD},
+      GETLINE_OMITTED_WORD},
     {"a numbered field is an lvalue", "getline $1++", GETLINE_OMITTED_WORD},
     {"a named field is an lvalue", "getline $ NF", GETLINE_TARGET_WORD},
     {"nested fields are one lvalue", "getline $$a[1]++", GETLINE_OMITTED_WORD},
@@ -918,10 +966,10 @@ static int test_getline_operand_lookahead(void) {
       GETLINE_OMITTED_WORD},
     {"a getline field takes no target that is no lvalue",
       "getline $getline length++",
-      GETLINE_TARGET_WORD},
-    {"a getline field takes its own target",
+      GETLINE_WORD},
+    {"the earlier getline target precedes a nested target",
       "getline $getline x++",
-      GETLINE_OMITTED_WORD},
+      GETLINE_TARGET_WORD},
     {"an update before a name follows a getline field",
       "getline $getline x++ y",
       GETLINE_TARGET_WORD},
@@ -944,20 +992,20 @@ static int test_getline_operand_lookahead(void) {
       "getline $getline < x++",
       GETLINE_TARGET_WORD},
     {"a continued logical source skips the following raw newline",
-      "getline $getline < 1 &&\\\n\n1++",
+      "getline $getline < (1 &&\\\n\n1)++",
       GETLINE_OMITTED_WORD},
     {"a continued logical source skips the following comment",
-      "getline $getline < 1 ||\\\n# source\n1--",
+      "getline $getline < (1 ||\\\n# source\n1)--",
       GETLINE_OMITTED_WORD},
     {"a logical source alternates comments and continuations",
-      "getline $getline < 1 && # first\n\\\n# second\n1++",
+      "getline $getline < (1 && # first\n\\\n# second\n1)++",
       GETLINE_OMITTED_WORD},
     {"a continued logical source preserves its own updated lvalue",
       "getline $getline < 1 &&\\\n# source\nx++",
       GETLINE_TARGET_WORD},
     {"an inner source target defers the enclosing target decision",
       "getline $getline < a < getline x++ < y",
-      GETLINE_PREFER_TARGET_WORD},
+      GETLINE_TARGET_WORD},
     {"a parenthesized source settles its inner target decision",
       "getline $getline < (getline x++)",
       GETLINE_TARGET_WORD},
@@ -965,13 +1013,13 @@ static int test_getline_operand_lookahead(void) {
       "getline $getline < x++++",
       GETLINE_OMITTED_WORD},
     {"a pipe source leaves the update for the field",
-      "getline $getline < x | getline ++",
+      "getline $getline < (x | getline)++",
       GETLINE_OMITTED_WORD},
     {"a source conditional keeps an update on its alternative",
       "getline $getline < a ? x : y++",
       GETLINE_TARGET_WORD},
     {"a grouped alternative leaves the update for the field",
-      "getline $getline < a ? x : (y)++",
+      "getline $getline < (a ? x : (y))++",
       GETLINE_OMITTED_WORD},
     {"a prefix-updated field can omit its own redirected target",
       "getline x++ $getline $getline < 1 ++",
@@ -980,22 +1028,31 @@ static int test_getline_operand_lookahead(void) {
       "getline $getline < 1e++",
       GETLINE_TARGET_WORD},
     {"membership ends before a concatenated operand outside the inner field",
-      "getline $getline < $getline < 1 in a 1++",
+      "getline $getline < (($getline < 1 in a) 1)++",
       GETLINE_OMITTED_WORD},
     {"membership ends before a comparison outside the inner field",
-      "getline $getline < $getline < x in a < \"f\" ++",
+      "getline $getline < (($getline < x in a) < \"f\")++",
       GETLINE_OMITTED_WORD},
     {"a pipe lets a comparison become the right operand of another comparison",
-      "getline $getline < x < y < z | getline ++",
+      "getline $getline < (x < (y < z | getline)) ++",
       GETLINE_OMITTED_WORD},
     {"a pipe lets a match become the right operand of another match",
-      "getline $getline < x ~ y ~ 1 | getline ++",
+      "getline $getline < (x ~ (y ~ 1 | getline)) ++",
       GETLINE_OMITTED_WORD},
     {"a pipe wraps a completed match before the following match",
-      "getline $getline < x ~ y | getline z ~ \"f\" ++",
+      "getline $getline < (x ~ y | getline z ~ \"f\")++",
       GETLINE_OMITTED_WORD},
     {"a unary field ends before its enclosing getline source",
-      "getline $getline $-x < x | getline ++",
+      "getline $getline $-x < (x | getline)++",
+      GETLINE_OMITTED_WORD},
+    {"a unary getline source defers its enclosing target decision",
+      "getline $getline $-getline < 1 ++",
+      GETLINE_OMITTED_WORD},
+    {"a logical-not getline source defers its enclosing target decision",
+      "getline $getline $!getline < x -- ++",
+      GETLINE_OMITTED_WORD},
+    {"a prefix-update getline source defers its enclosing target decision",
+      "getline $getline $--$getline < 1 ++",
       GETLINE_OMITTED_WORD},
     {"a compared getline field is an lvalue",
       "getline $getline <= x++",
@@ -1005,16 +1062,14 @@ static int test_getline_operand_lookahead(void) {
       GETLINE_OMITTED_WORD},
     {"a raw newline ends the lookahead", "getline x\n++", GETLINE_TARGET_WORD},
     {"a comment ends the lookahead", "getline x # c\n++", GETLINE_TARGET_WORD},
-    {"a stray backslash keeps the target",
+    {"a stray backslash preserves the keyword range",
       "getline x \\ ++",
-      GETLINE_TARGET_WORD},
+      GETLINE_OMITTED_WORD},
   };
   bool valid_symbols[TOKEN_TYPE_COUNT] = {
     [GETLINE_WORD] = true,
     [GETLINE_TARGET_WORD] = true,
     [GETLINE_OMITTED_WORD] = true,
-    [GETLINE_PREFER_TARGET_WORD] = true,
-    [GETLINE_PREFER_OMITTED_WORD] = true,
   };
 
   int failed = 0;
@@ -1104,15 +1159,13 @@ static int test_deep_getline_source_lookahead(void) {
   const bool valid_symbols[TOKEN_TYPE_COUNT] = {
     [GETLINE_TARGET_WORD] = true,
     [GETLINE_OMITTED_WORD] = true,
-    [GETLINE_PREFER_TARGET_WORD] = true,
-    [GETLINE_PREFER_OMITTED_WORD] = true,
   };
   const struct {
     const char *source;
     enum TokenType expected_symbol;
   } tails[] = {
     {"x", GETLINE_TARGET_WORD},
-    {"x++++", GETLINE_PREFER_TARGET_WORD},
+    {"x++++", GETLINE_TARGET_WORD},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(tails); i++) {
@@ -1141,7 +1194,8 @@ static int test_deep_getline_source_lookahead(void) {
     }
     char serialized[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
     assert(
-      tree_sitter_posix_awk_external_scanner_serialize(&state, serialized) == 0
+      tree_sitter_posix_awk_external_scanner_serialize(&state, serialized) <=
+      TREE_SITTER_SERIALIZATION_BUFFER_SIZE
     );
   }
   free(source);
@@ -1590,7 +1644,58 @@ static int test_newline_ends_every_literal_mode(void) {
       0,
       literal ? LEXICAL_MODE_OUTSIDE : mode
     );
+    failed |= expect_scan_result_at(
+      "blanks before a raw newline end every literal mode before the blanks",
+      " \t\nx",
+      break_valid,
+      mode,
+      literal,
+      LITERAL_BREAK,
+      0,
+      0,
+      literal ? LEXICAL_MODE_OUTSIDE : mode
+    );
+    failed |= expect_scan_result_at(
+      "blanks before other source keep every mode",
+      " \tx\n",
+      break_valid,
+      mode,
+      false,
+      LITERAL_BREAK,
+      0,
+      0,
+      mode
+    );
   }
+  bool recovery_valid[TOKEN_TYPE_COUNT] = {false};
+  set_all_symbols_valid(recovery_valid);
+  failed |= expect_scan_result_at(
+    "error recovery ends a blank collating payload before a raw newline",
+    " \n",
+    recovery_valid,
+    LEXICAL_MODE_ERE_COLLATING,
+    true,
+    LITERAL_BREAK,
+    0,
+    0,
+    LEXICAL_MODE_OUTSIDE
+  );
+  const bool payload_valid[TOKEN_TYPE_COUNT] = {
+    [ERE_COMPOUND_SINGLE] = true,
+    [ERE_COMPOUND_MULTI] = true,
+    [LITERAL_BREAK] = true,
+  };
+  failed |= expect_scan_result_at(
+    "an expected equivalence payload ends before blanks and a raw newline",
+    " \t\n",
+    payload_valid,
+    LEXICAL_MODE_ERE_EQUIVALENCE,
+    true,
+    LITERAL_BREAK,
+    0,
+    0,
+    LEXICAL_MODE_OUTSIDE
+  );
   const bool content_valid[TOKEN_TYPE_COUNT] = {
     [ERE_COMPOUND_CONTENT] = true,
   };
@@ -1650,6 +1755,24 @@ static int test_error_mode_real_tokens(void) {
       true,
       ERROR_SENTINEL,
       7,
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode prevents field expressions from nesting",
+      "$ ,",
+      true,
+      ERROR_SENTINEL,
+      1,
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode prevents negations from nesting",
+      "! ,",
+      true,
+      ERROR_SENTINEL,
+      1,
+      LEXICAL_MODE_OUTSIDE},
+    {"error mode prevents names from restarting nested assignments",
+      "x = ,",
+      true,
+      ERROR_SENTINEL,
+      1,
       LEXICAL_MODE_OUTSIDE},
     {"error mode suppresses division classification",
       "/x",
@@ -1865,12 +1988,24 @@ static int test_serialization(void) {
     unsigned length;
   } cases[] = {
     {"outside mode round trip", LEXICAL_MODE_OUTSIDE, 0},
-    {"ERE body mode round trip", LEXICAL_MODE_ERE_BODY, 1},
-    {"collating symbol mode round trip", LEXICAL_MODE_ERE_COLLATING, 1},
-    {"equivalence class mode round trip", LEXICAL_MODE_ERE_EQUIVALENCE, 1},
-    {"character class mode round trip", LEXICAL_MODE_ERE_CLASS, 1},
-    {"string mode round trip", LEXICAL_MODE_STRING, 1},
-    {"continued newline mode round trip", LEXICAL_MODE_CONTINUED_NEWLINE, 1},
+    {"ERE body mode round trip",
+      LEXICAL_MODE_ERE_BODY,
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"collating symbol mode round trip",
+      LEXICAL_MODE_ERE_COLLATING,
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"equivalence class mode round trip",
+      LEXICAL_MODE_ERE_EQUIVALENCE,
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"character class mode round trip",
+      LEXICAL_MODE_ERE_CLASS,
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"string mode round trip",
+      LEXICAL_MODE_STRING,
+      SERIALIZED_SCANNER_STATE_SIZE},
+    {"continued newline mode round trip",
+      LEXICAL_MODE_CONTINUED_NEWLINE,
+      SERIALIZED_SCANNER_STATE_SIZE},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
@@ -1909,6 +2044,87 @@ static int test_serialization(void) {
     );
   }
   return failed;
+}
+
+static void test_getline_decision_serialization(void) {
+  const unsigned char decisions[] = {
+    DECISION_GETLINE | 3,
+    DECISION_FIELD,
+    DECISION_GETLINE,
+    DECISION_FIELD | 1,
+  };
+  ScannerState original = {
+    .mode = LEXICAL_MODE_STRING,
+    .updates = UINT64_C(0x102030405060708),
+    .remaining_decisions = 4003,
+    .decision_count = sizeof(decisions),
+  };
+  memcpy(original.decisions, decisions, sizeof(decisions));
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+  const unsigned length =
+    tree_sitter_posix_awk_external_scanner_serialize(&original, buffer);
+  assert(length == SERIALIZED_SCANNER_STATE_SIZE + sizeof(decisions));
+  ScannerState restored = {0};
+  tree_sitter_posix_awk_external_scanner_deserialize(&restored, buffer, length);
+  assert(restored.mode == original.mode);
+  assert(restored.updates == original.updates);
+  for (size_t i = 0; i < 4003; i++) {
+    const int expected = decisions[i % sizeof(decisions)];
+    assert(
+      take_decision(&restored, (expected & 12) == DECISION_FIELD) ==
+      (expected & 3)
+    );
+  }
+  assert(take_decision(&restored, false) == -1);
+  assert(restored.remaining_decisions == 0);
+
+  buffer[9]++;
+  tree_sitter_posix_awk_external_scanner_deserialize(&restored, buffer, length);
+  assert(restored.mode == LEXICAL_MODE_OUTSIDE);
+  assert(restored.updates == 0);
+  assert(restored.decision_count == 0);
+  assert(restored.remaining_decisions == 0);
+}
+
+static void test_getline_group_isolation(void) {
+  ScannerState state = {
+    .updates = 2,
+    .remaining_decisions = 1,
+    .decision_count = 1,
+    .decisions = {DECISION_GETLINE | 1},
+  };
+  const bool opening[TOKEN_TYPE_COUNT] = {
+    [BEGIN_ISOLATION] = true,
+    [SUSPEND_UPDATE] = true,
+  };
+  MockLexer mock = make_mock_lexer("getline x++");
+  for (size_t i = 0; i < 2; i++) {
+    assert(
+      tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, opening)
+    );
+    assert(mock.lexer.result_symbol == SUSPEND_UPDATE);
+    assert(mock.token_end == 0);
+    assert(state.updates == 1 - i);
+  }
+  assert(
+    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, opening)
+  );
+  assert(mock.lexer.result_symbol == BEGIN_ISOLATION);
+  assert(state.decision_count == 0);
+  const bool closing[TOKEN_TYPE_COUNT] = {[RESTORE_UPDATE] = true};
+  mock = make_mock_lexer(")");
+  for (size_t i = 0; i < 2; i++) {
+    assert(
+      tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, closing)
+    );
+    assert(mock.lexer.result_symbol == RESTORE_UPDATE);
+    assert(mock.token_end == 0);
+    assert(state.updates == i + 1);
+  }
+  assert(
+    !tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, opening)
+  );
+  assert(state.updates == 2);
 }
 
 #ifdef TREE_SITTER_REUSE_ALLOCATOR
@@ -1974,6 +2190,12 @@ static int test_collating_payload_classification(void) {
       LEXICAL_MODE_ERE_COLLATING,
       ERE_COMPOUND_MULTI,
       2,
+      LEXICAL_MODE_ERE_COLLATING},
+    {"a raw compound payload can begin with blanks",
+      " \ta.]",
+      LEXICAL_MODE_ERE_COLLATING,
+      ERE_COMPOUND_MULTI,
+      3,
       LEXICAL_MODE_ERE_COLLATING},
   };
   int failed = 0;
@@ -2124,8 +2346,11 @@ int main(void) {
   test_nul_and_eof_are_distinct();
   test_disabled_tokens_preserve_state();
   failed |= test_serialization();
+  test_getline_decision_serialization();
+  test_getline_group_isolation();
   failed |= test_source_token_ranges();
   failed |= test_update_operator_boundaries();
+  failed |= test_prefix_operator_boundaries();
   failed |= test_backslash_tokens_by_mode();
   failed |= test_escape_classification_ignores_expected_tokens();
   failed |= test_continued_newline_requires_its_marker();

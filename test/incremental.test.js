@@ -20,6 +20,65 @@ import {
   writeSource,
 } from "./support/parser.js";
 
+for (const { name, before, after } of [
+  {
+    name: "outer field preserves an inner getline target",
+    before: "{ getline < getline x++ }",
+    after: "{ $getline < getline x++ }",
+  },
+  {
+    name: "two enclosing fields accept separate postfix updates",
+    before: "{ $getline < getline x++ }",
+    after: "{ $getline < $getline < getline x++++ }",
+  },
+  {
+    name: "grouped getline owns its decisions independently of outer updates",
+    before: "{ $getline < getline x++ }",
+    after: "{ $getline < (getline x++)++ }",
+  },
+  {
+    name: "call arguments suspend and restore pending field updates",
+    before: "{ $getline < f()++ }",
+    after: "{ $getline < f(getline x++)++ }",
+  },
+  {
+    name: "source moves across multiple nested targets",
+    before: "{ $getline $!getline $!getline < 1 }",
+    after: "{ $getline $!getline $!getline < 1 ++ }",
+  },
+]) {
+  for (const [initial, final] of [
+    [before, after],
+    [after, before],
+  ]) {
+    let start = 0;
+    while (initial[start] === final[start]) start++;
+    let suffix = 0;
+    while (
+      suffix < Math.min(initial.length, final.length) - start &&
+      initial.at(-suffix - 1) === final.at(-suffix - 1)
+    )
+      suffix++;
+    determinismTest(`${name}: ${initial} to ${final}`, initial, final, [
+      {
+        byte: start,
+        deleteBytes: initial.length - start - suffix,
+        insert: final.slice(start, final.length - suffix),
+      },
+    ]);
+  }
+}
+
+{
+  const prefix = `{ ${"$getline < 1 ".repeat(510)}`;
+  determinismTest(
+    "an edit beyond the serialized decision capacity invalidates the first lookahead",
+    `${prefix}getline x++ }`,
+    `${prefix}getline x++ y }`,
+    [{ byte: prefix.length + 11, deleteBytes: 0, insert: " y" }],
+  );
+}
+
 determinismTest(
   "semicolons change for-in to a membership expression in a classic for",
   "{ for (k in a); }",
@@ -1340,7 +1399,7 @@ editHistoryTest(
 );
 
 determinismTest(
-  "a getline after a reused output pipe returns it to the getline source",
+  "a getline after a reused output pipe remains in the print destination",
   lines("", "BEGIN {", '  print $getline < "f" | "cmd"', "}"),
   lines("", "BEGIN {", '  print $getline < "f" | getline "cmd"', "}"),
   [
@@ -1348,7 +1407,7 @@ determinismTest(
     { byte: 0, deleteBytes: 0, insert: "\nBEGIN " },
     { byte: 34, deleteBytes: 0, insert: "getline " },
   ],
-  (tree) => excludes(tree, "output_redirection"),
+  (tree) => contains(tree, "output_redirection"),
 );
 
 editHistoryTest(
@@ -2049,14 +2108,14 @@ test("posix_awk: every byte inside a Unicode payload can be deleted and repaired
   }
 });
 
-for (const { operator, replacementByte, end } of [
-  { operator: "<", replacementByte: 47, end: 54 },
-  { operator: "~", replacementByte: 47, end: 54 },
-  { operator: "&&", replacementByte: 48, end: 55 },
-  { operator: "||", replacementByte: 48, end: 55 },
+for (const { operator, replacementByte } of [
+  { operator: "<", replacementByte: 47 },
+  { operator: "~", replacementByte: 47 },
+  { operator: "&&", replacementByte: 48 },
+  { operator: "||", replacementByte: 48 },
 ]) {
   determinismTest(
-    `replacing an update extends the ${operator} operand inside a getline source`,
+    `replacing an update extends the ${operator} operand following a getline source`,
     `{ getline $getline < x ~ y | getline z ${operator} "f" ++ }\n`,
     `{ getline $getline < x ~ y | getline z++ ${operator} "f" getline }\n`,
     [
@@ -2064,10 +2123,53 @@ for (const { operator, replacementByte, end } of [
       { byte: replacementByte, deleteBytes: 2, insert: "getline" },
     ],
     (tree) => {
-      assert.match(tree, new RegExp(`^0:21 +- +0:${end} +source: expr$`, "m"));
+      assert.match(tree, /^0:21 +- +0:22 +source: expr$/m);
       assert.equal(matchingLineCount(tree, /target: lvalue$/), 1);
     },
   );
+}
+
+for (const { name, initial, final, byte, insert } of [
+  {
+    name: "a field update moves a source out of a unary operand",
+    initial: "{ $getline $-getline < 1 }\n",
+    final: "{ $getline $-getline < 1 ++ }\n",
+    byte: 24,
+    insert: " ++",
+  },
+  {
+    name: "a field update moves a source out of a logical-not operand",
+    initial: "{ $getline $!getline < x -- }\n",
+    final: "{ $getline $!getline < x -- ++ }\n",
+    byte: 27,
+    insert: " ++",
+  },
+  {
+    name: "a field update moves a source out of a prefix-update operand",
+    initial: "{ $getline $--$getline < 1 }\n",
+    final: "{ $getline $--$getline < 1 ++ }\n",
+    byte: 26,
+    insert: " ++",
+  },
+  {
+    name: "a final update follows a grouped membership source",
+    initial: "{ $getline < ((x) in a) -- x }\n",
+    final: "{ $getline < ((x) in a) -- x ++ }\n",
+    byte: 28,
+    insert: " ++",
+  },
+  {
+    name: "a final lvalue follows the update after a grouped membership source",
+    initial: "{ $getline < ((x) in a) -- x ++ }\n",
+    final: "{ $getline < ((x) in a) -- x ++ y }\n",
+    byte: 31,
+    insert: " y",
+  },
+]) {
+  determinismTest(name, initial, final, [{ byte, deleteBytes: 0, insert }]);
+  determinismTest(`reversing ${name}`, final, initial, [
+    { byte, deleteBytes: insert.length, insert: "" },
+  ]);
 }
 
 const validExpressions = [
@@ -2100,17 +2202,17 @@ const validExpressions = [
   "$getline < y++",
   "$getline < y++++",
   "$getline < y + 1 ++",
-  '$getline < x = "f" ++',
-  '$getline < a < "f" ++',
+  '$getline < (x = "f") ++',
+  '$getline < (a < "f") ++',
   "$getline < getline x++",
-  "$getline < a < getline x++ < y",
-  "$getline < a < getline x-- < y",
-  "$getline < a < $getline < b < getline x++++ < y",
-  "$getline < a < $getline < b < getline x++++++ < y",
-  "getline $getline < a < getline x++ < y",
-  "print ($getline < a < getline x++ < y)",
-  "f($getline < a < getline x++ < y)",
-  "x[$getline < a < getline x++ < y]",
+  "$getline < (a < getline x++) < y",
+  "$getline < (a < getline x--) < y",
+  "$getline < $getline < getline x++++",
+  "$getline < $getline < $getline < getline x++++++",
+  "getline $getline < (a < getline x++) < y",
+  "print ($getline < (a < getline x++) < y)",
+  "f($getline < (a < getline x++) < y)",
+  "x[$getline < (a < getline x++) < y]",
   "$getline < f(getline x++)++ < y",
   '$getline $getline < "f" ++',
   'getline $getline $-x < "f" ++',
@@ -2123,21 +2225,29 @@ const validExpressions = [
   'getline $getline < "f" ++',
   "getline $getline < x++",
   "getline $getline < x++++",
-  "getline $getline < x | getline ++",
-  "getline $getline < a ? x : (y)++",
+  "getline $getline < (x | getline) ++",
+  "getline $getline < (a ? x : (y))++",
   "getline $getline < 1e++",
   "getline $getline < a && # source\n x++",
-  "getline $getline < 1 &&\\\n\n1++",
-  "getline $getline < 1 ||\\\n# source\n1--",
-  "getline $getline < 1 && # first\n\\\n# second\n1++",
+  "getline $getline < (1 &&\\\n\n1)++",
+  "getline $getline < (1 ||\\\n# source\n1)--",
+  "getline $getline < (1 && # first\n\\\n# second\n1)++",
   "getline x++ $getline $getline < 1 ++",
   "getline $getline < getline $getline < x++++",
-  "getline $getline < $getline < 1 in a 1++",
-  'getline $getline < $getline < x in a < "f" ++',
-  "getline $getline < x < y < z | getline ++",
-  "getline $getline < x ~ y ~ 1 | getline ++",
-  'getline $getline < x ~ y | getline z ~ "f" ++',
-  "getline $getline $-x < x | getline ++",
+  "getline $getline < (($getline < 1 in a) 1)++",
+  'getline $getline < (($getline < x in a) < "f") ++',
+  "getline $getline < (x < (y < z | getline)) ++",
+  "getline $getline < (x ~ (y ~ 1 | getline)) ++",
+  'getline $getline < (x ~ y | getline z ~ "f") ++',
+  "getline $getline $-x < (x | getline) ++",
+  "$getline $-getline < 1 ++",
+  "$getline $!getline < x -- ++",
+  "$getline $--$getline < 1 ++",
+  "getline $getline $-getline < 1 ++",
+  "getline $getline $!getline < x -- ++",
+  "getline $getline $--$getline < 1 ++",
+  "$getline < ((x) in a) -- x ++",
+  "getline $getline < ((x) in a) -- x ++",
 ];
 
 for (const expression of validExpressions) {

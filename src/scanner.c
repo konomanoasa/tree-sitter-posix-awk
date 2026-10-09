@@ -7,12 +7,37 @@
 #define ARRAY_LENGTH(array) (sizeof(array) / sizeof((array)[0]))
 
 enum TokenType {
+  BEGIN_ISOLATION,
+  COMPLETE_FIELD_UPDATE,
+  SUSPEND_UPDATE,
+  RESTORE_UPDATE,
+  WITHHELD_SOURCE_FILE_WORD,
+  WITHHELD_SOURCE_FILE_TARGET_WORD,
+  WITHHELD_SOURCE_FILE_FIELD_WORD,
+  WITHHELD_SOURCE_FILE_FIELD_TARGET_WORD,
+  WITHHELD_FILE_WORD,
+  WITHHELD_FILE_TARGET_WORD,
+  WITHHELD_SOURCE_FIELD_OPERATOR,
+  WITHHELD_SOURCE_UPDATED_FIELD_OPERATOR,
+  CONTINUED_FIELD_OPERATOR,
+  CONTINUED_UPDATED_FIELD_OPERATOR,
+  WITHHELD_SOURCE_GETLINE_WORD,
+  WITHHELD_SOURCE_GETLINE_TARGET_WORD,
+  WITHHELD_SOURCE_FIELD_WORD,
+  WITHHELD_SOURCE_FIELD_TARGET_WORD,
+  READY_GETLINE_WORD,
+  READY_GETLINE_TARGET_WORD,
+  GETLINE_FIELD_TARGET_WORD,
+  WITHHELD_GETLINE_WORD,
+  WITHHELD_GETLINE_TARGET_WORD,
+  CONTINUED_GETLINE_FIELD_WORD,
+  CONTINUED_GETLINE_FIELD_TARGET_WORD,
+  CONTINUED_GETLINE_WORD,
+  CONTINUED_GETLINE_TARGET_WORD,
   GETLINE_WORD,
   GETLINE_TARGET_WORD,
   GETLINE_OMITTED_WORD,
   GETLINE_FIELD_WORD,
-  GETLINE_PREFER_TARGET_WORD,
-  GETLINE_PREFER_OMITTED_WORD,
   FUNC_NAME_WORD,
   DIVISION_SLASH,
   ERE_OPENING_SLASH,
@@ -20,6 +45,9 @@ enum TokenType {
   DECR_OPERATOR,
   PLUS_OPERATOR,
   MINUS_OPERATOR,
+  POSTFIX_FIELD_OPERATOR,
+  FIELD_OPERATOR,
+  NOT_OPERATOR,
   GETLINE_PIPE,
   ERE_COMPOUND_OPENING,
   ERE_ESCAPED_COMPOUND_OPENING,
@@ -50,7 +78,11 @@ enum TokenType {
 };
 
 enum {
-  SERIALIZED_SCANNER_STATE_SIZE = 1,
+  SERIALIZED_SCANNER_STATE_SIZE = 19,
+  DECISION_CAPACITY = TREE_SITTER_SERIALIZATION_BUFFER_SIZE -
+    SERIALIZED_SCANNER_STATE_SIZE,
+  DECISION_FIELD = 4,
+  DECISION_GETLINE = 8,
 };
 
 typedef char SerializedScannerStateFitsTreeSitterBuffer
@@ -83,7 +115,16 @@ typedef enum {
 
 typedef struct {
   LexicalMode mode;
+  uint64_t updates;
+  uint64_t remaining_decisions;
+  uint16_t decision_count;
+  unsigned char decisions[DECISION_CAPACITY];
 } ScannerState;
+
+static void clear_decisions(ScannerState *state) {
+  state->decision_count = 0;
+  state->remaining_decisions = 0;
+}
 
 // BEGIN generated reserved words from grammar.js.
 enum {
@@ -384,9 +425,6 @@ typedef struct {
   size_t position;
   size_t marked_end;
   bool failed;
-  bool pipe_checked;
-  bool may_have_pipe;
-  bool deferred_target;
 } InputProbe;
 
 static void probe_restore(InputProbe *probe, size_t position) {
@@ -484,7 +522,7 @@ static int probe_token(InputProbe *probe, bool operand) {
       return PROBE_END;
     }
     if (!skip_token_layout(lexer)) {
-      return PROBE_END;
+      return word == WORD_NAME ? PROBE_NAME : PROBE_VALUE;
     }
     if (call || word == WORD_BUILTIN) {
       return lexer->lookahead != '(' || skip_group(lexer) ? PROBE_VALUE
@@ -528,14 +566,6 @@ static int probe_token(InputProbe *probe, bool operand) {
   return character;
 }
 
-typedef struct {
-  bool valid;
-  bool lvalue;
-  // Allows a surrounding field to take the next postfix update.
-  bool postfix;
-  bool redirected;
-} ProbeExpression;
-
 // BEGIN generated expression rules from grammar.js.
 enum ExpressionPrecedence {
   EXPR_ASSIGNMENT = 2,
@@ -552,6 +582,7 @@ enum ExpressionPrecedence {
   EXPR_EXPONENTIATION = 21,
   EXPR_POSTFIX = 23,
   EXPR_FIELD = 24,
+  EXPR_FILE_SOURCE = EXPR_ADDITIVE,
 };
 
 static int expression_right_precedence(int precedence) {
@@ -624,717 +655,1349 @@ static int probe_precedence(int token) {
   }
 }
 
-static bool probe_has_pipe(InputProbe *input) {
-  if (input->pipe_checked) {
-    return input->may_have_pipe;
-  }
-  input->pipe_checked = true;
-  const size_t start = input->position;
-  probe_restore(input, 0);
-  bool operand = true;
-  bool found = false;
-  for (;;) {
-    const int token = probe_token(input, operand);
-    if (token == '|') {
-      found = true;
-      break;
-    }
-    if (probe_precedence(token) == 0 && !character_in(token, "$!:")) {
-      break;
-    }
-    operand = token !=
-      PROBE_VALUE &&
-      token !=
-      PROBE_NAME &&
-      token !=
-      PROBE_GETLINE &&
-      token != PROBE_UPDATE;
-  }
-  probe_restore(input, start);
-  input->may_have_pipe = found;
-  return found;
-}
-
-typedef enum {
-  PROBE_EXPRESSION = 1,
-  PROBE_PREFIX,
-  PROBE_LVALUE,
-  PROBE_GET,
-  PROBE_TARGET_TAIL,
-} ProbeRule;
-
-typedef struct {
-  size_t position;
-  ProbeRule rule;
-  int argument;
-} ProbeKey;
-
-typedef struct {
-  ProbeKey key;
-  size_t end;
-  ProbeExpression expression;
-} ProbeMemo;
-
-enum ProbeStep {
-  PROBE_START,
-  PROBE_AFTER_TARGET_UPDATE,
-  PROBE_AFTER_TARGET_LVALUE,
-  PROBE_AFTER_FIELD_OPERAND,
-  PROBE_AFTER_PREFIX_OPERAND,
-  PROBE_AFTER_UNARY_OPERAND,
-  PROBE_GET_TARGET,
-  PROBE_GET_TAIL,
-  PROBE_GET_SOURCE,
-  PROBE_GET_REDIRECTED,
-  PROBE_EXPR_OPERAND,
-  PROBE_EXPR_NEXT,
-  PROBE_EXPR_OPERATOR,
-  PROBE_EXPR_CONSEQUENCE,
-  PROBE_EXPR_RIGHT,
-  PROBE_EXPR_PIPE,
-  PROBE_EXPR_PIPE_SOURCE,
-  PROBE_EXPR_PIPE_GET,
-};
-
-enum ProbeGetContext {
-  PROBE_FIELD_GET = 1,
-  PROBE_SOURCE_ALLOWED = 2,
-  PROBE_NO_PIPE = 256,
+typedef struct DelayedNode DelayedNode;
+struct DelayedNode {
+  size_t start, end, decision, rank, plan;
+  int ceiling, kind, value;
+  bool lvalue, postfix, unary, blocked_postfix, focus_postfix;
+  bool focus_target, focus_source, ranked;
+  size_t outer_postfix;
 };
 
 typedef struct {
-  ProbeKey key;
-  unsigned stage;
-  size_t end;
-  size_t operand;
-  size_t pipe_end;
-  int token;
-  int precedence;
-  int non_associative;
-  int ceiling;
-  ProbeExpression left;
-  ProbeExpression target;
-} ProbeFrame;
+  DelayedNode *items;
+  size_t *slots, *heap;
+  size_t length, capacity, heap_length, table_capacity;
+} DelayedSet;
 
 typedef struct {
-  InputProbe *input;
-  ProbeFrame *frames;
-  size_t length;
-  size_t capacity;
-  ProbeMemo *memo;
-  size_t memo_length;
-  size_t memo_capacity;
-  ProbeExpression result;
-} ProbeParser;
+  size_t left, right;
+} DelayedRank;
 
-static size_t probe_hash(ProbeKey key) {
-  return (key.position * 2654435761u) ^
-    ((unsigned)key.rule * 97u + (unsigned)key.argument);
+typedef struct {
+  int *tokens;
+  size_t length, capacity;
+  DelayedNode candidate;
+  bool failed;
+  DelayedSet *memo;
+  bool *computed;
+  DelayedRank *ranks;
+  size_t rank_length, rank_capacity, *rank_slots, rank_slot_capacity;
+  size_t focus, blocked;
+} DelayedParser;
+
+enum {
+  DELAYED_LEVELS = EXPR_FIELD + 2,
+  DELAYED_LVALUE = EXPR_FIELD + 1,
+  DELAYED_GET = 1,
+  DELAYED_FILE,
+  DELAYED_FIELD,
+  DELAYED_PREFIX,
+  DELAYED_POSTFIX,
+};
+
+static size_t delayed_rank_hash(size_t left, size_t right) {
+  return (left * 0x9e3779b1u) ^ (right * 0x85ebca6bu);
 }
 
-static ProbeMemo *probe_memo_slot(ProbeParser *parser, ProbeKey key) {
-  size_t slot = probe_hash(key) & (parser->memo_capacity - 1);
-  while (parser->memo[slot].key.rule != 0) {
-    const ProbeKey found = parser->memo[slot].key;
+static size_t
+delayed_rank_pair(DelayedParser *parser, size_t left, size_t right) {
+  if (parser->failed || (!left && !right))
+    return 0;
+  if (parser->rank_length >= parser->rank_slot_capacity / 2) {
+    if (parser->rank_slot_capacity > SIZE_MAX / 2 / sizeof(size_t)) {
+      parser->failed = true;
+      return 0;
+    }
+    const size_t capacity =
+      parser->rank_slot_capacity ? parser->rank_slot_capacity * 2 : 64;
+    size_t *slots = ts_calloc(capacity, sizeof(*slots));
+    if (!slots) {
+      parser->failed = true;
+      return 0;
+    }
+    for (size_t i = 0; i < parser->rank_length; i++) {
+      const DelayedRank rank = parser->ranks[i];
+      size_t slot = delayed_rank_hash(rank.left, rank.right) & (capacity - 1);
+      while (slots[slot])
+        slot = (slot + 1) & (capacity - 1);
+      slots[slot] = i + 1;
+    }
+    ts_free(parser->rank_slots);
+    parser->rank_slots = slots;
+    parser->rank_slot_capacity = capacity;
+  }
+  size_t slot =
+    delayed_rank_hash(left, right) & (parser->rank_slot_capacity - 1);
+  while (parser->rank_slots[slot]) {
+    const size_t i = parser->rank_slots[slot] - 1;
+    if (parser->ranks[i].left == left && parser->ranks[i].right == right)
+      return parser->length + 3 + i;
+    slot = (slot + 1) & (parser->rank_slot_capacity - 1);
+  }
+  if (parser->rank_length == parser->rank_capacity) {
+    if (parser->rank_capacity > SIZE_MAX / 2 / sizeof(*parser->ranks)) {
+      parser->failed = true;
+      return 0;
+    }
+    const size_t capacity =
+      parser->rank_capacity ? parser->rank_capacity * 2 : 32;
+    DelayedRank *ranks = ts_realloc(parser->ranks, capacity * sizeof(*ranks));
+    if (!ranks) {
+      parser->failed = true;
+      return 0;
+    }
+    parser->ranks = ranks;
+    parser->rank_capacity = capacity;
+  }
+  const size_t index = parser->rank_length++;
+  parser->ranks[index] = (DelayedRank){left, right};
+  parser->rank_slots[slot] = index + 1;
+  return parser->length + 3 + index;
+}
+
+static DelayedRank
+delayed_rank_children(const DelayedParser *parser, size_t rank) {
+  return rank ? parser->ranks[rank - parser->length - 3] : (DelayedRank){0};
+}
+
+static size_t delayed_rank_single(
+  DelayedParser *parser,
+  size_t position,
+  size_t value,
+  size_t begin,
+  size_t end
+) {
+  if (end - begin == 1)
+    return value;
+  const size_t middle = begin + (end - begin) / 2;
+  return position < middle
+    ? delayed_rank_pair(
+        parser,
+        delayed_rank_single(parser, position, value, begin, middle),
+        0
+      )
+    : delayed_rank_pair(
+        parser,
+        0,
+        delayed_rank_single(parser, position, value, middle, end)
+      );
+}
+
+static size_t delayed_rank_merge(DelayedParser *parser, size_t a, size_t b) {
+  if (!a || !b || parser->failed)
+    return a ? a : b;
+  const DelayedRank left = delayed_rank_children(parser, a),
+                    right = delayed_rank_children(parser, b);
+  const size_t first = delayed_rank_merge(parser, left.left, right.left);
+  const size_t second = delayed_rank_merge(parser, left.right, right.right);
+  return delayed_rank_pair(parser, first, second);
+}
+
+static bool
+delayed_better(DelayedParser *parser, DelayedNode *left, DelayedNode *right) {
+  size_t a = left->rank, b = right->rank;
+  size_t begin = 0, end = parser->length;
+  while (a != b && end - begin > 1) {
+    const DelayedRank first = delayed_rank_children(parser, a),
+                      second = delayed_rank_children(parser, b);
+    const size_t middle = begin + (end - begin) / 2;
+    if (first.left != second.left) {
+      a = first.left;
+      b = second.left;
+      end = middle;
+    } else {
+      a = first.right;
+      b = second.right;
+      begin = middle;
+    }
+  }
+  return a < b;
+}
+
+static size_t
+delayed_rank_at(const DelayedParser *parser, size_t rank, size_t position) {
+  size_t begin = 0, end = parser->length;
+  while (rank && end - begin > 1) {
+    const size_t middle = begin + (end - begin) / 2;
+    const DelayedRank node = delayed_rank_children(parser, rank);
+    if (position < middle) {
+      rank = node.left;
+      end = middle;
+    } else {
+      rank = node.right;
+      begin = middle;
+    }
+  }
+  return rank;
+}
+
+static DelayedNode *delayed_node(
+  DelayedParser *parser,
+  int kind,
+  size_t start,
+  size_t end,
+  DelayedNode *left,
+  DelayedNode *right
+) {
+  DelayedNode *node = &parser->candidate;
+  *node = (DelayedNode){
+    .start = start,
+    .end = end,
+    .decision = SIZE_MAX,
+    .kind = kind,
+    .ceiling = EXPR_FIELD,
+    .rank = delayed_rank_merge(
+      parser,
+      left ? left->rank : 0,
+      right ? right->rank : 0
+    ),
+    .plan = delayed_rank_merge(
+      parser,
+      left ? left->plan : 0,
+      right ? right->plan : 0
+    ),
+    .focus_target =
+      (left && left->focus_target) || (right && right->focus_target),
+    .focus_source = (left && left->focus_source) ||
+      (right && right->focus_source) ||
+      (kind == DELAYED_FILE && start == parser->focus),
+    .focus_postfix = (left && left->focus_postfix) ||
+      (right && right->focus_postfix) ||
+      (kind ==
+        DELAYED_POSTFIX &&
+        left &&
+        left->kind ==
+        DELAYED_FIELD &&
+        left->start == parser->focus),
+    .outer_postfix = (left ? left->outer_postfix : 0) +
+      (right ? right->outer_postfix : 0) +
+      (kind ==
+        DELAYED_POSTFIX &&
+        left &&
+        left->kind ==
+        DELAYED_FIELD &&
+        left->start <
+        parser->focus &&
+        left->start != parser->blocked),
+    .blocked_postfix = (left && left->blocked_postfix) ||
+      (right && right->blocked_postfix) ||
+      (kind ==
+        DELAYED_POSTFIX &&
+        left &&
+        left->kind ==
+        DELAYED_FIELD &&
+        left->start == parser->blocked),
+  };
+  if (
+    kind ==
+    DELAYED_FILE ||
+    (kind == DELAYED_POSTFIX && left && left->kind == DELAYED_FIELD)
+  ) {
+    const size_t position = kind == DELAYED_FILE ? start : left->start;
+    node->plan = delayed_rank_merge(
+      parser,
+      node->plan,
+      delayed_rank_single(parser, position, 1, 0, parser->length)
+    );
+  }
+  return node;
+}
+
+static void delayed_set_destroy(DelayedSet *set) {
+  ts_free(set->items);
+  ts_free(set->slots);
+  ts_free(set->heap);
+}
+
+static size_t delayed_hash(const DelayedNode *node) {
+  size_t value = node->end;
+  value = value * 31 + (size_t)node->ceiling;
+  value = value * 31 + node->outer_postfix;
+  value = value * 2 + node->lvalue;
+  value = value * 2 + node->postfix;
+  value = value * 2 + node->unary;
+  value = value * 2 + node->blocked_postfix;
+  return value * 2 + node->focus_postfix;
+}
+
+static void
+delayed_add(DelayedParser *parser, DelayedSet *set, DelayedNode *node) {
+  if (parser->failed)
+    return;
+  if (!node->ranked) {
+    if (node->decision != SIZE_MAX) {
+      const size_t value = node->kind == DELAYED_FILE
+        ? parser->length - node->start + 1
+        : parser->tokens[node->decision] == '<' ? parser->length + 2
+                                                : (size_t)node->value + 1;
+      node->rank = delayed_rank_merge(
+        parser,
+        node->rank,
+        delayed_rank_single(parser, node->decision, value, 0, parser->length)
+      );
+    }
+    node->ranked = true;
+    if (parser->failed)
+      return;
+  }
+  if (set->length >= set->table_capacity / 2) {
+    if (set->table_capacity > SIZE_MAX / 2 / sizeof(*set->slots)) {
+      parser->failed = true;
+      return;
+    }
+    const size_t capacity = set->table_capacity ? set->table_capacity * 2 : 16;
+    size_t *heads = ts_calloc(capacity, sizeof(*heads));
+    if (!heads) {
+      parser->failed = true;
+      return;
+    }
+    for (size_t i = 0; i < set->length; i++) {
+      size_t slot = delayed_hash(&set->items[i]) & (capacity - 1);
+      while (heads[slot])
+        slot = (slot + 1) & (capacity - 1);
+      heads[slot] = i + 1;
+    }
+    ts_free(set->slots);
+    set->slots = heads;
+    set->table_capacity = capacity;
+  }
+  size_t slot = delayed_hash(node) & (set->table_capacity - 1);
+  while (set->slots[slot]) {
+    const size_t i = set->slots[slot] - 1;
+    DelayedNode *old = &set->items[i];
     if (
-      found.position ==
-      key.position &&
-      found.rule ==
-      key.rule &&
-      found.argument == key.argument
+      old->end ==
+      node->end &&
+      old->lvalue ==
+      node->lvalue &&
+      old->postfix ==
+      node->postfix &&
+      old->unary ==
+      node->unary &&
+      old->ceiling ==
+      node->ceiling &&
+      old->outer_postfix ==
+      node->outer_postfix &&
+      old->blocked_postfix ==
+      node->blocked_postfix &&
+      old->focus_postfix == node->focus_postfix
     ) {
-      break;
-    }
-    slot = (slot + 1) & (parser->memo_capacity - 1);
-  }
-  return &parser->memo[slot];
-}
-
-static bool probe_memo_reserve(ProbeParser *parser) {
-  if (parser->memo_length * 2 < parser->memo_capacity) {
-    return true;
-  }
-  const size_t old_capacity = parser->memo_capacity;
-  if (old_capacity > SIZE_MAX / 2 / sizeof(*parser->memo)) {
-    parser->input->failed = true;
-    return false;
-  }
-  const size_t capacity = old_capacity ? old_capacity * 2 : 64;
-  ProbeMemo *memo = ts_calloc(capacity, sizeof(*memo));
-  if (memo == NULL) {
-    parser->input->failed = true;
-    return false;
-  }
-  ProbeMemo *old = parser->memo;
-  parser->memo = memo;
-  parser->memo_capacity = capacity;
-  for (size_t i = 0; i < old_capacity; i++) {
-    if (old[i].key.rule != 0) {
-      *probe_memo_slot(parser, old[i].key) = old[i];
-    }
-  }
-  ts_free(old);
-  return true;
-}
-
-static bool probe_memoizes(ProbeRule rule) {
-  return rule != PROBE_PREFIX && rule != PROBE_GET;
-}
-
-static void probe_call(ProbeParser *parser, ProbeRule rule, int argument) {
-  const ProbeKey key = {parser->input->position, rule, argument};
-  if (probe_memoizes(rule)) {
-    if (!probe_memo_reserve(parser)) {
+      if (delayed_better(parser, node, old))
+        set->items[i] = *node;
       return;
     }
-    const ProbeMemo *memo = probe_memo_slot(parser, key);
-    if (memo->key.rule != 0) {
-      probe_restore(parser->input, memo->end);
-      parser->result = memo->expression;
-      return;
-    }
+    slot = (slot + 1) & (set->table_capacity - 1);
   }
-  if (parser->length == parser->capacity) {
-    if (parser->capacity > SIZE_MAX / 2 / sizeof(*parser->frames)) {
-      parser->input->failed = true;
+  if (set->length == set->capacity) {
+    if (set->capacity > SIZE_MAX / 2 / sizeof(*set->items)) {
+      parser->failed = true;
       return;
     }
-    const size_t capacity = parser->capacity ? parser->capacity * 2 : 32;
-    ProbeFrame *frames = ts_realloc(parser->frames, capacity * sizeof(*frames));
-    if (frames == NULL) {
-      parser->input->failed = true;
+    const size_t capacity = set->capacity ? set->capacity * 2 : 8;
+    DelayedNode *items = ts_realloc(set->items, capacity * sizeof(*set->items));
+    if (!items) {
+      parser->failed = true;
       return;
     }
-    parser->frames = frames;
-    parser->capacity = capacity;
+    set->items = items;
+    size_t *next = ts_realloc(set->heap, capacity * sizeof(*set->heap));
+    if (!next) {
+      parser->failed = true;
+      return;
+    }
+    set->heap = next;
+    set->capacity = capacity;
   }
-  parser->frames[parser->length++] = (ProbeFrame){.key = key};
+  const size_t index = set->length++;
+  set->items[index] = *node;
+  set->slots[slot] = index + 1;
+  size_t position = set->heap_length++;
+  while (
+    position && set->items[set->heap[(position - 1) / 2]].end > node->end
+  ) {
+    set->heap[position] = set->heap[(position - 1) / 2];
+    position = (position - 1) / 2;
+  }
+  set->heap[position] = index;
 }
 
-static void probe_return(ProbeParser *parser, ProbeExpression result) {
-  const ProbeKey key = parser->frames[--parser->length].key;
-  parser->result = result;
-  if (probe_memoizes(key.rule) && probe_memo_reserve(parser)) {
-    ProbeMemo *memo = probe_memo_slot(parser, key);
-    if (memo->key.rule == 0) {
-      parser->memo_length++;
-    }
-    *memo = (ProbeMemo){key, parser->input->position, result};
+static DelayedNode delayed_pop(DelayedSet *set) {
+  DelayedNode node = set->items[set->heap[0]];
+  const size_t last = set->heap[--set->heap_length];
+  size_t position = 0;
+  while (position * 2 + 1 < set->heap_length) {
+    size_t child = position * 2 + 1;
+    if (
+      child +
+      1 <
+      set->heap_length &&
+      set->items[set->heap[child + 1]].end < set->items[set->heap[child]].end
+    )
+      child++;
+    if (set->items[last].end <= set->items[set->heap[child]].end)
+      break;
+    set->heap[position] = set->heap[child];
+    position = child;
   }
+  set->heap[position] = last;
+  return node;
 }
 
-static ProbeExpression
-probe_parse(InputProbe *input, ProbeRule rule, int argument) {
-  ProbeParser parser = {.input = input};
-  probe_call(&parser, rule, argument);
-  while (parser.length && !input->failed) {
-    ProbeFrame *frame = &parser.frames[parser.length - 1];
-    switch (frame->key.rule) {
-    case PROBE_TARGET_TAIL:
-      if (frame->stage == PROBE_AFTER_TARGET_LVALUE) {
-        probe_restore(input, frame->key.position);
-        probe_return(&parser, (ProbeExpression){.valid = parser.result.valid});
-      } else if (frame->stage == PROBE_AFTER_TARGET_UPDATE) {
-        if (parser.result.valid) {
-          frame->stage = PROBE_AFTER_TARGET_LVALUE;
-          probe_call(&parser, PROBE_TARGET_TAIL, 0);
-        } else {
-          probe_restore(input, frame->key.position);
-          probe_return(&parser, (ProbeExpression){0});
-        }
-      } else if (
-        !skip_token_layout(&input->lexer) ||
-        !character_in(input->lexer.lookahead, "+-") ||
-        probe_token(input, false) != PROBE_UPDATE
-      ) {
-        probe_restore(input, frame->key.position);
-        probe_return(&parser, (ProbeExpression){.valid = true});
-      } else {
-        frame->stage = PROBE_AFTER_TARGET_UPDATE;
-        probe_call(&parser, PROBE_LVALUE, true);
-      }
-      break;
-    case PROBE_LVALUE:
-      if (frame->stage == PROBE_AFTER_FIELD_OPERAND) {
-        ProbeExpression result = parser.result;
-        result.lvalue = result.valid;
-        probe_return(&parser, result);
-        break;
-      }
-      if (
-        !skip_token_layout(&input->lexer) ||
-        (!is_word_start(input->lexer.lookahead) &&
-          input->lexer.lookahead != '$')
-      ) {
-        probe_restore(input, frame->key.position);
-        probe_return(&parser, (ProbeExpression){0});
-        break;
-      }
-      frame->token = probe_token(input, true);
-      if (frame->token == PROBE_NAME) {
-        probe_return(&parser, (ProbeExpression){true, true, true, false});
-      } else if (frame->token != '$') {
-        probe_restore(input, frame->key.position);
-        probe_return(&parser, (ProbeExpression){0});
-      } else {
-        do {
-          frame->operand = input->position;
-        } while (probe_token(input, true) == '$');
-        probe_restore(input, frame->operand);
-        frame->stage = PROBE_AFTER_FIELD_OPERAND;
-        probe_call(&parser, PROBE_PREFIX, !frame->key.argument | PROBE_NO_PIPE);
-      }
-      break;
-    case PROBE_PREFIX:
-      if (frame->stage == PROBE_AFTER_PREFIX_OPERAND) {
-        probe_return(&parser, parser.result);
-        break;
-      }
-      if (frame->stage == PROBE_AFTER_UNARY_OPERAND) {
-        probe_return(&parser, (ProbeExpression){.valid = parser.result.valid});
-        break;
-      }
-      switch (probe_token(input, true)) {
-      case PROBE_VALUE:
-        probe_return(
-          &parser,
-          (ProbeExpression){.valid = true, .postfix = true}
-        );
-        break;
-      case PROBE_NAME:
-        probe_return(&parser, (ProbeExpression){true, true, true, false});
-        break;
-      case PROBE_GETLINE:
-        frame->stage = PROBE_AFTER_PREFIX_OPERAND;
-        probe_call(
-          &parser,
-          PROBE_GET,
-          (frame->key.argument & PROBE_FIELD_GET) | PROBE_SOURCE_ALLOWED
-        );
-        break;
-      case '$':
-        probe_restore(input, frame->key.position);
-        frame->stage = PROBE_AFTER_PREFIX_OPERAND;
-        probe_call(&parser, PROBE_LVALUE, false);
-        break;
-      case PROBE_UPDATE:
-        frame->stage = PROBE_AFTER_UNARY_OPERAND;
-        probe_call(&parser, PROBE_LVALUE, true);
-        break;
-      case '+':
-      case '-':
-      case '!':
-        frame->stage = PROBE_AFTER_UNARY_OPERAND;
-        probe_call(
-          &parser,
-          PROBE_EXPRESSION,
-          EXPR_UNARY | (frame->key.argument & PROBE_NO_PIPE)
-        );
-        break;
-      default:
-        probe_restore(input, frame->key.position);
-        probe_return(&parser, (ProbeExpression){0});
-        break;
-      }
-      break;
-    case PROBE_GET:
-      switch (frame->stage) {
-      case PROBE_START:
-        frame->stage = PROBE_GET_TARGET;
-        probe_call(&parser, PROBE_LVALUE, false);
-        break;
-      case PROBE_GET_TARGET:
-        frame->target = parser.result;
-        frame->stage = PROBE_GET_SOURCE;
-        if (!frame->target.valid) {
-          probe_restore(input, frame->key.position);
-        } else if (!(frame->key.argument & PROBE_FIELD_GET)) {
-          frame->stage = PROBE_GET_TAIL;
-          probe_call(&parser, PROBE_TARGET_TAIL, 0);
-        }
-        break;
-      case PROBE_GET_TAIL:
-        if (!parser.result.valid) {
-          input->deferred_target = true;
-          probe_restore(input, frame->key.position);
-          frame->target = (ProbeExpression){0};
-        }
-        frame->stage = PROBE_GET_SOURCE;
-        break;
-      case PROBE_GET_SOURCE:
-        frame->left = (ProbeExpression){
-          .valid = true,
-          .postfix = !frame->target.valid || frame->target.postfix,
-          .redirected = frame->target.redirected,
-        };
-        frame->end = input->position;
-        if (
-          (frame->key.argument & PROBE_SOURCE_ALLOWED) &&
-          probe_token(input, false) == '<'
-        ) {
-          frame->stage = PROBE_GET_REDIRECTED;
-          probe_call(&parser, PROBE_EXPRESSION, EXPR_ASSIGNMENT);
-        } else {
-          probe_restore(input, frame->end);
-          probe_return(&parser, frame->left);
-        }
-        break;
-      default:
-        probe_return(
-          &parser,
-          (ProbeExpression){
-            .valid = parser.result.valid,
-            .postfix = true,
-            .redirected = true,
-          }
-        );
-        break;
-      }
-      break;
-    case PROBE_EXPRESSION:
-      switch (frame->stage) {
-      case PROBE_START:
-        frame->stage = PROBE_EXPR_OPERAND;
-        probe_call(&parser, PROBE_PREFIX, frame->key.argument & PROBE_NO_PIPE);
-        break;
-      case PROBE_EXPR_OPERAND:
-        if (!parser.result.valid) {
-          probe_return(&parser, parser.result);
-        } else {
-          frame->left = parser.result;
-          frame->stage = PROBE_EXPR_NEXT;
-        }
-        break;
-      case PROBE_EXPR_NEXT:
-        frame->end = input->position;
-        frame->token = probe_token(input, false);
-        frame->precedence = probe_precedence(frame->token);
-        if (frame->token == '|' && frame->key.argument == EXPR_ASSIGNMENT) {
-          if (probe_token(input, false) != PROBE_GETLINE) {
-            probe_restore(input, frame->end);
-            probe_return(&parser, frame->left);
-          } else {
-            frame->stage = PROBE_EXPR_PIPE;
-            probe_call(&parser, PROBE_GET, 0);
-          }
-        } else if (frame->token == PROBE_UPDATE) {
-          const size_t operand = input->position;
-          const bool prefix = scan_lvalue_start(&input->lexer);
-          probe_restore(input, operand);
-          if (
-            (frame->key.argument & ~PROBE_NO_PIPE) <=
-            EXPR_POSTFIX &&
-            frame->left.lvalue &&
-            frame->left.postfix &&
-            (!frame->left.redirected || !prefix)
-          ) {
-            frame->left = (ProbeExpression){.valid = true};
-            frame->stage = PROBE_EXPR_NEXT;
-          } else {
-            frame->precedence = prefix ? EXPR_CONCATENATION : 0;
-            frame->stage = PROBE_EXPR_OPERATOR;
-          }
-        } else {
-          frame->stage = PROBE_EXPR_OPERATOR;
-        }
-        break;
-      case PROBE_EXPR_OPERATOR: {
-        const int precedence = frame->precedence;
-        if (
-          precedence <
-          (frame->key.argument & ~PROBE_NO_PIPE) ||
-          (frame->ceiling != 0 && precedence > frame->ceiling) ||
-          precedence ==
-          frame->non_associative ||
-          (precedence == EXPR_ASSIGNMENT && !frame->left.lvalue)
-        ) {
-          if (
-            !(frame->key.argument & PROBE_NO_PIPE) &&
-            (precedence > 0 || frame->token == '|') &&
-            probe_has_pipe(input)
-          ) {
-            probe_restore(input, frame->key.position);
-            frame->stage = PROBE_EXPR_PIPE_SOURCE;
-            probe_call(
-              &parser,
-              PROBE_EXPRESSION,
-              EXPR_ASSIGNMENT | PROBE_NO_PIPE
-            );
-          } else {
-            probe_restore(input, frame->end);
-            probe_return(&parser, frame->left);
-          }
-          break;
-        }
-        if (precedence == EXPR_CONCATENATION) {
-          probe_restore(input, frame->end);
-        }
-        if (frame->token == '?') {
-          frame->stage = PROBE_EXPR_CONSEQUENCE;
-          probe_call(
-            &parser,
-            PROBE_EXPRESSION,
-            EXPR_ASSIGNMENT | (frame->key.argument & PROBE_NO_PIPE)
-          );
-        } else if (frame->token == PROBE_MEMBERSHIP) {
-          parser.result = (ProbeExpression){
-            .valid = probe_token(input, true) == PROBE_NAME,
-          };
-          frame->stage = PROBE_EXPR_RIGHT;
-        } else {
-          const int right_precedence = expression_right_precedence(precedence);
-          frame->stage = PROBE_EXPR_RIGHT;
-          probe_call(
-            &parser,
-            PROBE_EXPRESSION,
-            right_precedence | (frame->key.argument & PROBE_NO_PIPE)
-          );
-        }
-        break;
-      }
-      case PROBE_EXPR_CONSEQUENCE:
-        if (!parser.result.valid || probe_token(input, false) != ':') {
-          probe_restore(input, frame->end);
-          probe_return(&parser, frame->left);
-        } else {
-          frame->stage = PROBE_EXPR_RIGHT;
-          probe_call(
-            &parser,
-            PROBE_EXPRESSION,
-            EXPR_CONDITIONAL | (frame->key.argument & PROBE_NO_PIPE)
-          );
-        }
-        break;
-      case PROBE_EXPR_RIGHT:
-      case PROBE_EXPR_PIPE:
-      case PROBE_EXPR_PIPE_GET:
-        if (
-          !parser.result.valid ||
-          (frame->stage ==
-            PROBE_EXPR_PIPE_GET &&
-            (input->position <
-              frame->end ||
-              input->position == frame->pipe_end))
-        ) {
-          probe_restore(input, frame->end);
-          probe_return(&parser, frame->left);
-        } else {
-          if (frame->stage == PROBE_EXPR_PIPE_GET) {
-            frame->pipe_end = input->position;
-          }
-          frame->non_associative = frame->stage ==
-              PROBE_EXPR_RIGHT &&
-              expression_non_associative(frame->precedence)
-            ? frame->precedence
-            : 0;
-          frame->ceiling =
-            frame->stage == PROBE_EXPR_RIGHT ? frame->precedence : 0;
-          frame->left = (ProbeExpression){.valid = true};
-          frame->stage = PROBE_EXPR_NEXT;
-        }
-        break;
-      case PROBE_EXPR_PIPE_SOURCE:
-        if (
-          !parser.result.valid ||
-          probe_token(input, false) !=
-          '|' ||
-          probe_token(input, false) != PROBE_GETLINE
-        ) {
-          probe_restore(input, frame->end);
-          probe_return(&parser, frame->left);
-        } else {
-          frame->stage = PROBE_EXPR_PIPE_GET;
-          probe_call(&parser, PROBE_GET, 0);
-        }
-        break;
-      }
-      break;
+static int delayed_token(const DelayedParser *parser, size_t position) {
+  return position < parser->length ? parser->tokens[position] : PROBE_END;
+}
+
+static DelayedSet *
+delayed_expr(DelayedParser *parser, size_t start, int minimum) {
+  return &parser->memo[start * DELAYED_LEVELS + minimum];
+}
+
+static DelayedSet
+delayed_get(DelayedParser *parser, size_t start, bool redirected) {
+  DelayedSet result = {0};
+  DelayedNode *bare =
+    delayed_node(parser, DELAYED_GET, start, start + 1, NULL, NULL);
+  bare->decision = start;
+  bare->value = 1;
+  bare->postfix = true;
+  delayed_add(parser, &result, bare);
+  DelayedSet *targets = delayed_expr(parser, start + 1, DELAYED_LVALUE);
+  for (size_t i = 0; i < targets->length; i++) {
+    DelayedNode *target = &targets->items[i];
+    DelayedNode *node =
+      delayed_node(parser, DELAYED_GET, start, target->end, NULL, target);
+    node->decision = start;
+    node->focus_target |= start == parser->focus;
+    node->postfix = target->postfix;
+    delayed_add(parser, &result, node);
+  }
+  const size_t count = result.length;
+  DelayedNode *gets = ts_calloc(count, sizeof(*gets));
+  if (!gets && count) {
+    parser->failed = true;
+    return result;
+  }
+  if (count)
+    memcpy(gets, result.items, count * sizeof(*gets));
+  for (size_t i = 0; redirected && i < count; i++) {
+    DelayedNode *get = &gets[i];
+    if (delayed_token(parser, get->end) != '<')
+      continue;
+    DelayedSet *sources = delayed_expr(parser, get->end + 1, EXPR_FILE_SOURCE);
+    for (size_t j = 0; j < sources->length; j++) {
+      DelayedNode *source = &sources->items[j];
+      DelayedNode *node =
+        delayed_node(parser, DELAYED_FILE, start, source->end, get, source);
+      node->decision = get->end;
+      node->value = 0;
+      node->postfix = true;
+      delayed_add(parser, &result, node);
     }
   }
-  const ProbeExpression result =
-    input->failed ? (ProbeExpression){0} : parser.result;
-  ts_free(parser.frames);
-  ts_free(parser.memo);
+  ts_free(gets);
   return result;
 }
 
-typedef enum {
-  PROBE_SOURCE,
-  PROBE_UNARY_TARGET,
-  PROBE_PREFIX_GETLINE,
-} ProbeContext;
-
-static bool
-probe_getline_field(TSLexer *lexer, ProbeContext context, bool *deferred) {
-  InputProbe probe = {
-    .lexer =
-      {
-        .lookahead = lexer->lookahead,
-        .advance = probe_advance,
-        .mark_end = probe_mark_end,
-        .eof = probe_eof,
-      },
-    .source = lexer,
-  };
-  bool survives = true;
-  bool source = context == PROBE_SOURCE;
-  bool tail = false;
-  if (context == PROBE_UNARY_TARGET) {
-    if (
-      probe_parse(&probe, PROBE_EXPRESSION, EXPR_UNARY | PROBE_NO_PIPE).valid
-    ) {
-      source = probe_token(&probe, false) == '<';
+static DelayedSet
+delayed_prefix(DelayedParser *parser, size_t start, bool lvalue) {
+  DelayedSet result = {0};
+  const int token = delayed_token(parser, start);
+  if (token == PROBE_NAME || (!lvalue && token == PROBE_VALUE)) {
+    DelayedNode *node = delayed_node(parser, 0, start, start + 1, NULL, NULL);
+    node->lvalue = token == PROBE_NAME;
+    node->postfix = true;
+    delayed_add(parser, &result, node);
+  } else if (token == '$') {
+    DelayedSet *operands = delayed_expr(parser, start + 1, EXPR_FIELD);
+    for (size_t i = 0; i < operands->length; i++) {
+      DelayedNode *operand = &operands->items[i];
+      DelayedNode *node =
+        delayed_node(parser, DELAYED_FIELD, start, operand->end, NULL, operand);
+      node->lvalue = true;
+      node->postfix = operand->postfix;
+      delayed_add(parser, &result, node);
     }
-  } else if (context == PROBE_PREFIX_GETLINE) {
-    const bool targeted = probe_parse(&probe, PROBE_LVALUE, false).valid;
-    const size_t end = probe.position;
-    source = probe_token(&probe, false) == '<';
-    if (!source) {
-      probe_restore(&probe, end);
-      tail = !targeted;
+  } else if (!lvalue && token == PROBE_GETLINE) {
+    result = delayed_get(parser, start, true);
+  } else if (
+    !lvalue &&
+    (token == PROBE_UPDATE || token == '+' || token == '-' || token == '!')
+  ) {
+    DelayedSet *operands = delayed_expr(
+      parser,
+      start + 1,
+      token == PROBE_UPDATE ? DELAYED_LVALUE : EXPR_UNARY
+    );
+    for (size_t i = 0; i < operands->length; i++) {
+      DelayedNode *operand = &operands->items[i];
+      DelayedNode *node = delayed_node(
+        parser,
+        DELAYED_PREFIX,
+        start,
+        operand->end,
+        NULL,
+        operand
+      );
+      node->ceiling = token == PROBE_UPDATE ? EXPR_POSTFIX : EXPR_UNARY;
+      node->unary = token == '+' || token == '-';
+      if (token == PROBE_UPDATE) {
+        node->decision = start;
+        node->value = 1;
+      }
+      delayed_add(parser, &result, node);
     }
   }
-  if (source) {
-    tail = probe_parse(&probe, PROBE_EXPRESSION, EXPR_ASSIGNMENT).valid;
-  }
-  if (tail) {
-    survives = probe_parse(&probe, PROBE_TARGET_TAIL, 0).valid;
-  }
-  *deferred |= probe.deferred_target;
-  ts_free(probe.characters);
-  return survives;
+  return result;
 }
 
-typedef enum {
-  LVALUE_SHAPE_NONE,
-  LVALUE_SHAPE_POSTFIX,
-  LVALUE_SHAPE_SETTLED,
-  LVALUE_SHAPE_OPEN,
-} LvalueShape;
-
-// POSTFIX leaves an update outside a getline source; OPEN may accept one.
-// SETTLED leaves no update to place, including malformed input.
-static LvalueShape
-skip_lvalue(TSLexer *lexer, bool prefix_update, bool *deferred) {
-  bool targeted = false;
-  for (;;) {
-    if (!skip_token_layout(lexer)) {
-      return LVALUE_SHAPE_SETTLED;
+static void delayed_compute(DelayedParser *parser, size_t start, int minimum) {
+  DelayedSet *result = &parser->memo[start * DELAYED_LEVELS + minimum];
+  DelayedSet work = delayed_prefix(parser, start, minimum == DELAYED_LVALUE);
+  if (minimum == DELAYED_LVALUE) {
+    *result = work;
+    return;
+  }
+  while (!parser->failed && work.heap_length) {
+    DelayedNode popped = delayed_pop(&work);
+    DelayedNode *left = &popped;
+    const size_t end = left->end;
+    const int token = delayed_token(parser, end);
+    int precedence =
+      token == PROBE_UPDATE ? EXPR_CONCATENATION : probe_precedence(token);
+    const bool pipe = token == '|' && minimum <= EXPR_ASSIGNMENT;
+    if (pipe)
+      precedence = EXPR_ASSIGNMENT;
+    const bool postfix = token ==
+      PROBE_UPDATE &&
+      left->lvalue &&
+      left->postfix &&
+      minimum <=
+      EXPR_POSTFIX &&
+      EXPR_POSTFIX <= left->ceiling;
+    if (postfix) {
+      DelayedNode *node =
+        delayed_node(parser, DELAYED_POSTFIX, start, end + 1, left, NULL);
+      node->decision = end;
+      node->ceiling = EXPR_POSTFIX;
+      delayed_add(parser, &work, node);
     }
-    bool field = false;
-    while (lexer->lookahead == '$') {
-      field = true;
-      lexer->advance(lexer, false);
-      if (!skip_token_layout(lexer)) {
-        return LVALUE_SHAPE_SETTLED;
-      }
-      if (character_in(lexer->lookahead, "+-!")) {
-        return targeted &&
-            !probe_getline_field(lexer, PROBE_UNARY_TARGET, deferred)
-          ? LVALUE_SHAPE_POSTFIX
-          : LVALUE_SHAPE_SETTLED;
-      }
+    const bool eligible = precedence >
+      0 &&
+      minimum <=
+      precedence &&
+      precedence <=
+      left->ceiling &&
+      (pipe || precedence != EXPR_ASSIGNMENT || left->lvalue);
+    if (!eligible) {
+      if (!postfix)
+        delayed_add(parser, result, left);
+      continue;
     }
-    bool name = false;
-    bool input = false;
-    if (
-      field && (is_ascii_digit(lexer->lookahead) || lexer->lookahead == '.')
-    ) {
-      if (skip_number(lexer, false) != NUMBER_WHOLE) {
-        return LVALUE_SHAPE_SETTLED;
-      }
-    } else if (field && lexer->lookahead == '(') {
-      if (!skip_group(lexer)) {
-        return LVALUE_SHAPE_SETTLED;
-      }
-    } else if (field && character_in(lexer->lookahead, "\"/")) {
-      if (!skip_literal(lexer)) {
-        return LVALUE_SHAPE_SETTLED;
+    DelayedSet local = {0}, *rights = &local;
+    if (token == PROBE_MEMBERSHIP) {
+      if (delayed_token(parser, end + 1) == PROBE_NAME)
+        delayed_add(
+          parser,
+          &local,
+          delayed_node(parser, 0, end + 1, end + 2, NULL, NULL)
+        );
+    } else if (pipe) {
+      if (delayed_token(parser, end + 1) == PROBE_GETLINE)
+        local = delayed_get(parser, end + 1, false);
+    } else if (token == '?') {
+      DelayedSet *consequences = delayed_expr(parser, end + 1, EXPR_ASSIGNMENT);
+      for (size_t j = 0; j < consequences->length; j++) {
+        DelayedNode *consequence = &consequences->items[j];
+        if (delayed_token(parser, consequence->end) != ':')
+          continue;
+        DelayedSet *alternatives =
+          delayed_expr(parser, consequence->end + 1, EXPR_CONDITIONAL);
+        for (size_t k = 0; k < alternatives->length; k++) {
+          DelayedNode *alternative = &alternatives->items[k];
+          delayed_add(
+            parser,
+            &local,
+            delayed_node(
+              parser,
+              0,
+              end + 1,
+              alternative->end,
+              consequence,
+              alternative
+            )
+          );
+        }
       }
     } else {
-      const WordKind word = scan_word_spelling(lexer);
-      const bool call = word == WORD_NAME && lexer->lookahead == '(';
-      if (field && word == WORD_GETLINE) {
-        if (prefix_update) {
-          return probe_getline_field(lexer, PROBE_PREFIX_GETLINE, deferred)
-            ? LVALUE_SHAPE_SETTLED
-            : LVALUE_SHAPE_POSTFIX;
-        }
-        if (!skip_token_layout(lexer)) {
-          return LVALUE_SHAPE_SETTLED;
-        }
-        if (is_word_start(lexer->lookahead) || lexer->lookahead == '$') {
-          targeted = true;
-          continue;
-        }
-        input = true;
-      } else if (field && (call || word == WORD_BUILTIN)) {
-        if (
-          !skip_token_layout(lexer) ||
-          (lexer->lookahead == '(' && !skip_group(lexer))
-        ) {
-          return LVALUE_SHAPE_SETTLED;
-        }
-      } else if (call || word != WORD_NAME) {
-        return field || targeted ? LVALUE_SHAPE_SETTLED : LVALUE_SHAPE_NONE;
-      } else {
-        name = true;
+      rights = delayed_expr(
+        parser,
+        precedence == EXPR_CONCATENATION ? end : end + 1,
+        expression_right_precedence(precedence)
+      );
+    }
+    for (size_t j = 0; j < rights->length; j++) {
+      DelayedNode *right = &rights->items[j];
+      if (precedence == EXPR_CONCATENATION && right->unary)
+        continue;
+      DelayedNode *node =
+        delayed_node(parser, token, start, right->end, left, right);
+      node->unary = left->unary;
+      node->ceiling =
+        pipe ? EXPR_FIELD : precedence - expression_non_associative(precedence);
+      if (token == '<') {
+        node->decision = end;
+        node->value = 1;
       }
+      delayed_add(parser, &work, node);
     }
-    if (!skip_token_layout(lexer)) {
-      return LVALUE_SHAPE_SETTLED;
+    delayed_set_destroy(&local);
+  }
+  delayed_set_destroy(&work);
+}
+
+static void delayed_token_add(DelayedParser *parser, int token) {
+  if (parser->failed)
+    return;
+  if (parser->length == parser->capacity) {
+    if (parser->capacity > SIZE_MAX / 2 / sizeof(*parser->tokens)) {
+      parser->failed = true;
+      return;
     }
-    if (name && lexer->lookahead == '[') {
-      if (!skip_group(lexer) || !skip_token_layout(lexer)) {
-        return LVALUE_SHAPE_SETTLED;
-      }
+    const size_t capacity = parser->capacity ? parser->capacity * 2 : 32;
+    int *tokens =
+      ts_realloc(parser->tokens, capacity * sizeof(*parser->tokens));
+    if (!tokens) {
+      parser->failed = true;
+      return;
     }
-    if ((input || targeted) && lexer->lookahead == '<') {
-      lexer->advance(lexer, false);
-      if (lexer->lookahead != '=') {
-        return probe_getline_field(lexer, PROBE_SOURCE, deferred)
-          ? LVALUE_SHAPE_SETTLED
-          : LVALUE_SHAPE_POSTFIX;
-      }
+    parser->tokens = tokens;
+    parser->capacity = capacity;
+  }
+  parser->tokens[parser->length++] = token;
+}
+
+static void delayed_destroy(DelayedParser *parser) {
+  if (parser->memo)
+    for (size_t i = 0; i < (parser->length + 1) * DELAYED_LEVELS; i++)
+      delayed_set_destroy(&parser->memo[i]);
+  ts_free(parser->memo);
+  ts_free(parser->computed);
+  ts_free(parser->ranks);
+  ts_free(parser->rank_slots);
+  ts_free(parser->tokens);
+}
+
+static void delayed_prepare(DelayedParser *parser, size_t selected) {
+  parser->computed[EXPR_ASSIGNMENT] = true;
+  parser->computed[selected * DELAYED_LEVELS + EXPR_ASSIGNMENT] = true;
+  for (size_t i = 0; i < parser->length; i++) {
+    const int token = parser->tokens[i];
+    const size_t next = (i + 1) * DELAYED_LEVELS;
+    if (token == '$')
+      parser->computed[next + EXPR_FIELD] = true;
+    if (token == PROBE_GETLINE || token == PROBE_UPDATE)
+      parser->computed[next + DELAYED_LVALUE] = true;
+    if (token == '<')
+      parser->computed[next + EXPR_FILE_SOURCE] = true;
+    if (token == '+' || token == '-' || token == '!')
+      parser->computed[next + EXPR_UNARY] = true;
+    if (token == '?')
+      parser->computed[next + EXPR_ASSIGNMENT] = true;
+    if (token == ':')
+      parser->computed[next + EXPR_CONDITIONAL] = true;
+    const int precedence =
+      token == PROBE_UPDATE ? EXPR_CONCATENATION : probe_precedence(token);
+    if (precedence == EXPR_CONCATENATION)
+      parser->computed[i * DELAYED_LEVELS + EXPR_CONCATENATION + 1] = true;
+    else if (precedence)
+      parser->computed[next + expression_right_precedence(precedence)] = true;
+  }
+  for (size_t start = parser->length + 1; start && !parser->failed;) {
+    start--;
+    for (
+      int minimum = 0; minimum < DELAYED_LEVELS && !parser->failed; minimum++
+    ) {
+      if (parser->computed[start * DELAYED_LEVELS + minimum])
+        delayed_compute(parser, start, minimum);
     }
-    return LVALUE_SHAPE_OPEN;
   }
 }
 
-static enum TokenType probe_getline_operand(TSLexer *lexer, bool *deferred) {
-  for (bool updated = false;; updated = true) {
-    const LvalueShape shape = skip_lvalue(lexer, updated, deferred);
-    if (shape == LVALUE_SHAPE_POSTFIX) {
-      return GETLINE_OMITTED_WORD;
-    }
-    if (shape == LVALUE_SHAPE_NONE) {
-      return updated ? GETLINE_OMITTED_WORD : GETLINE_WORD;
-    }
-    const int32_t sign = lexer->lookahead;
-    if (shape == LVALUE_SHAPE_SETTLED || (sign != '+' && sign != '-')) {
-      return GETLINE_TARGET_WORD;
-    }
-    lexer->advance(lexer, false);
-    if (lexer->lookahead != sign) {
-      return GETLINE_TARGET_WORD;
-    }
-    lexer->advance(lexer, false);
+typedef struct {
+  size_t start, end, outer_postfix;
+  int kind, ceiling;
+  bool lvalue, postfix, unary, blocked_postfix;
+} OrderedValue;
+
+typedef enum {
+  ORDERED_PREFIX,
+  ORDERED_FIELD,
+  ORDERED_UNARY,
+  ORDERED_TARGET,
+  ORDERED_SOURCE,
+  ORDERED_GET,
+  ORDERED_TAIL,
+  ORDERED_BINARY,
+  ORDERED_CONSEQUENCE,
+  ORDERED_ALTERNATIVE,
+} OrderedStage;
+
+typedef struct {
+  size_t start, operator_position;
+  int minimum, token, precedence;
+  OrderedStage stage;
+  bool get_only;
+  OrderedValue left, consequence;
+} OrderedFrame;
+
+typedef struct {
+  DelayedParser *input;
+  OrderedFrame *frames;
+  size_t *choices, *sources;
+  bool *alternatives;
+  unsigned char *plan;
+  size_t depth, maximum_depth, budget;
+  OrderedValue value;
+  bool valid;
+} OrderedParser;
+
+static void ordered_push(OrderedParser *parser, size_t start, int minimum) {
+  if (parser->depth > parser->input->length) {
+    parser->valid = false;
+    return;
+  }
+  parser->frames[parser->depth++] = (OrderedFrame){
+    .start = start,
+    .minimum = minimum,
+    .get_only = minimum == 0,
+  };
+  // Limit speculative retries; the chart shares continuations after this
+  // budget.
+  if (parser->depth > parser->maximum_depth) {
+    parser->maximum_depth = parser->depth;
+    const size_t allowance = parser->input->length > SIZE_MAX / 8
+      ? SIZE_MAX
+      : 8 * parser->input->length;
+    parser->budget = parser->budget > SIZE_MAX - allowance
+      ? SIZE_MAX
+      : parser->budget + allowance;
   }
 }
 
-static enum TokenType scan_getline_operand(TSLexer *lexer) {
-  bool deferred = false;
-  const enum TokenType token = probe_getline_operand(lexer, &deferred);
-  if (!deferred) {
-    return token;
+static void ordered_return(OrderedParser *parser, OrderedValue value) {
+  parser->value = value;
+  parser->depth--;
+}
+
+static OrderedValue ordered_node(
+  int kind,
+  size_t start,
+  size_t end,
+  OrderedValue left,
+  OrderedValue right
+) {
+  return (OrderedValue){
+    .kind = kind,
+    .start = start,
+    .end = end,
+    .ceiling = EXPR_FIELD,
+    .outer_postfix = left.outer_postfix + right.outer_postfix,
+    .blocked_postfix = left.blocked_postfix || right.blocked_postfix,
+  };
+}
+
+static void ordered_step(OrderedParser *parser) {
+  OrderedFrame *frame = &parser->frames[parser->depth - 1];
+  const int token = delayed_token(parser->input, frame->start);
+  const OrderedValue empty = {0};
+  switch (frame->stage) {
+  case ORDERED_PREFIX:
+    if (
+      token ==
+      PROBE_NAME ||
+      (token == PROBE_VALUE && frame->minimum != DELAYED_LVALUE)
+    ) {
+      frame->left =
+        ordered_node(0, frame->start, frame->start + 1, empty, empty);
+      frame->left.lvalue = token == PROBE_NAME;
+      frame->left.postfix = true;
+      frame->stage = ORDERED_TAIL;
+    } else if (token == '$') {
+      frame->stage = ORDERED_FIELD;
+      ordered_push(parser, frame->start + 1, EXPR_FIELD);
+    } else if (token == PROBE_GETLINE && frame->minimum != DELAYED_LVALUE) {
+      frame->left =
+        ordered_node(DELAYED_GET, frame->start, frame->start + 1, empty, empty);
+      frame->left.postfix = true;
+      const int next = delayed_token(parser->input, frame->start + 1);
+      if (next == PROBE_NAME || next == '$') {
+        parser->alternatives[frame->start] = parser->choices[frame->start] == 0;
+        if (!parser->choices[frame->start]) {
+          parser->plan[frame->start] = 1;
+          frame->stage = ORDERED_TARGET;
+          ordered_push(parser, frame->start + 1, DELAYED_LVALUE);
+          break;
+        }
+      }
+      frame->stage = ORDERED_GET;
+    } else if (
+      frame->minimum !=
+      DELAYED_LVALUE &&
+      (token == '+' || token == '-' || token == '!' || token == PROBE_UPDATE)
+    ) {
+      frame->stage = ORDERED_UNARY;
+      ordered_push(
+        parser,
+        frame->start + 1,
+        token == PROBE_UPDATE ? DELAYED_LVALUE : EXPR_UNARY
+      );
+    } else {
+      parser->valid = false;
+    }
+    break;
+  case ORDERED_FIELD:
+    frame->left = ordered_node(
+      DELAYED_FIELD,
+      frame->start,
+      parser->value.end,
+      empty,
+      parser->value
+    );
+    frame->left.lvalue = true;
+    frame->left.postfix = parser->value.postfix;
+    frame->stage = ORDERED_TAIL;
+    break;
+  case ORDERED_UNARY:
+    frame->left = ordered_node(
+      DELAYED_PREFIX,
+      frame->start,
+      parser->value.end,
+      empty,
+      parser->value
+    );
+    frame->left.ceiling = token == PROBE_UPDATE ? EXPR_POSTFIX : EXPR_UNARY;
+    frame->left.unary = token == '+' || token == '-';
+    frame->stage = ORDERED_TAIL;
+    break;
+  case ORDERED_TARGET:
+    frame->left = ordered_node(
+      DELAYED_GET,
+      frame->start,
+      parser->value.end,
+      empty,
+      parser->value
+    );
+    frame->left.postfix = parser->value.postfix;
+    frame->stage = ORDERED_GET;
+    break;
+  case ORDERED_GET:
+    if (
+      !frame->get_only && delayed_token(parser->input, frame->left.end) == '<'
+    ) {
+      const size_t position = frame->left.end;
+      const size_t owner = parser->sources[position]++;
+      if (parser->choices[position] == owner) {
+        parser->alternatives[position] = true;
+        parser->plan[frame->start] |= 2;
+        frame->stage = ORDERED_SOURCE;
+        ordered_push(parser, position + 1, EXPR_FILE_SOURCE);
+        break;
+      }
+    }
+    frame->stage = ORDERED_TAIL;
+    break;
+  case ORDERED_SOURCE:
+    frame->left = ordered_node(
+      DELAYED_FILE,
+      frame->start,
+      parser->value.end,
+      frame->left,
+      parser->value
+    );
+    frame->left.postfix = true;
+    frame->stage = ORDERED_TAIL;
+    break;
+  case ORDERED_TAIL: {
+    if (frame->minimum == DELAYED_LVALUE || frame->get_only) {
+      ordered_return(parser, frame->left);
+      break;
+    }
+    const size_t end = frame->left.end;
+    const int next = delayed_token(parser->input, end);
+    const bool pipe = next == '|' && frame->minimum <= EXPR_ASSIGNMENT;
+    const int precedence = pipe ? EXPR_ASSIGNMENT
+      : next == PROBE_UPDATE    ? EXPR_CONCATENATION
+                                : probe_precedence(next);
+    const bool postfix = next ==
+      PROBE_UPDATE &&
+      frame->left.lvalue &&
+      frame->left.postfix &&
+      frame->minimum <=
+      EXPR_POSTFIX &&
+      EXPR_POSTFIX <= frame->left.ceiling;
+    const bool eligible = precedence >
+      0 &&
+      frame->minimum <=
+      precedence &&
+      precedence <=
+      frame->left.ceiling &&
+      (pipe || precedence != EXPR_ASSIGNMENT || frame->left.lvalue);
+    if (postfix && (!eligible || !parser->choices[end])) {
+      parser->alternatives[end] = eligible;
+      const OrderedValue left = frame->left;
+      frame->left =
+        ordered_node(DELAYED_POSTFIX, frame->start, end + 1, left, empty);
+      frame->left.ceiling = EXPR_POSTFIX;
+      if (left.kind == DELAYED_FIELD) {
+        parser->plan[left.start] = 1;
+        frame->left.outer_postfix += left.start <
+          parser->input->focus &&
+          left.start != parser->input->blocked;
+        frame->left.blocked_postfix |= left.start == parser->input->blocked;
+      }
+      break;
+    }
+    if (!eligible) {
+      ordered_return(parser, frame->left);
+      break;
+    }
+    frame->token = next;
+    frame->operator_position = end;
+    frame->precedence = precedence;
+    frame->stage = ORDERED_BINARY;
+    if (next == PROBE_MEMBERSHIP) {
+      if (delayed_token(parser->input, end + 1) != PROBE_NAME) {
+        parser->valid = false;
+        break;
+      }
+      parser->value = ordered_node(0, end + 1, end + 2, empty, empty);
+    } else if (pipe) {
+      if (delayed_token(parser->input, end + 1) != PROBE_GETLINE) {
+        parser->valid = false;
+        break;
+      }
+      ordered_push(parser, end + 1, 0);
+    } else if (next == '?') {
+      frame->stage = ORDERED_CONSEQUENCE;
+      ordered_push(parser, end + 1, EXPR_ASSIGNMENT);
+    } else {
+      if (next == '<')
+        parser->alternatives[end] = false;
+      ordered_push(
+        parser,
+        precedence == EXPR_CONCATENATION ? end : end + 1,
+        expression_right_precedence(precedence)
+      );
+    }
+    break;
   }
-  if (token == GETLINE_TARGET_WORD) {
-    return GETLINE_PREFER_TARGET_WORD;
+  case ORDERED_CONSEQUENCE:
+    if (delayed_token(parser->input, parser->value.end) != ':') {
+      parser->valid = false;
+      break;
+    }
+    frame->consequence = parser->value;
+    frame->stage = ORDERED_ALTERNATIVE;
+    ordered_push(parser, parser->value.end + 1, EXPR_CONDITIONAL);
+    break;
+  case ORDERED_ALTERNATIVE:
+    parser->value = ordered_node(
+      0,
+      frame->operator_position + 1,
+      parser->value.end,
+      frame->consequence,
+      parser->value
+    );
+    frame->stage = ORDERED_BINARY;
+    break;
+  case ORDERED_BINARY: {
+    if (frame->precedence == EXPR_CONCATENATION && parser->value.unary) {
+      parser->valid = false;
+      break;
+    }
+    const bool unary = frame->left.unary;
+    frame->left = ordered_node(
+      frame->token,
+      frame->start,
+      parser->value.end,
+      frame->left,
+      parser->value
+    );
+    frame->left.unary = unary;
+    frame->left.ceiling = frame->token == '|'
+      ? EXPR_FIELD
+      : frame->precedence - expression_non_associative(frame->precedence);
+    frame->stage = ORDERED_TAIL;
+    break;
   }
-  return token == GETLINE_OMITTED_WORD ? GETLINE_PREFER_OMITTED_WORD : token;
+  }
+}
+
+static unsigned char *ordered_parse(DelayedParser *input, uint64_t required) {
+  if (input->length > (SIZE_MAX / sizeof(OrderedFrame)) - 2)
+    return NULL;
+  OrderedParser parser = {.input = input};
+  parser.frames = ts_calloc(input->length + 2, sizeof(*parser.frames));
+  parser.choices = ts_calloc(input->length, sizeof(*parser.choices));
+  parser.sources = ts_calloc(input->length, sizeof(*parser.sources));
+  parser.alternatives = ts_calloc(input->length, sizeof(*parser.alternatives));
+  parser.plan = ts_calloc(input->length, sizeof(*parser.plan));
+  unsigned char *result = NULL;
+  if (
+    !parser.frames ||
+    !parser.choices ||
+    !parser.sources ||
+    !parser.alternatives ||
+    !parser.plan
+  )
+    goto done;
+  parser.budget = 1;
+  while (parser.budget) {
+    memset(parser.sources, 0, input->length * sizeof(*parser.sources));
+    memset(
+      parser.alternatives,
+      0,
+      input->length * sizeof(*parser.alternatives)
+    );
+    memset(parser.plan, 0, input->length * sizeof(*parser.plan));
+    parser.depth = 0;
+    parser.valid = true;
+    ordered_push(&parser, 0, EXPR_ASSIGNMENT);
+    while (parser.valid && parser.depth && parser.budget) {
+      parser.budget--;
+      ordered_step(&parser);
+    }
+    if (
+      parser.valid &&
+      !parser.depth &&
+      parser.value.end ==
+      input->length &&
+      parser.value.outer_postfix ==
+      required &&
+      !parser.value.blocked_postfix
+    ) {
+      result = parser.plan;
+      parser.plan = NULL;
+      break;
+    }
+    size_t position = input->length;
+    while (position && !parser.alternatives[position - 1])
+      position--;
+    if (!position)
+      break;
+    parser.choices[position - 1]++;
+    memset(
+      parser.choices + position,
+      0,
+      (input->length - position) * sizeof(*parser.choices)
+    );
+  }
+done:
+  ts_free(parser.frames);
+  ts_free(parser.choices);
+  ts_free(parser.sources);
+  ts_free(parser.alternatives);
+  ts_free(parser.plan);
+  return result;
+}
+
+static int take_decision(ScannerState *state, bool field) {
+  if (!state->decision_count)
+    return -1;
+  const int decision = state->decisions[0];
+  if ((decision & 12) != (field ? DECISION_FIELD : DECISION_GETLINE)) {
+    clear_decisions(state);
+    return -1;
+  }
+  if (--state->remaining_decisions) {
+    memmove(state->decisions, state->decisions + 1, state->decision_count - 1);
+    state->decisions[state->decision_count - 1] = (unsigned char)decision;
+  } else {
+    clear_decisions(state);
+  }
+  return decision & 3;
+}
+
+static void cache_decisions(
+  ScannerState *state,
+  const DelayedParser *parser,
+  const unsigned char *plan,
+  const DelayedNode *best
+) {
+  const size_t capacity = parser->length - parser->focus - 1;
+  if (!capacity || capacity > SIZE_MAX / sizeof(size_t))
+    return;
+  unsigned char *decisions = ts_calloc(capacity, sizeof(*decisions));
+  size_t *prefixes = ts_calloc(capacity, sizeof(*prefixes));
+  if (!decisions || !prefixes) {
+    ts_free(decisions);
+    ts_free(prefixes);
+    return;
+  }
+  size_t length = 0;
+  for (size_t i = parser->focus + 1; i < parser->length; i++) {
+    const int token = parser->tokens[i];
+    if (token == '$')
+      decisions[length++] = DECISION_FIELD |
+        (plan      ? plan[i]
+            : best ? delayed_rank_at(parser, best->plan, i) != 0
+                   : 0);
+    if (token == PROBE_GETLINE)
+      decisions[length++] = DECISION_GETLINE |
+        (plan      ? plan[i]
+            : best ? (delayed_rank_at(parser, best->rank, i) == 1) |
+              (delayed_rank_at(parser, best->plan, i) ? 2 : 0)
+                   : delayed_token(parser, i + 1) ==
+              PROBE_NAME ||
+              delayed_token(parser, i + 1) == '$');
+  }
+  if (length) {
+    for (size_t i = 1; i < length; i++) {
+      size_t prefix = prefixes[i - 1];
+      while (prefix && decisions[prefix] != decisions[i])
+        prefix = prefixes[prefix - 1];
+      prefixes[i] = prefix + (decisions[prefix] == decisions[i]);
+    }
+    const size_t period = length - prefixes[length - 1];
+    state->decision_count =
+      period <= DECISION_CAPACITY ? (uint16_t)period : DECISION_CAPACITY;
+    state->remaining_decisions =
+      period <= DECISION_CAPACITY ? length : DECISION_CAPACITY;
+    memcpy(state->decisions, decisions, state->decision_count);
+  }
+  ts_free(decisions);
+  ts_free(prefixes);
+}
+
+typedef enum {
+  GETLINE_EXPRESSION,
+  GETLINE_UPDATED_FIELD,
+  GETLINE_UPDATED_SOURCE,
+  GETLINE_FIELD_OPERATOR,
+  GETLINE_TARGET_BEFORE_SOURCE,
+  GETLINE_PLAIN_FIELD,
+  GETLINE_SOURCE_BEFORE_OUTER_SOURCE,
+} GetlineContext;
+
+static int delayed_getline(
+  TSLexer *lexer,
+  GetlineContext context,
+  bool field_focus,
+  bool *continued,
+  ScannerState *state
+) {
+  const uint64_t updates = state->updates;
+  const int cached = take_decision(state, field_focus);
+  if (cached >= 0) {
+    *continued = updates &&
+      (context ==
+        GETLINE_UPDATED_SOURCE ||
+        context ==
+        GETLINE_TARGET_BEFORE_SOURCE ||
+        context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE);
+    return cached;
+  }
+  InputProbe input = {
+    .lexer =
+      {.lookahead = lexer->lookahead,
+        .advance = probe_advance,
+        .mark_end = probe_mark_end,
+        .eof = probe_eof},
+    .source = lexer
+  };
+  DelayedParser parser = {.blocked = SIZE_MAX};
+  const bool owns_context = context ==
+    GETLINE_UPDATED_FIELD ||
+    context ==
+    GETLINE_UPDATED_SOURCE ||
+    context ==
+    GETLINE_TARGET_BEFORE_SOURCE ||
+    context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE;
+  const uint64_t ancestors = owns_context && updates ? updates - 1 : updates;
+  for (uint64_t i = 0; i < ancestors; i++) {
+    delayed_token_add(&parser, '$');
+    delayed_token_add(&parser, PROBE_GETLINE);
+    delayed_token_add(&parser, '<');
+  }
+  if (context == GETLINE_PLAIN_FIELD)
+    parser.blocked = parser.length;
+  const uint64_t required = ancestors + owns_context;
+  if (context && context != GETLINE_FIELD_OPERATOR)
+    delayed_token_add(&parser, '$');
+  if (context == GETLINE_UPDATED_SOURCE) {
+    delayed_token_add(&parser, PROBE_GETLINE);
+    delayed_token_add(&parser, '<');
+  }
+  if (
+    context ==
+    GETLINE_TARGET_BEFORE_SOURCE ||
+    context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE
+  ) {
+    delayed_token_add(&parser, PROBE_GETLINE);
+    delayed_token_add(&parser, '$');
+    delayed_token_add(&parser, '!');
+    if (context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE) {
+      delayed_token_add(&parser, PROBE_GETLINE);
+      delayed_token_add(&parser, '<');
+    }
+  }
+  const size_t selected = parser.length;
+  parser.focus = selected;
+  delayed_token_add(&parser, field_focus ? '$' : PROBE_GETLINE);
+  bool operand = field_focus;
+  int questions = 0;
+  while (!parser.failed) {
+    const int token = probe_token(&input, operand);
+    if (
+      !token ||
+      token ==
+      '\n' ||
+      token ==
+      '#' ||
+      token ==
+      ';' ||
+      token ==
+      ',' ||
+      token ==
+      ')' ||
+      token ==
+      ']' ||
+      token ==
+      '}' ||
+      token ==
+      '{' ||
+      (token == ':' && questions == 0)
+    )
+      break;
+    if (token == '?')
+      questions++;
+    if (token == ':')
+      questions--;
+    delayed_token_add(&parser, token);
+    if (token != PROBE_UPDATE)
+      operand =
+        token != PROBE_NAME && token != PROBE_VALUE && token != PROBE_GETLINE;
+  }
+  bool has_updates = false;
+  for (size_t i = 0; i < parser.length; i++)
+    has_updates |= parser.tokens[i] == PROBE_UPDATE;
+  if (!has_updates) {
+    const int token = delayed_token(&parser, selected + 1);
+    const int decision = field_focus     ? 0
+      : context == GETLINE_UPDATED_FIELD ? -1
+                                         : token == PROBE_NAME || token == '$';
+    *continued = false;
+    if (decision >= 0 && !parser.failed && !input.failed && !updates)
+      cache_decisions(state, &parser, NULL, NULL);
+    delayed_destroy(&parser);
+    ts_free(input.characters);
+    return decision;
+  }
+  if (
+    parser.failed ||
+    input.failed ||
+    parser.length >=
+    SIZE_MAX /
+    DELAYED_LEVELS /
+    sizeof(*parser.memo)
+  ) {
+    delayed_destroy(&parser);
+    ts_free(input.characters);
+    *continued = false;
+    return -1;
+  }
+  unsigned char *plan = ordered_parse(&parser, required);
+  if (plan) {
+    const int decision = plan[selected];
+    *continued = context ==
+      GETLINE_UPDATED_SOURCE ||
+      context ==
+      GETLINE_TARGET_BEFORE_SOURCE ||
+      context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE;
+    cache_decisions(state, &parser, plan, NULL);
+    ts_free(plan);
+    delayed_destroy(&parser);
+    ts_free(input.characters);
+    return decision;
+  }
+  parser.memo =
+    ts_calloc((parser.length + 1) * DELAYED_LEVELS, sizeof(*parser.memo));
+  parser.computed =
+    ts_calloc((parser.length + 1) * DELAYED_LEVELS, sizeof(*parser.computed));
+  if (!parser.memo || !parser.computed) {
+    delayed_destroy(&parser);
+    ts_free(input.characters);
+    *continued = false;
+    return -1;
+  }
+  delayed_prepare(&parser, selected);
+  if (parser.failed) {
+    delayed_destroy(&parser);
+    ts_free(input.characters);
+    *continued = false;
+    return -1;
+  }
+  DelayedSet *candidates = delayed_expr(&parser, 0, EXPR_ASSIGNMENT);
+  DelayedNode *best = NULL;
+  for (size_t i = 0; i < candidates->length; i++) {
+    DelayedNode *node = &candidates->items[i];
+    if (
+      node->end ==
+      parser.length &&
+      (node->outer_postfix == required) &&
+      !node->blocked_postfix &&
+      (!best || delayed_better(&parser, node, best))
+    )
+      best = node;
+  }
+  *continued = (context ==
+                 GETLINE_UPDATED_SOURCE ||
+                 context ==
+                 GETLINE_TARGET_BEFORE_SOURCE ||
+                 context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE) &&
+    best != NULL;
+  if (
+    (context ==
+      GETLINE_UPDATED_SOURCE ||
+      context ==
+      GETLINE_TARGET_BEFORE_SOURCE ||
+      context == GETLINE_SOURCE_BEFORE_OUTER_SOURCE) &&
+    !best
+  ) {
+    candidates = delayed_expr(&parser, selected, EXPR_ASSIGNMENT);
+    for (size_t i = 0; i < candidates->length; i++) {
+      DelayedNode *node = &candidates->items[i];
+      if (
+        node->end ==
+        parser.length &&
+        (!best || delayed_better(&parser, node, best))
+      )
+        best = node;
+    }
+  }
+  int decision = field_focus && best ? best->focus_postfix : -1;
+  if (best && !field_focus)
+    decision = best->focus_target | (best->focus_source ? 2 : 0);
+  if (best)
+    cache_decisions(state, &parser, NULL, best);
+  delayed_destroy(&parser);
+  ts_free(input.characters);
+  return decision;
+}
+
+static enum TokenType
+scan_getline_operand(ScannerState *state, TSLexer *lexer) {
+  bool continued;
+  const int decision =
+    delayed_getline(lexer, GETLINE_EXPRESSION, false, &continued, state);
+  return (decision >= 0 && (decision & 1)) ? GETLINE_TARGET_WORD
+    : decision == 0                        ? GETLINE_OMITTED_WORD
+                                           : GETLINE_WORD;
 }
 
 static bool scan_contextual_word(
+  ScannerState *state,
   TSLexer *lexer,
   const bool *valid_symbols,
   bool recovering
@@ -1344,18 +2007,123 @@ static bool scan_contextual_word(
   if (word == WORD_NAME && lexer->lookahead == '(') {
     return emit(lexer, FUNC_NAME_WORD);
   }
+  // Names and getline can restart nested expressions at every recovery.
+  if (recovering && (word == WORD_NAME || word == WORD_GETLINE)) {
+    return emit(lexer, ERROR_SENTINEL);
+  }
   if (word != WORD_GETLINE) {
     return false;
   }
-  // Returning GETLINE_WORD here makes repeated recovery quadratic.
-  if (recovering) {
-    return emit(lexer, ERROR_SENTINEL);
-  }
   enum TokenType token = GETLINE_WORD;
-  if (valid_symbols[GETLINE_TARGET_WORD]) {
-    token = scan_getline_operand(lexer);
-  } else if (valid_symbols[GETLINE_FIELD_WORD]) {
-    token = GETLINE_FIELD_WORD;
+  if (
+    valid_symbols[READY_GETLINE_WORD] ||
+    valid_symbols[READY_GETLINE_TARGET_WORD]
+  ) {
+    bool continued;
+    const int decision =
+      delayed_getline(lexer, GETLINE_UPDATED_FIELD, false, &continued, state);
+    return emit(
+      lexer,
+      (decision >= 0 && (decision & 1)) ? READY_GETLINE_TARGET_WORD
+                                        : READY_GETLINE_WORD
+    );
+  }
+  const bool withheld_source = valid_symbols[WITHHELD_SOURCE_FILE_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_FILE_TARGET_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_FILE_FIELD_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_FILE_FIELD_TARGET_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_GETLINE_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_GETLINE_TARGET_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_FIELD_WORD] ||
+    valid_symbols[WITHHELD_SOURCE_FIELD_TARGET_WORD];
+  const bool withheld = valid_symbols[WITHHELD_GETLINE_WORD] ||
+    valid_symbols[WITHHELD_GETLINE_TARGET_WORD] ||
+    valid_symbols[WITHHELD_FILE_WORD] ||
+    valid_symbols[WITHHELD_FILE_TARGET_WORD];
+  if (
+    withheld_source ||
+    withheld ||
+    valid_symbols[CONTINUED_GETLINE_WORD] ||
+    valid_symbols[CONTINUED_GETLINE_TARGET_WORD] ||
+    valid_symbols[CONTINUED_GETLINE_FIELD_WORD] ||
+    valid_symbols[CONTINUED_GETLINE_FIELD_TARGET_WORD]
+  ) {
+    bool continued;
+    const int decision = delayed_getline(
+      lexer,
+      withheld_source ? GETLINE_SOURCE_BEFORE_OUTER_SOURCE
+        : withheld    ? GETLINE_TARGET_BEFORE_SOURCE
+                      : GETLINE_UPDATED_SOURCE,
+      false,
+      &continued,
+      state
+    );
+    if (decision >= 0 && continued) {
+      if (withheld_source) {
+        const bool field =
+          !valid_symbols[WITHHELD_SOURCE_GETLINE_TARGET_WORD] &&
+          !valid_symbols[WITHHELD_SOURCE_FILE_TARGET_WORD];
+        if (decision & 2)
+          return emit(
+            lexer,
+            (decision & 1) ? (field ? WITHHELD_SOURCE_FILE_FIELD_TARGET_WORD
+                                    : WITHHELD_SOURCE_FILE_TARGET_WORD)
+                           : (field ? WITHHELD_SOURCE_FILE_FIELD_WORD
+                                    : WITHHELD_SOURCE_FILE_WORD)
+          );
+        return emit(
+          lexer,
+          (decision >= 0 && (decision & 1))
+            ? (field ? WITHHELD_SOURCE_FIELD_TARGET_WORD
+                     : WITHHELD_SOURCE_GETLINE_TARGET_WORD)
+            : (field ? WITHHELD_SOURCE_FIELD_WORD
+                     : WITHHELD_SOURCE_GETLINE_WORD)
+        );
+      }
+      if (withheld)
+        return emit(
+          lexer,
+          (decision & 2)
+            ? ((decision & 1) ? WITHHELD_FILE_TARGET_WORD : WITHHELD_FILE_WORD)
+            : ((decision & 1) ? WITHHELD_GETLINE_TARGET_WORD
+                              : WITHHELD_GETLINE_WORD)
+        );
+      const bool field = !valid_symbols[CONTINUED_GETLINE_TARGET_WORD];
+      return emit(
+        lexer,
+        (decision >= 0 && (decision & 1))
+          ? (field ? CONTINUED_GETLINE_FIELD_TARGET_WORD
+                   : CONTINUED_GETLINE_TARGET_WORD)
+          : (field ? CONTINUED_GETLINE_FIELD_WORD : CONTINUED_GETLINE_WORD)
+      );
+    }
+    if (valid_symbols[GETLINE_TARGET_WORD])
+      return emit(
+        lexer,
+        (decision >= 0 && (decision & 1)) ? GETLINE_TARGET_WORD
+                                          : GETLINE_OMITTED_WORD
+      );
+    if (
+      valid_symbols[GETLINE_FIELD_WORD] ||
+      valid_symbols[GETLINE_FIELD_TARGET_WORD]
+    )
+      return emit(
+        lexer,
+        (decision >= 0 && (decision & 1)) ? GETLINE_FIELD_TARGET_WORD
+                                          : GETLINE_FIELD_WORD
+      );
+    return emit(lexer, GETLINE_WORD);
+  } else if (valid_symbols[GETLINE_TARGET_WORD]) {
+    token = scan_getline_operand(state, lexer);
+  } else if (
+    valid_symbols[GETLINE_FIELD_WORD] ||
+    valid_symbols[GETLINE_FIELD_TARGET_WORD]
+  ) {
+    bool continued;
+    const int decision =
+      delayed_getline(lexer, GETLINE_PLAIN_FIELD, false, &continued, state);
+    token = (decision >= 0 && (decision & 1)) ? GETLINE_FIELD_TARGET_WORD
+                                              : GETLINE_FIELD_WORD;
   }
   return emit(lexer, token);
 }
@@ -1379,6 +2147,55 @@ static bool scan_sign(TSLexer *lexer, const bool *valid_symbols) {
       emit(lexer, token);
   }
   const enum TokenType token = first == '+' ? PLUS_OPERATOR : MINUS_OPERATOR;
+  return valid_symbols[token] && emit(lexer, token);
+}
+
+static bool scan_prefix_operator(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols,
+  bool recovering
+) {
+  const int32_t first = lexer->lookahead;
+  lexer->advance(lexer, false);
+  lexer->mark_end(lexer);
+  if (first == '$' && !recovering) {
+    const bool withheld = valid_symbols[WITHHELD_SOURCE_FIELD_OPERATOR] ||
+      valid_symbols[WITHHELD_SOURCE_UPDATED_FIELD_OPERATOR];
+    const bool source = valid_symbols[CONTINUED_FIELD_OPERATOR] ||
+      valid_symbols[CONTINUED_UPDATED_FIELD_OPERATOR];
+    const enum TokenType plain = withheld ? WITHHELD_SOURCE_FIELD_OPERATOR
+      : source                            ? CONTINUED_FIELD_OPERATOR
+                                          : FIELD_OPERATOR;
+    const enum TokenType updated = withheld
+      ? WITHHELD_SOURCE_UPDATED_FIELD_OPERATOR
+      : source ? CONTINUED_UPDATED_FIELD_OPERATOR
+               : POSTFIX_FIELD_OPERATOR;
+    if (valid_symbols[updated]) {
+      bool continued;
+      const int result = delayed_getline(
+        lexer,
+        withheld   ? GETLINE_SOURCE_BEFORE_OUTER_SOURCE
+          : source ? GETLINE_UPDATED_SOURCE
+                   : GETLINE_FIELD_OPERATOR,
+        true,
+        &continued,
+        state
+      );
+      if (result == 1)
+        state->updates++;
+      return emit(lexer, result == 1 ? updated : plain);
+    }
+    take_decision(state, true);
+    return valid_symbols[plain] && emit(lexer, plain);
+  }
+  if (first == '!' && (lexer->lookahead == '=' || lexer->lookahead == '~')) {
+    return false;
+  }
+  if (recovering) {
+    return emit(lexer, ERROR_SENTINEL);
+  }
+  const enum TokenType token = first == '$' ? FIELD_OPERATOR : NOT_OPERATOR;
   return valid_symbols[token] && emit(lexer, token);
 }
 
@@ -1489,14 +2306,36 @@ static bool compound_has_escape(TSLexer *lexer, int32_t marker) {
   return false;
 }
 
+// Other lexing can consume trailing blanks together with the raw newline.
+static bool skip_blanks_before_newline(TSLexer *lexer, unsigned *count) {
+  while (is_ascii_blank(lexer->lookahead)) {
+    lexer->advance(lexer, false);
+    (*count)++;
+  }
+  return lexer->lookahead == '\n';
+}
+
+// Save the mode change without consuming the newline.
+static bool emit_literal_break(
+  ScannerState *state,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+  return valid_symbols[LITERAL_BREAK] &&
+    emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, LITERAL_BREAK);
+}
+
 static bool scan_ere_collating_element(
-  const ScannerState *state,
+  ScannerState *state,
   TSLexer *lexer,
   const bool *valid_symbols
 ) {
   const int32_t marker = state->mode == LEXICAL_MODE_ERE_COLLATING ? '.' : '=';
   const int32_t first = lexer->lookahead;
   unsigned count = 0;
+  if (skip_blanks_before_newline(lexer, &count)) {
+    return emit_literal_break(state, lexer, valid_symbols);
+  }
   while (
     !lexer->eof(lexer) &&
     lexer->lookahead !=
@@ -1596,7 +2435,9 @@ static bool scan_ere_context(
     lexer->mark_end(lexer);
     return lexer->lookahead == ']' && emit(lexer, ERE_CLOSING_HYPHEN);
   }
-  return false;
+  unsigned blanks = 0;
+  return skip_blanks_before_newline(lexer, &blanks) &&
+    emit_literal_break(state, lexer, valid_symbols);
 }
 
 static bool scan_comment(TSLexer *lexer) {
@@ -1618,11 +2459,27 @@ void tree_sitter_posix_awk_external_scanner_destroy(void *payload) {
 unsigned
 tree_sitter_posix_awk_external_scanner_serialize(void *payload, char *buffer) {
   const ScannerState *state = payload;
-  if (state->mode == LEXICAL_MODE_OUTSIDE) {
+  if (
+    state->mode ==
+    LEXICAL_MODE_OUTSIDE &&
+    !state->updates &&
+    !state->decision_count
+  ) {
     return 0;
   }
   buffer[0] = (char)state->mode;
-  return SERIALIZED_SCANNER_STATE_SIZE;
+  for (unsigned i = 0; i < 8; i++)
+    buffer[i + 1] = (char)(state->updates >> (i * 8));
+  buffer[9] = (char)state->decision_count;
+  buffer[10] = (char)(state->decision_count >> 8);
+  for (unsigned i = 0; i < 8; i++)
+    buffer[i + 11] = (char)(state->remaining_decisions >> (i * 8));
+  memcpy(
+    buffer + SERIALIZED_SCANNER_STATE_SIZE,
+    state->decisions,
+    state->decision_count
+  );
+  return SERIALIZED_SCANNER_STATE_SIZE + state->decision_count;
 }
 
 void tree_sitter_posix_awk_external_scanner_deserialize(
@@ -1632,12 +2489,37 @@ void tree_sitter_posix_awk_external_scanner_deserialize(
 ) {
   ScannerState *state = payload;
   *state = (ScannerState){0};
-  if (length != SERIALIZED_SCANNER_STATE_SIZE) {
+  if (
+    length <
+    SERIALIZED_SCANNER_STATE_SIZE ||
+    length > TREE_SITTER_SERIALIZATION_BUFFER_SIZE
+  ) {
     return;
   }
   const unsigned char mode = (unsigned char)buffer[0];
-  if (mode <= LEXICAL_MODE_CONTINUED_NEWLINE) {
+  const uint16_t count =
+    (unsigned char)buffer[9] | ((uint16_t)(unsigned char)buffer[10] << 8);
+  if (
+    mode <=
+    LEXICAL_MODE_CONTINUED_NEWLINE &&
+    count <=
+    DECISION_CAPACITY &&
+    length ==
+    SERIALIZED_SCANNER_STATE_SIZE +
+    count
+  ) {
     state->mode = (LexicalMode)mode;
+    for (unsigned i = 0; i < 8; i++)
+      state->updates |= (uint64_t)(unsigned char)buffer[i + 1] << (i * 8);
+    for (unsigned i = 0; i < 8; i++)
+      state->remaining_decisions |= (uint64_t)(unsigned char)buffer[i + 11]
+        << (i * 8);
+    if ((count == 0) != (state->remaining_decisions == 0)) {
+      *state = (ScannerState){0};
+      return;
+    }
+    state->decision_count = count;
+    memcpy(state->decisions, buffer + SERIALIZED_SCANNER_STATE_SIZE, count);
   }
 }
 
@@ -1648,6 +2530,36 @@ bool tree_sitter_posix_awk_external_scanner_scan(
 ) {
   ScannerState *state = payload;
   const bool recovering = valid_symbols[ERROR_SENTINEL];
+  if (recovering)
+    clear_decisions(state);
+  if (!recovering && state->mode == LEXICAL_MODE_OUTSIDE) {
+    lexer->mark_end(lexer);
+    if (valid_symbols[COMPLETE_FIELD_UPDATE]) {
+      if (state->updates)
+        state->updates--;
+      return emit(lexer, COMPLETE_FIELD_UPDATE);
+    }
+    while (is_ascii_blank(lexer->lookahead))
+      lexer->advance(lexer, true);
+    lexer->mark_end(lexer);
+    const bool nonempty = lexer->lookahead != ')' && lexer->lookahead != ']';
+    if (valid_symbols[SUSPEND_UPDATE] && state->updates && nonempty) {
+      state->updates--;
+      return emit(lexer, SUSPEND_UPDATE);
+    }
+    if (valid_symbols[BEGIN_ISOLATION] && nonempty) {
+      clear_decisions(state);
+      return emit(lexer, BEGIN_ISOLATION);
+    }
+    if (
+      valid_symbols[RESTORE_UPDATE] &&
+      (lexer->lookahead == ')' || lexer->lookahead == ']')
+    ) {
+      state->updates++;
+      clear_decisions(state);
+      return emit(lexer, RESTORE_UPDATE);
+    }
+  }
   if (state->mode == LEXICAL_MODE_CONTINUED_NEWLINE) {
     if (lexer->lookahead != '\n' || !valid_symbols[CONTINUATION_NEWLINE]) {
       return false;
@@ -1665,10 +2577,8 @@ bool tree_sitter_posix_awk_external_scanner_scan(
   if (lexer->lookahead == '\\') {
     return scan_backslash(state, lexer);
   }
-  // Save the mode change without consuming the newline.
   if (lexer->lookahead == '\n' && state->mode != LEXICAL_MODE_OUTSIDE) {
-    return valid_symbols[LITERAL_BREAK] &&
-      emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, LITERAL_BREAK);
+    return emit_literal_break(state, lexer, valid_symbols);
   }
   if (is_ere_mode(state->mode)) {
     return scan_ere_context(state, lexer, valid_symbols, recovering);
@@ -1679,7 +2589,9 @@ bool tree_sitter_posix_awk_external_scanner_scan(
       lexer->mark_end(lexer);
       return emit_mode(state, lexer, LEXICAL_MODE_OUTSIDE, STRING_CLOSING);
     }
-    return false;
+    unsigned blanks = 0;
+    return skip_blanks_before_newline(lexer, &blanks) &&
+      emit_literal_break(state, lexer, valid_symbols);
   }
   if (lexer->lookahead == '#' && valid_symbols[COMMENT]) {
     return scan_comment(lexer);
@@ -1690,10 +2602,13 @@ bool tree_sitter_posix_awk_external_scanner_scan(
     return emit_mode(state, lexer, LEXICAL_MODE_STRING, STRING_OPENING);
   }
   if (is_word_start(lexer->lookahead)) {
-    return scan_contextual_word(lexer, valid_symbols, recovering);
+    return scan_contextual_word(state, lexer, valid_symbols, recovering);
   }
   if (lexer->lookahead == '|') {
     return scan_getline_pipe(lexer, valid_symbols, recovering);
+  }
+  if (lexer->lookahead == '$' || lexer->lookahead == '!') {
+    return scan_prefix_operator(state, lexer, valid_symbols, recovering);
   }
   if (recovering) {
     return false;

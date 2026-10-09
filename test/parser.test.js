@@ -747,6 +747,22 @@ for (const { name, source } of membershipPrecedenceCases) {
 
 const invalidSyntaxCases = [
   {
+    name: "a getline source cannot end early to accept chained comparisons",
+    source: "{ getline < x < y < z }\n",
+  },
+  {
+    name: "a source update cannot move out of grouping to its field",
+    source: "{ $getline < ((x) in a -- x ++) }\n",
+  },
+  {
+    name: "a source update cannot move out of a function argument to its field",
+    source: "{ $getline < f((x) in a -- x ++) }\n",
+  },
+  {
+    name: "a source update cannot move out of an array subscript to its field",
+    source: "{ $getline < a[(x) in a -- x ++] }\n",
+  },
+  {
     name: "a backslash at EOF cannot form a continuation",
     source: "{}\\",
   },
@@ -1214,10 +1230,69 @@ test("posix_awk: long unterminated strings parse through EOF with native recover
   assert.equal(parseSummary(source).successful, false);
 });
 
-test("posix_awk: repeated invalid input functions recover through EOF within one second", () => {
+test("posix_awk: blanks before a raw newline end an unterminated literal", () => {
+  for (const literal of [
+    '"broken',
+    "/[[:",
+    "/[[.a",
+    "/[[=",
+    "/[[=a",
+    "/a{1",
+    "/a{1,",
+    "/[[: }",
+  ]) {
+    for (const blanks of [" ", "\t", " \t"]) {
+      const source = lines(
+        `BEGIN { x = ${literal}${blanks}`,
+        'BEGIN { print "s" ~ /b/ }',
+      );
+      const result = captureParse(writeSource("invalid", source));
+      dirty(result.tree);
+      assert.match(result.tree, /^1:15 +- +1:16 +string_content `s`$/m, source);
+      assert.match(
+        result.tree,
+        /^1:21 +- +1:22 +ordinary_character `b`$/m,
+        source,
+      );
+    }
+  }
+});
+
+test("posix_awk: ordinary nested getline sequences parse within one second", () => {
+  for (const expression of [
+    "$getline $-getline < 1 ++ ",
+    "$getline $-getline < 1 ",
+  ]) {
+    assert.equal(
+      parseSummary(`{ ${expression.repeat(64)}}\n`, 1_000_000).successful,
+      true,
+      expression,
+    );
+  }
+});
+
+test("posix_awk: extreme nested getline sequences finish without truncation", () => {
+  for (const expression of [
+    "$getline $-getline < 1 ++ ",
+    "$getline $-getline < 1 ",
+  ]) {
+    assert.equal(
+      parseSummary(`{ ${expression.repeat(1600)}}\n`, 50_000_000).successful,
+      true,
+      expression,
+    );
+  }
+});
+
+test("posix_awk: repeated incomplete expressions recover through EOF within one second", () => {
   for (const source of [
     `${") getline < ".repeat(1200)}\n`,
     `BEGIN { ${"] ^ getline < , 1 ".repeat(1200)}}\n`,
+    `${"$ , ".repeat(4000)}\n`,
+    `${"$ ) ".repeat(4000)}\n`,
+    `${"! , ".repeat(4000)}\n`,
+    `${"!! , ".repeat(4000)}\n`,
+    `${"x = , ".repeat(4000)}\n`,
   ]) {
     assert.equal(parseSummary(source, 1_000_000).successful, false);
   }
@@ -1229,7 +1304,6 @@ test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
 
 for (const expression of [
   "print getline x++",
-  'print $getline < "cmd" > a < x',
   "getline x++++",
   "a + (1,2) in array",
   "$getline $-x^2++",

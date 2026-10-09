@@ -1091,7 +1091,7 @@ a postfix update on an input filename remains inside the source expression
       (newline))))
 
 ==================
-getline input redirection takes a concatenation as its source
+concatenation follows an additive getline source
 ==================
 { getline line < dir "/" name }
 ---
@@ -1105,26 +1105,26 @@ getline input redirection takes a concatenation as its source
             (simple_statement
               (expr
                 (non_unary_expr
-                  (non_unary_input_function
-                    (simple_get
-                      (getline_keyword)
-                      (lvalue
-                        (name)))
-                    (expr
-                      (non_unary_expr
-                        (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_input_function
+                        (simple_get
+                          (getline_keyword)
+                          (lvalue
+                            (name)))
+                        (expr
                           (non_unary_expr
                             (lvalue
-                              (name)))
-                          (non_unary_expr
-                            (string
-                              (string_content))))
-                        (non_unary_expr
-                          (lvalue
-                            (name)))))))))))))))
+                              (name))))))
+                    (non_unary_expr
+                      (string
+                        (string_content))))
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))))))))
 
 ==================
-getline input redirection takes a comparison as its source
+comparison follows an additive getline source
 ==================
 { getline < file > 0 }
 ---
@@ -1138,20 +1138,20 @@ getline input redirection takes a comparison as its source
             (simple_statement
               (expr
                 (non_unary_expr
-                  (non_unary_input_function
-                    (simple_get
-                      (getline_keyword))
-                    (expr
-                      (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))
+                      (expr
                         (non_unary_expr
                           (lvalue
-                            (name)))
-                        (expr
-                          (non_unary_expr
-                            (number)))))))))))))))
+                            (name))))))
+                  (expr
+                    (non_unary_expr
+                      (number))))))))))))
 
 ==================
-an update before a name stays inside the source of a redirected getline field
+a field takes a postfix update before a concatenated name
 ==================
 { $getline < "f" ++y }
 ---
@@ -1165,26 +1165,26 @@ an update before a name stays inside the source of a redirected getline field
             (simple_statement
               (expr
                 (non_unary_expr
-                  (lvalue
-                    (expr
-                      (non_unary_expr
-                        (non_unary_input_function
-                          (simple_get
-                            (getline_keyword))
-                          (expr
-                            (non_unary_expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
                               (non_unary_expr
                                 (string
-                                  (string_content)))
-                              (non_unary_expr
-                                (incr)
-                                (lvalue
-                                  (name))))))))))))))))))
+                                  (string_content))))))))
+                    (incr))
+                  (non_unary_expr
+                    (lvalue
+                      (name))))))))))))
 
 ==================
-a redirected getline field accepts a postfix update after a comparison source
+a redirected getline field takes an update after a grouped comparison source
 ==================
-{ $getline < a < "f" ++ }
+{ $getline < (a < "f") ++ }
 ---
 
 (program
@@ -1204,17 +1204,76 @@ a redirected getline field accepts a postfix update after a comparison source
                             (getline_keyword))
                           (expr
                             (non_unary_expr
-                              (non_unary_expr
-                                (lvalue
-                                  (name)))
                               (expr
                                 (non_unary_expr
-                                  (string
-                                    (string_content))))))))))
+                                  (non_unary_expr
+                                    (lvalue
+                                      (name)))
+                                  (expr
+                                    (non_unary_expr
+                                      (string
+                                        (string_content))))))))))))
                   (incr))))))))))
 
 ==================
-a postfix update on a name after getline remains inside the source expression
+assignment applies to a field after its additive getline source
+==================
+{
+  $getline < "f" = 1
+  $getline < -x += 1
+}
+---
+
+(program
+  (item
+    (action
+      (newline_opt
+        (newline))
+      (terminated_statement_list
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))
+                          (expr
+                            (non_unary_expr
+                              (string
+                                (string_content))))))))
+                  (expr
+                    (non_unary_expr
+                      (number)))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))
+                          (expr
+                            (unary_expr
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name))))))))))
+                  (add_assign)
+                  (expr
+                    (non_unary_expr
+                      (number)))))))
+          (newline))))))
+
+==================
+an outer field retains the getline target inside its source before an update
 ==================
 { $getline < getline x++ }
 ---
@@ -1236,14 +1295,12 @@ a postfix update on a name after getline remains inside the source expression
                             (getline_keyword))
                           (expr
                             (non_unary_expr
-                              (non_unary_expr
-                                (non_unary_input_function
-                                  (simple_get
-                                    (getline_keyword))))
-                              (non_unary_expr
-                                (lvalue
-                                  (name))
-                                (incr)))))))))))))))))
+                              (non_unary_input_function
+                                (simple_get
+                                  (getline_keyword)
+                                  (lvalue
+                                    (name))))))))))
+                  (incr))))))))))
 
 ==================
 an outer getline field takes the update after the source of its target
@@ -1433,9 +1490,389 @@ getline lookahead prefers the first viable target over a nested target
             (simple_statement
               (expr
                 (non_unary_expr
-                  (non_unary_input_function
-                    (simple_get
-                      (getline_keyword)
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword)
+                        (lvalue
+                          (expr
+                            (non_unary_expr
+                              (non_unary_input_function
+                                (simple_get
+                                  (getline_keyword))
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_input_function
+                                      (simple_get
+                                        (getline_keyword))))))))))))
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name))
+                                (incr)))))))
+                    (incr)))))))))))
+
+==================
+getline source ownership moves out of unary and prefix operands for a field update
+==================
+{
+  $getline $-getline < 1 ++
+  $getline $!getline < x -- ++
+  $getline $--$getline < 1 ++
+}
+---
+
+(program
+  (item
+    (action
+      (newline_opt
+        (newline))
+      (terminated_statement_list
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword)))))))))
+                          (expr
+                            (non_unary_expr
+                              (number)))))))
+                  (incr)))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword)))))))))
+                          (expr
+                            (non_unary_expr
+                              (lvalue
+                                (name))
+                              (decr)))))))
+                  (incr)))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (decr)
+                                  (lvalue
+                                    (expr
+                                      (non_unary_expr
+                                        (non_unary_input_function
+                                          (simple_get
+                                            (getline_keyword))))))))))
+                          (expr
+                            (non_unary_expr
+                              (number)))))))
+                  (incr)))))
+          (newline))))))
+
+==================
+getline source ownership stays inside unary and prefix operands when complete
+==================
+{
+  $getline $-getline < 1
+  $getline $!getline < x --
+  $getline $--$getline < 1
+}
+---
+
+(program
+  (item
+    (action
+      (newline_opt
+        (newline))
+      (terminated_statement_list
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword))
+                                        (expr
+                                          (non_unary_expr
+                                            (number))))))))))))))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword))
+                                        (expr
+                                          (non_unary_expr
+                                            (lvalue
+                                              (name))
+                                            (decr))))))))))))))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (decr)
+                                  (lvalue
+                                    (expr
+                                      (non_unary_expr
+                                        (non_unary_input_function
+                                          (simple_get
+                                            (getline_keyword))
+                                          (expr
+                                            (non_unary_expr
+                                              (number)))))))))))))))))))
+          (newline))))))
+
+==================
+a field getline in a unary operand of a field getline target keeps its field reading
+==================
+{
+  $getline $-$getline
+  $getline $!$getline x
+  $getline $-$getline < 1
+}
+---
+
+(program
+  (item
+    (action
+      (newline_opt
+        (newline))
+      (terminated_statement_list
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (expr
+                                          (non_unary_expr
+                                            (non_unary_input_function
+                                              (simple_get
+                                                (getline_keyword))))))))))))))))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (expr
+                                          (non_unary_expr
+                                            (non_unary_input_function
+                                              (simple_get
+                                                (getline_keyword)
+                                                (lvalue
+                                                  (name)))))))))))))))))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (lvalue
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword)
+                            (lvalue
+                              (expr
+                                (unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (expr
+                                          (non_unary_expr
+                                            (non_unary_input_function
+                                              (simple_get
+                                                (getline_keyword))
+                                              (expr
+                                                (non_unary_expr
+                                                  (number)))))))))))))))))))))
+          (newline))))))
+
+==================
+a field takes a postfix update after a grouped membership source
+==================
+{
+  $getline < ((x) in a) -- x
+  $getline < ((x) in a) -- x ++
+  $getline < ((x) in a) -- x ++ y
+}
+---
+
+(program
+  (item
+    (action
+      (newline_opt
+        (newline))
+      (terminated_statement_list
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_expr
+                                      (expr
+                                        (non_unary_expr
+                                          (lvalue
+                                            (name)))))
+                                    (in_keyword)
+                                    (name)))))))))
+                    (decr))
+                  (non_unary_expr
+                    (lvalue
+                      (name)))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_expr
+                                      (expr
+                                        (non_unary_expr
+                                          (lvalue
+                                            (name)))))
+                                    (in_keyword)
+                                    (name)))))))))
+                    (decr))
+                  (non_unary_expr
+                    (lvalue
+                      (name))
+                    (incr))))))
+          (newline))
+        (terminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (non_unary_expr
                       (lvalue
                         (expr
                           (non_unary_expr
@@ -1444,10 +1881,412 @@ getline lookahead prefers the first viable target over a nested target
                                 (getline_keyword))
                               (expr
                                 (non_unary_expr
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_expr
+                                        (expr
+                                          (non_unary_expr
+                                            (lvalue
+                                              (name)))))
+                                      (in_keyword)
+                                      (name)))))))))
+                      (decr))
+                    (non_unary_expr
+                      (lvalue
+                        (name))
+                      (incr)))
+                  (non_unary_expr
+                    (lvalue
+                      (name)))))))
+          (newline))))))
+
+==================
+a parenthesized getline comparison source ends before an outer comparison
+==================
+{ (getline < (x < y)) < z }
+---
+
+(program
+  (item
+    (action
+      (unterminated_statement_list
+        (unterminated_statement
+          (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  (non_unary_expr
+                    (expr
+                      (non_unary_expr
+                        (non_unary_input_function
+                          (simple_get
+                            (getline_keyword))
+                          (expr
+                            (non_unary_expr
+                              (expr
+                                (non_unary_expr
                                   (non_unary_expr
-                                    (non_unary_input_function
-                                      (simple_get
-                                        (getline_keyword))))
+                                    (lvalue
+                                      (name)))
+                                  (expr
+                                    (non_unary_expr
+                                      (lvalue
+                                        (name))))))))))))
+                  (expr
+                    (non_unary_expr
+                      (lvalue
+                        (name)))))))))))))
+
+================================================================================
+parenthesized getline concatenates a postfix update
+================================================================================
+{ (getline) x++ }
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))))))
+                    (non_unary_expr
+                      (lvalue
+                        (name))
+                      (incr))))))))))
+    (terminator
+      (newline))))
+
+================================================================================
+file input stops before concatenation and includes additive operators
+================================================================================
+{
+  getline < "a" "b"
+  getline < "a" + 1
+  getline < ("a" "b")
+}
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (non_unary_input_function
+                        (simple_get
+                          (getline_keyword))
+                        (expr
+                          (non_unary_expr
+                            (string
+                              (string_content))))))
+                    (non_unary_expr
+                      (string
+                        (string_content)))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))
+                      (expr
+                        (non_unary_expr
+                          (non_unary_expr
+                            (string
+                              (string_content)))
+                          (expr
+                            (non_unary_expr
+                              (number))))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_input_function
+                      (simple_get
+                        (getline_keyword))
+                      (expr
+                        (non_unary_expr
+                          (expr
+                            (non_unary_expr
+                              (non_unary_expr
+                                (string
+                                  (string_content)))
+                              (non_unary_expr
+                                (string
+                                  (string_content))))))))))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+================================================================================
+source relocation crosses multiple getline targets before a field update
+================================================================================
+{ $getline $!getline $!getline < 1 ++ }
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword)
+                              (lvalue
+                                (expr
+                                  (non_unary_expr
+                                    (expr
+                                      (non_unary_expr
+                                        (non_unary_input_function
+                                          (simple_get
+                                            (getline_keyword)
+                                            (lvalue
+                                              (expr
+                                                (non_unary_expr
+                                                  (expr
+                                                    (non_unary_expr
+                                                      (non_unary_input_function
+                                                        (simple_get
+                                                          (getline_keyword))))))))))))))))
+                            (expr
+                              (non_unary_expr
+                                (number)))))))
+                    (incr)))))))))
+    (terminator
+      (newline))))
+
+================================================================================
+nested file inputs each leave an update for their enclosing field
+================================================================================
+{
+  $getline < $getline < getline x++++
+  $getline < $getline < $getline < getline x++++++
+}
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword))
+                                        (expr
+                                          (non_unary_expr
+                                            (non_unary_input_function
+                                              (simple_get
+                                                (getline_keyword)
+                                                (lvalue
+                                                  (name))))))))))
+                                (incr)))))))
+                    (incr)))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword))
+                                        (expr
+                                          (non_unary_expr
+                                            (lvalue
+                                              (expr
+                                                (non_unary_expr
+                                                  (non_unary_input_function
+                                                    (simple_get
+                                                      (getline_keyword))
+                                                    (expr
+                                                      (non_unary_expr
+                                                        (non_unary_input_function
+                                                          (simple_get
+                                                            (getline_keyword)
+                                                            (lvalue
+                                                              (name))))))))))
+                                            (incr)))))))
+                                (incr)))))))
+                    (incr)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+================================================================================
+group call and subscript boundaries isolate getline target selection
+================================================================================
+{
+  $getline < (getline x++) ++
+  $getline < f(getline x++) ++
+  $getline < a[getline x++] ++
+  $getline < ($getline < (getline x++) ++) ++
+}
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (newline_opt
+          (newline))
+        (terminated_statement_list
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (expr
+                                  (non_unary_expr
+                                    (non_unary_expr
+                                      (non_unary_input_function
+                                        (simple_get
+                                          (getline_keyword))))
+                                    (non_unary_expr
+                                      (lvalue
+                                        (name))
+                                      (incr))))))))))
+                    (incr)))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (func_name)
+                                (expr_list
+                                  (expr
+                                    (non_unary_expr
+                                      (non_unary_expr
+                                        (non_unary_input_function
+                                          (simple_get
+                                            (getline_keyword))))
+                                      (non_unary_expr
+                                        (lvalue
+                                          (name))
+                                        (incr)))))))))))
+                    (incr)))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (lvalue
+                                  (name)
+                                  (expr_list
+                                    (expr
+                                      (non_unary_expr
+                                        (non_unary_expr
+                                          (non_unary_input_function
+                                            (simple_get
+                                              (getline_keyword))))
+                                        (non_unary_expr
+                                          (lvalue
+                                            (name))
+                                          (incr))))))
+                                (incr)))))))))))
+            (newline))
+          (terminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword))
+                            (expr
+                              (non_unary_expr
+                                (expr
                                   (non_unary_expr
                                     (lvalue
                                       (expr
@@ -1457,7 +2296,144 @@ getline lookahead prefers the first viable target over a nested target
                                               (getline_keyword))
                                             (expr
                                               (non_unary_expr
+                                                (expr
+                                                  (non_unary_expr
+                                                    (non_unary_expr
+                                                      (non_unary_input_function
+                                                        (simple_get
+                                                          (getline_keyword))))
+                                                    (non_unary_expr
+                                                      (lvalue
+                                                        (name))
+                                                      (incr))))))))))
+                                    (incr)))))))))
+                    (incr)))))
+            (newline)))))
+    (terminator
+      (newline))))
+
+================================================================================
+nested sources retain the earlier targets before the final outer source
+================================================================================
+{ $getline $!getline $--$getline $(x) < $!getline $getline $-getline < 1 ++ }
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (lvalue
+                      (expr
+                        (non_unary_expr
+                          (non_unary_input_function
+                            (simple_get
+                              (getline_keyword)
+                              (lvalue
+                                (expr
+                                  (non_unary_expr
+                                    (expr
+                                      (non_unary_expr
+                                        (non_unary_input_function
+                                          (simple_get
+                                            (getline_keyword)
+                                            (lvalue
+                                              (expr
+                                                (non_unary_expr
+                                                  (decr)
+                                                  (lvalue
+                                                    (expr
+                                                      (non_unary_expr
+                                                        (non_unary_input_function
+                                                          (simple_get
+                                                            (getline_keyword)
+                                                            (lvalue
+                                                              (expr
+                                                                (non_unary_expr
+                                                                  (expr
+                                                                    (non_unary_expr
+                                                                      (lvalue
+                                                                        (name))))))))
+                                                          (expr
+                                                            (non_unary_expr
+                                                              (lvalue
+                                                                (expr
+                                                                  (non_unary_expr
+                                                                    (expr
+                                                                      (non_unary_expr
+                                                                        (non_unary_input_function
+                                                                          (simple_get
+                                                                            (getline_keyword)
+                                                                            (lvalue
+                                                                              (expr
+                                                                                (non_unary_expr
+                                                                                  (non_unary_input_function
+                                                                                    (simple_get
+                                                                                      (getline_keyword)
+                                                                                      (lvalue
+                                                                                        (expr
+                                                                                          (unary_expr
+                                                                                            (expr
+                                                                                              (non_unary_expr
+                                                                                                (non_unary_input_function
+                                                                                                  (simple_get
+                                                                                                    (getline_keyword)))))))))))))))))))))))))))))))))))))
+                            (expr
+                              (non_unary_expr
+                                (number)))))))
+                    (incr)))))))))
+    (terminator
+      (newline))))
+
+================================================================================
+two file sources precede a comparison outside nested getline
+================================================================================
+{ $getline $-getline < x < y < z }
+
+--------------------------------------------------------------------------------
+
+(program
+  (item_list
+    (item
+      (action
+        (unterminated_statement_list
+          (unterminated_statement
+            (terminatable_statement
+              (simple_statement
+                (expr
+                  (non_unary_expr
+                    (non_unary_expr
+                      (lvalue
+                        (expr
+                          (non_unary_expr
+                            (non_unary_input_function
+                              (simple_get
+                                (getline_keyword)
+                                (lvalue
+                                  (expr
+                                    (unary_expr
+                                      (expr
+                                        (non_unary_expr
+                                          (non_unary_input_function
+                                            (simple_get
+                                              (getline_keyword))
+                                            (expr
+                                              (non_unary_expr
                                                 (lvalue
-                                                  (name))
-                                                (incr)))))))
-                                    (incr)))))))))))))))))))
+                                                  (name)))))))))))
+                              (expr
+                                (non_unary_expr
+                                  (lvalue
+                                    (name)))))))))
+                    (expr
+                      (non_unary_expr
+                        (lvalue
+                          (name))))))))))))
+    (terminator
+      (newline))))

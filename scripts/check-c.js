@@ -267,6 +267,7 @@ function main(arguments_) {
   const sanitizerArguments =
     arguments_[0] === "--sanitize"
       ? [
+          "-O1",
           "-fsanitize=address,undefined",
           "-fno-sanitize-recover=undefined",
           "-fno-omit-frame-pointer",

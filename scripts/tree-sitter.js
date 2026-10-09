@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EXPRESSION, RESERVED_WORDS } from "../grammar.js";
+import { EXPRESSION, FILE_SOURCE_TIER, RESERVED_WORDS } from "../grammar.js";
 
 const root = resolve(import.meta.dirname, "..");
 const packageName = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
@@ -200,6 +200,7 @@ function scannerExpressionRules(source) {
   const entries = Object.entries(EXPRESSION);
   const generated = `enum ExpressionPrecedence {
 ${entries.map(([name, { precedence }]) => `  ${symbol(name)} = ${precedence},`).join("\n")}
+  EXPR_FILE_SOURCE = ${symbol(FILE_SOURCE_TIER)},
 };
 
 static int expression_right_precedence(int precedence) {

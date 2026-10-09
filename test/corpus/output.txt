@@ -892,22 +892,22 @@ BEGIN {
                     (print_expr_list
                       (print_expr
                         (non_unary_print_expr
-                          (lvalue
-                            (expr
-                              (non_unary_expr
-                                (non_unary_input_function
-                                  (simple_get
-                                    (getline_keyword))
-                                  (expr
-                                    (non_unary_expr
+                          (non_unary_print_expr
+                            (lvalue
+                              (expr
+                                (non_unary_expr
+                                  (non_unary_input_function
+                                    (simple_get
+                                      (getline_keyword))
+                                    (expr
                                       (non_unary_expr
                                         (non_unary_input_function
                                           (simple_get
-                                            (getline_keyword))))
-                                      (non_unary_expr
-                                        (lvalue
-                                          (name))
-                                        (incr))))))))))))
+                                            (getline_keyword))))))))))
+                          (non_unary_print_expr
+                            (lvalue
+                              (name))
+                            (incr))))))
                   (output_redirection
                     (expr
                       (non_unary_expr
@@ -1326,7 +1326,7 @@ destination
       (newline))))
 
 ==================
-a comparison after getline stays inside its source in print
+a greater-than sign after an additive getline source redirects print
 ==================
 { print $getline < "f" > "out" }
 
@@ -1354,13 +1354,13 @@ a comparison after getline stays inside its source in print
                                     (getline_keyword))
                                   (expr
                                     (non_unary_expr
-                                      (non_unary_expr
-                                        (string
-                                          (string_content)))
-                                      (expr
-                                        (non_unary_expr
-                                          (string
-                                            (string_content)))))))))))))))))))))
+                                      (string
+                                        (string_content))))))))))))
+                  (output_redirection
+                    (expr
+                      (non_unary_expr
+                        (string
+                          (string_content))))))))))))
     (terminator
       (newline))))
 

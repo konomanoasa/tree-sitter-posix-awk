@@ -8,13 +8,11 @@ use tree_sitter::{
 struct EreCase {
   name: &'static str,
   source: &'static str,
-  leaves: &'static [(&'static str, usize, usize)],
 }
 
 struct LeafCase {
   name: &'static str,
   source: &'static str,
-  kind: &'static str,
   range: Range<usize>,
 }
 
@@ -22,85 +20,71 @@ const LEAF_CASES: &[LeafCase] = &[
   LeafCase {
     name: "a complete name remains one leaf",
     source: "foo\n",
-    kind: "name",
     range: 0..3,
   },
   LeafCase {
     name: "the name before consecutive continuations remains separate",
     source: "fo\\\n\\\no\n",
-    kind: "name",
     range: 0..2,
   },
   LeafCase {
     name: "the name after consecutive continuations remains separate",
     source: "fo\\\n\\\no\n",
-    kind: "name",
     range: 6..7,
   },
   LeafCase {
     name: "a keyword excludes its following continuation",
     source: "BEGIN\\\n{}\n",
-    kind: "begin_keyword",
     range: 0..5,
   },
   LeafCase {
     name: "a builtin excludes its following continuation",
     source: "{length\\\n(x)}\n",
-    kind: "builtin_func_name",
     range: 1..7,
   },
   LeafCase {
     name: "a function name excludes its adjacent parenthesis",
     source: "{foo(x)}\n",
-    kind: "func_name",
     range: 1..4,
   },
   LeafCase {
     name: "a continuation before the parenthesis makes a variable name",
     source: "{foo\\\n(x)}\n",
-    kind: "name",
     range: 1..4,
   },
   LeafCase {
     name: "a decimal constant includes its exponent and suffix",
     source: "1.2e+3F\n",
-    kind: "number",
     range: 0..7,
   },
   LeafCase {
     name: "a logical operator excludes its following continuation",
     source: "a||\\\nb\n",
-    kind: "or",
     range: 1..3,
   },
   LeafCase {
     name: "Unicode string content remains one leaf",
     source: "\"é😀\"\n",
-    kind: "string_content",
     range: 1..7,
   },
   LeafCase {
     name: "an octal escape excludes the following string character",
     source: "\"\\123x\"\n",
-    kind: "escape_sequence",
     range: 1..5,
   },
   LeafCase {
     name: "an escaped slash excludes the closing delimiter",
     source: "/\\//\n",
-    kind: "escaped_delimiter",
     range: 1..3,
   },
   LeafCase {
     name: "an ERE class name excludes compound delimiters",
     source: "/[[:alpha:]]/\n",
-    kind: "class_name",
     range: 4..9,
   },
   LeafCase {
     name: "an ERE repetition count remains one leaf",
     source: "/a{12}/\n",
-    kind: "duplication_count",
     range: 3..5,
   },
 ];
@@ -109,147 +93,34 @@ const ERE_CASES: &[EreCase] = &[
   EreCase {
     name: "an empty ERE retains only its delimiter ranges",
     source: "//",
-    leaves: &[("/", 0, 1), ("/", 1, 2)],
   },
   EreCase {
     name: "empty groups retain delimiters within nested alternation and repetition",
     source: "/(()|())*?/",
-    leaves: &[
-      ("/", 0, 1),
-      ("(", 1, 2),
-      ("(", 2, 3),
-      (")", 3, 4),
-      ("|", 4, 5),
-      ("(", 5, 6),
-      (")", 6, 7),
-      (")", 7, 8),
-      ("*", 8, 9),
-      ("repetition_modifier", 9, 10),
-      ("/", 10, 11),
-    ],
   },
   EreCase {
     name: "ordinary characters and complete escapes retain their source ranges",
     source: r"/a é)}.\n\/\\\141\q(a*?)/",
-    leaves: &[
-      ("/", 0, 1),
-      ("ordinary_character", 1, 2),
-      ("ordinary_character", 2, 3),
-      ("ordinary_character", 3, 5),
-      ("ordinary_character", 5, 6),
-      ("ordinary_character", 6, 7),
-      (".", 7, 8),
-      ("escape_sequence", 8, 10),
-      ("escaped_delimiter", 10, 12),
-      ("quoted_character", 12, 14),
-      ("escape_sequence", 14, 18),
-      ("escape_sequence", 18, 20),
-      ("(", 20, 21),
-      ("ordinary_character", 21, 22),
-      ("*", 22, 23),
-      ("repetition_modifier", 23, 24),
-      (")", 24, 25),
-      ("/", 25, 26),
-    ],
   },
   EreCase {
     name: "a blank before an escape remains content in every literal position",
     source: r"/ \.[ \]][[. \..]]/",
-    leaves: &[
-      ("/", 0, 1),
-      ("ordinary_character", 1, 2),
-      ("quoted_character", 2, 4),
-      ("[", 4, 5),
-      ("collating_element_single", 5, 6),
-      ("escape_sequence", 6, 8),
-      ("]", 8, 9),
-      ("[", 9, 10),
-      ("[", 10, 11),
-      (".", 11, 12),
-      ("collating_element_content", 12, 13),
-      ("escape_sequence", 13, 15),
-      (".", 15, 16),
-      ("]", 16, 17),
-      ("]", 17, 18),
-      ("/", 18, 19),
-    ],
   },
   EreCase {
     name: "collating forms separate raw fragments from adjacent escapes",
     source: r"/[[.a\nb.][=é\t犬=][.\/\141\q.]]/",
-    leaves: &[
-      ("/", 0, 1),
-      ("[", 1, 2),
-      ("[", 2, 3),
-      (".", 3, 4),
-      ("collating_element_content", 4, 5),
-      ("escape_sequence", 5, 7),
-      ("collating_element_content", 7, 8),
-      (".", 8, 9),
-      ("]", 9, 10),
-      ("[", 10, 11),
-      ("=", 11, 12),
-      ("collating_element_content", 12, 14),
-      ("escape_sequence", 14, 16),
-      ("collating_element_content", 16, 19),
-      ("=", 19, 20),
-      ("]", 20, 21),
-      ("[", 21, 22),
-      (".", 22, 23),
-      ("escaped_delimiter", 23, 25),
-      ("escape_sequence", 25, 29),
-      ("escape_sequence", 29, 31),
-      (".", 31, 32),
-      ("]", 32, 33),
-      ("]", 33, 34),
-      ("/", 34, 35),
-    ],
   },
   EreCase {
     name: "raw compound punctuation, spaces and Unicode share one payload leaf",
     source: r"/[[. a-]🙂.]]/",
-    leaves: &[
-      ("/", 0, 1),
-      ("[", 1, 2),
-      ("[", 2, 3),
-      (".", 3, 4),
-      ("collating_element_multi", 4, 12),
-      (".", 12, 13),
-      ("]", 13, 14),
-      ("]", 14, 15),
-      ("/", 15, 16),
-    ],
   },
   EreCase {
     name: "bracket literals distinguish raw brackets and a trailing hyphen",
     source: r"/[]a[\/\n-]/",
-    leaves: &[
-      ("/", 0, 1),
-      ("[", 1, 2),
-      ("collating_element_single", 2, 3),
-      ("collating_element_single", 3, 4),
-      ("collating_element_single", 4, 5),
-      ("escaped_delimiter", 5, 7),
-      ("escape_sequence", 7, 9),
-      ("-", 9, 10),
-      ("]", 10, 11),
-      ("/", 11, 12),
-    ],
   },
   EreCase {
     name: "a leading hyphen is a named endpoint before range and list hyphens",
     source: r"/[--ac-]/",
-    leaves: &[
-      ("/", 0, 1),
-      ("[", 1, 2),
-      ("collating_element_single", 2, 3),
-      ("-", 3, 4),
-      ("collating_element_single", 4, 5),
-      ("collating_element_single", 5, 6),
-      ("-", 6, 7),
-      ("]", 7, 8),
-      ("/", 8, 9),
-    ],
   },
 ];
 
@@ -295,27 +166,6 @@ fn edit(
     old_end_position,
     new_end_position: point(text, new_end),
   });
-}
-
-fn assert_leaf_partition(
-  node: Node<'_>,
-  expected: &[(&str, usize, usize)],
-  name: &str,
-) {
-  let mut leaves = Vec::new();
-  collect_leaves(node, &mut leaves);
-  let actual: Vec<_> = leaves
-    .iter()
-    .map(|leaf| (leaf.kind(), leaf.start_byte(), leaf.end_byte()))
-    .collect();
-  assert_eq!(actual, expected, "{name}");
-  let mut end = node.start_byte();
-  for leaf in leaves {
-    assert_eq!(leaf.start_byte(), end, "{name}");
-    assert!(leaf.end_byte() > end, "{name}");
-    end = leaf.end_byte();
-  }
-  assert_eq!(end, node.end_byte(), "{name}");
 }
 
 fn assert_leaf_highlights(
@@ -378,6 +228,35 @@ fn assert_same_cst(actual: Node<'_>, expected: Node<'_>, context: &str) {
   }
 }
 
+fn assert_changed_scopes(old: &Tree, new: &Tree, context: &str) {
+  let scopes = |tree: &Tree| {
+    let mut scopes = vec![Vec::new(); tree.root_node().end_byte()];
+    let mut pending = vec![tree.root_node()];
+    while let Some(node) = pending.pop() {
+      for scope in &mut scopes[node.byte_range()] {
+        scope.push(node.kind_id());
+      }
+      for index in (0..node.child_count()).rev() {
+        pending.push(node.child(index).unwrap());
+      }
+    }
+    scopes
+  };
+  let old_scopes = scopes(old);
+  let new_scopes = scopes(new);
+  let ranges: Vec<_> = old.changed_ranges(new).collect();
+  for (byte, scope) in new_scopes.iter().enumerate() {
+    if old_scopes.get(byte) != Some(scope) {
+      assert!(
+        ranges
+          .iter()
+          .any(|range| range.start_byte <= byte && byte < range.end_byte),
+        "{context}: unreported scope change at byte {byte}: {ranges:?}",
+      );
+    }
+  }
+}
+
 fn assert_fresh_cst(
   reused: &mut Parser,
   source: &[u8],
@@ -408,19 +287,6 @@ fn parses_valid_source() {
   assert!(!root.has_error());
   assert!(grammar::NODE_TYPES.contains("\"program\""));
   Query::new(&language, grammar::HIGHLIGHTS_QUERY).unwrap();
-}
-
-#[test]
-fn ere_leaves_partition_complete_source_spellings() {
-  for case in ERE_CASES {
-    let tree = parse(&format!("{}\n", case.source), case.name);
-    let ere = tree
-      .root_node()
-      .descendant_for_byte_range(0, case.source.len())
-      .unwrap();
-    assert_eq!(ere.kind(), "ere", "{}", case.name);
-    assert_leaf_partition(ere, case.leaves, case.name);
-  }
 }
 
 #[test]
@@ -586,6 +452,18 @@ fn fields_belong_to_direct_children() {
     ("nested field after arithmetic unary", "{$+$a}"),
     ("nested field after logical unary in print", "{print $!$a}"),
     (
+      "ordinary updated fields without getline",
+      "{$$x++; $(-x)++; $-x++; ++$!x; $!$a}",
+    ),
+    (
+      "ordinary fields inside operators and arguments",
+      "{$a + $b * $!$c; $d ? $e : $f; f($1, ($a,$b) in arr)}",
+    ),
+    (
+      "nested getline targets without a source",
+      "{getline $(getline $(-$a)); print $+$a}",
+    ),
+    (
       "postfix field and getline target aliases",
       "{$-x++; $(-x)++; $$x++; $getline x++; $getline $-x++; $getline $(x)++}\n",
     ),
@@ -679,36 +557,6 @@ fn unary_field_assignment_preserves_target_and_right_association() {
         }
       }
     }
-  }
-}
-
-#[test]
-fn unary_field_assignment_keeps_parenthesized_pipe_ownership() {
-  for (name, source, pipe_source) in [
-    (
-      "assignment supplies pipe",
-      "{($+a=b) | getline}\n",
-      "($+a=b)",
-    ),
-    ("pipe supplies assignment", "{$+a=(b | getline)}\n", "b"),
-  ] {
-    let tree = parse(source, name);
-    let mut pending = vec![tree.root_node()];
-    let mut fields = Vec::new();
-    let mut sources = Vec::new();
-    while let Some(node) = pending.pop() {
-      if node.kind() == "lvalue"
-        && node.child_by_field_name("operator").is_some()
-      {
-        fields.push(node.utf8_text(source.as_bytes()).unwrap());
-      }
-      if let Some(child) = node.child_by_field_name("source") {
-        sources.push(child.utf8_text(source.as_bytes()).unwrap());
-      }
-      pending.extend(node.children(&mut node.walk()));
-    }
-    assert_eq!(fields, ["$+a"], "{name}");
-    assert_eq!(sources, [pipe_source], "{name}");
   }
 }
 
@@ -812,25 +660,10 @@ fn highlights_capture_only_leaves_and_cover_ere_and_token_spellings() {
 }
 
 #[test]
-fn lexical_tokens_keep_complete_leaf_ranges() {
-  for case in LEAF_CASES {
-    let tree = parse(case.source, case.name);
-    let node = tree
-      .root_node()
-      .descendant_for_byte_range(case.range.start, case.range.end)
-      .unwrap();
-    assert_eq!(node.kind(), case.kind, "{}", case.name);
-    assert_eq!(node.byte_range(), case.range, "{}", case.name);
-    assert_eq!(node.child_count(), 0, "{}", case.name);
-  }
-}
-
-#[test]
-fn continuation_markers_are_anonymous_and_exclude_newlines() {
+fn continuation_markers_exclude_newlines_and_receive_leaf_highlights() {
   struct Case {
     name: &'static str,
     source: &'static str,
-    markers: &'static [(usize, usize)],
   }
   assert!(!grammar::NODE_TYPES.contains("\"line_continuation\""));
   let query =
@@ -839,52 +672,42 @@ fn continuation_markers_are_anonymous_and_exclude_newlines() {
     Case {
       name: "a continuation alone creates no newline token",
       source: "\\\n",
-      markers: &[(0, 1)],
     },
     Case {
       name: "source and AWK expression boundaries",
       source: "\\\n{a +\\\nb}\\\n",
-      markers: &[(0, 1), (6, 7), (10, 11)],
     },
     Case {
       name: "consecutive continuations separate two names",
       source: "fo\\\n\\\no\n",
-      markers: &[(2, 3), (4, 5)],
     },
     Case {
       name: "a continuation separates two numbers",
       source: "1\\\n2\n",
-      markers: &[(1, 2)],
     },
     Case {
       name: "a continuation separates a definition name and parenthesis",
       source: "function f\\\n(){}",
-      markers: &[(10, 11)],
     },
     Case {
       name: "a continuation follows a parameter separator",
       source: "function f(a,\\\nb){}",
-      markers: &[(13, 14)],
     },
     Case {
       name: "a continuation separates complete string constants",
       source: "\"a\"\\\n\"b\"\n",
-      markers: &[(3, 4)],
     },
     Case {
       name: "a continuation follows a complete static ERE",
       source: "/a/\\\n&& /b/\n",
-      markers: &[(3, 4)],
     },
     Case {
       name: "string and ERE escapes remain distinct from continuations",
       source: "\"\\n\"\\\n&& /\\n/\n",
-      markers: &[(4, 5)],
     },
     Case {
       name: "a comment backslash does not become a continuation marker",
       source: "# \\\n/a/\\\n&& /b/\n",
-      markers: &[(7, 8)],
     },
   ] {
     let tree = parse(case.source, case.name);
@@ -899,8 +722,7 @@ fn continuation_markers_are_anonymous_and_exclude_newlines() {
         (node.start_byte(), node.end_byte())
       })
       .collect();
-    assert_eq!(actual, case.markers, "{}", case.name);
-    for (_, end) in case.markers {
+    for (_, end) in &actual {
       assert_eq!(case.source.as_bytes()[*end], b'\n');
       assert!(
         leaves.iter().all(|leaf| !leaf.byte_range().contains(end)),
@@ -911,7 +733,7 @@ fn continuation_markers_are_anonymous_and_exclude_newlines() {
     assert_leaf_highlights(
       case.source,
       &tree,
-      case.markers.iter().map(|(start, end)| *start..*end),
+      actual.iter().map(|(start, end)| *start..*end),
       case.name,
       &query,
     );
@@ -1218,6 +1040,14 @@ fn editing_a_field_getline_lookahead_during_recovery_restores_its_target() {
 #[test]
 fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
   let seeds = [
+    "{ (getline line) + y++ }",
+    "{ (getline line) < y }",
+    "{ getline line <= y }",
+    "{ f(getline line, ++y) }",
+    "{ a[getline line, i++] }",
+    "{ getline a[i++] }",
+    "{ (getline a) + (getline b) + i++ }",
+    "{ print (getline line) > out }",
     "{ $getline < (a < getline x++) < y }",
     "{ $getline < (a < getline x--) < y }",
     "{ $getline < $getline < getline x++++ < y }",
@@ -1278,7 +1108,7 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
       };
       steps.push((start, deleted, inserted.clone()));
       edit(&mut tree, &mut text, start, deleted, &inserted);
-      tree = parser.parse(&text, Some(&tree)).unwrap();
+      let next = parser.parse(&text, Some(&tree)).unwrap();
       let fresh = parser.parse(&text, None).unwrap();
       let expected = independent.parse(&text, None).unwrap();
       let context = format!(
@@ -1287,8 +1117,12 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
       );
       assert_same_cst(fresh.root_node(), expected.root_node(), &context);
       if !fresh.root_node().has_error() {
-        assert_same_cst(tree.root_node(), fresh.root_node(), &context);
+        assert_same_cst(next.root_node(), fresh.root_node(), &context);
+        if !tree.root_node().has_error() {
+          assert_changed_scopes(&tree, &next, &context);
+        }
       }
+      tree = next;
     }
     assert_eq!(
       text,
@@ -1362,310 +1196,117 @@ fn getline_token_edit_histories_match_fresh_parses() {
 }
 
 #[test]
-fn getline_postfix_concatenation_keeps_its_operands() {
-  for (source, concatenation, left, right) in [
-    ("{ -getline x++ }\n", "-getline x++", "-getline", "x++"),
+fn changed_ranges_include_getline_ownership_changes() {
+  for (name, source, removed, inserted) in [
     (
-      "{ a + getline x++ }\n",
-      "a + getline x++",
-      "a + getline",
-      "x++",
-    ),
-    ("{ a getline x++ }\n", "a getline x++", "a getline", "x++"),
-    (
-      "{ q = $-getline x++ }\n",
-      "$-getline x++",
-      "$-getline",
-      "x++",
-    ),
-    (
-      "{ a ^ getline x++ }\n",
-      "a ^ getline x++",
-      "a ^ getline",
-      "x++",
-    ),
-    (
-      "{ getline $-getline x++ }\n",
-      "getline $-getline x++",
-      "getline $-getline",
-      "x++",
-    ),
-    (
-      "{ ++$getline x-- }\n",
-      "++$getline x--",
-      "++$getline",
-      "x--",
-    ),
-    (
-      "{ print $-getline x++ }\n",
-      "$-getline x++",
-      "$-getline",
-      "x++",
-    ),
-  ] {
-    let tree = parse(source, source);
-    let start = source.find(concatenation).unwrap();
-    let expression = tree
-      .root_node()
-      .descendant_for_byte_range(start, start + concatenation.len())
-      .unwrap();
-    assert!(
-      expression.child_by_field_name("operator").is_none(),
-      "{source}"
-    );
-    for (field, text) in [("left", left), ("right", right)] {
-      let child = expression.child_by_field_name(field).unwrap();
-      assert_eq!(&source[child.byte_range()], text, "{source}: {field}");
-    }
-    let right = expression.child_by_field_name("right").unwrap();
-    let operator = right.child_by_field_name("operator").unwrap();
-    assert!(matches!(operator.kind(), "incr" | "decr"), "{source}");
-  }
-}
-
-#[test]
-fn redirected_getline_field_updates_keep_their_source_and_target() {
-  for (source, expression, filename, target, operator) in [
-    (
-      "{ $getline < \"f\" ++ }\n",
-      "$getline < \"f\" ++",
-      "\"f\"",
-      None,
-      "++",
-    ),
-    (
-      "{ $getline x < \"f\" -- }\n",
-      "$getline x < \"f\" --",
-      "\"f\"",
-      Some("x"),
-      "--",
-    ),
-    (
-      "{ $getline $-x < \"f\" ++ }\n",
-      "$getline $-x < \"f\" ++",
-      "\"f\"",
-      Some("$-x"),
-      "++",
-    ),
-    (
-      "{ print $getline < -1 ++ }\n",
-      "$getline < -1 ++",
-      "-1",
-      None,
-      "++",
-    ),
-    (
-      "{ printf $getline < y++ -- }\n",
-      "$getline < y++ --",
-      "y++",
-      None,
-      "--",
-    ),
-    (
-      "{ $getline < f() ++ }\n",
-      "$getline < f() ++",
-      "f()",
-      None,
-      "++",
-    ),
-  ] {
-    let tree = parse(source, source);
-    let start = source.find(expression).unwrap();
-    let update = tree
-      .root_node()
-      .descendant_for_byte_range(start, start + expression.len())
-      .unwrap();
-    let update_operator = update.child_by_field_name("operator").unwrap();
-    assert_eq!(&source[update_operator.byte_range()], operator, "{source}");
-    let field = update.child_by_field_name("operand").unwrap();
-    assert_eq!(field.kind(), "lvalue", "{source}");
-    assert_eq!(field.start_byte(), start, "{source}");
-    assert_eq!(
-      field.end_byte(),
-      update_operator.start_byte() - 1,
-      "{source}"
-    );
-    let input = field
-      .child_by_field_name("operand")
-      .unwrap()
-      .named_child(0)
-      .unwrap()
-      .named_child(0)
-      .unwrap();
-    assert_eq!(input.kind(), "non_unary_input_function", "{source}");
-    let file = input.child_by_field_name("source").unwrap();
-    assert_eq!(&source[file.byte_range()], filename, "{source}");
-    let get = input.child_by_field_name("get").unwrap();
-    assert_eq!(
-      get
-        .child_by_field_name("target")
-        .map(|node| &source[node.byte_range()]),
-      target,
-      "{source}"
-    );
-  }
-}
-
-#[test]
-fn getline_source_lookahead_preserves_target_ownership() {
-  for (expression, target) in [
-    ("getline $getline < \"f\"", Some("$getline < \"f\"")),
-    ("getline $getline < \"f\" ++", None),
-    ("getline $getline < x++", Some("$getline < x++")),
-    (
-      "getline $getline < a < getline x++ < y",
-      Some("$getline < a"),
-    ),
-    ("getline $getline < x++++", None),
-    ("getline $getline $-x < \"f\" ++", None),
-    ("getline $getline < (x | getline) ++", None),
-    ("getline $getline < a ? x : y++", Some("$getline < a")),
-    ("getline $getline < (a ? x : (y))++", None),
-    ("getline $getline < 1e++", Some("$getline < 1")),
-    ("getline x++ $getline $getline < 1 ++", Some("x")),
-    ("getline $getline < (($getline < 1 in a) 1)++", None),
-    ("getline $getline < (($getline < x in a) < \"f\") ++", None),
-    ("getline $getline < (x < (y < z | getline)) ++", None),
-    ("getline $getline < (x ~ (y ~ 1 | getline)) ++", None),
-    ("getline $getline < (x ~ y | getline z ~ \"f\") ++", None),
-    ("getline $getline $-x < (x | getline) ++", None),
-    (
-      "getline $getline < getline $getline < x++++",
-      Some("$getline < getline"),
-    ),
-  ] {
-    let source = format!("{{ {expression} }}\n");
-    let tree = parse(&source, expression);
-    let keyword = tree.root_node().descendant_for_byte_range(2, 8).unwrap();
-    assert_eq!(keyword.kind(), "getline_keyword", "{expression}");
-    let get = keyword.parent().unwrap();
-    assert_eq!(get.kind(), "simple_get", "{expression}");
-    assert_eq!(
-      get
-        .child_by_field_name("target")
-        .map(|node| &source[node.byte_range()]),
-      target,
-      "{expression}",
-    );
-  }
-}
-
-#[test]
-fn nested_getline_sources_prefer_the_innermost_input_through_unary_fields() {
-  for (source, get, filename) in [
-    ("{ $-getline $-getline < a }", "getline", "a"),
-    ("{ $-getline $-getline y < a }", "getline y", "a"),
-    ("{ $-getline $-getline < a ++ }", "getline", "a ++"),
-    ("{ $getline $-getline $-getline < a }", "getline", "a"),
-    ("{ $!getline $!getline < a }", "getline", "a"),
-    ("{ $!getline $-getline y < a }", "getline y", "a"),
-    ("{ $+getline $!getline < a ++ }", "getline", "a ++"),
-    ("{ $getline $!getline $-getline < a }", "getline", "a"),
-  ] {
-    let tree = parse(source, source);
-    let mut pending = vec![tree.root_node()];
-    let mut sources = Vec::new();
-    while let Some(node) = pending.pop() {
-      if let Some(input) = node.child_by_field_name("get")
-        && let Some(file) = node.child_by_field_name("source")
-      {
-        sources.push((
-          input.start_byte(),
-          &source[input.byte_range()],
-          &source[file.byte_range()],
-        ));
-      }
-      for index in (0..node.child_count()).rev() {
-        pending.push(node.child(index).unwrap());
-      }
-    }
-    assert_eq!(
-      sources,
-      vec![(source.rfind("getline").unwrap(), get, filename)],
-      "{source}"
-    );
-  }
-}
-
-#[test]
-fn source_getline_targets_can_leave_postfix_updates_for_enclosing_fields() {
-  for (source, targets, operands) in [
-    (
+      "file source moves inward",
       "{ $getline $-getline < 1 ++ }",
-      vec![Some("$-getline"), None],
-      vec!["$getline $-getline < 1"],
+      "++",
+      "",
     ),
     (
-      "{ $getline $!getline < x -- ++ }",
-      vec![Some("$!getline"), None],
-      vec!["$getline $!getline < x --", "x"],
+      "file source crosses two targets",
+      "{ $getline $!getline $!getline < 1 ++ }",
+      "++",
+      "",
     ),
     (
-      "{ $getline $--$getline < 1 ++ }",
-      vec![Some("$--$getline"), None],
-      vec!["$getline $--$getline < 1", "$getline"],
+      "grouped source",
+      "{ $getline $-getline < (1) ++ }",
+      "++",
+      "",
+    ),
+    ("call source", "{ $getline $-getline < f(1) ++ }", "++", ""),
+    (
+      "subscript source",
+      "{ $getline $-getline < a[1] ++ }",
+      "++",
+      "",
     ),
     (
-      "{ $getline < ((x) in a) -- x ++ }",
-      vec![None],
-      vec!["$getline < ((x) in a)", "x"],
+      "source inside call arguments",
+      "{ f($getline $-getline < 1 ++, x) }",
+      "++",
+      "",
     ),
     (
-      "{ $getline < getline x++ < y }",
-      vec![None, Some("x")],
-      vec!["$getline < getline x"],
+      "source inside a subscript",
+      "{ a[$getline $-getline < 1 ++, x] }",
+      "++",
+      "",
     ),
     (
-      "{ $getline < getline x-- < y }",
-      vec![None, Some("x")],
-      vec!["$getline < getline x"],
+      "source inside print arguments",
+      "{ print ($getline $-getline < 1 ++), x }",
+      "++",
+      "",
     ),
     (
-      "{ $getline < $getline < getline x++++ < y }",
-      vec![None, None, Some("x")],
-      vec!["$getline < $getline < getline x++", "$getline < getline x"],
+      "multiline source after Unicode",
+      "{ print \"é\"; $getline $-getline < \\\n1 ++; print 2 }\n{ print 3 }",
+      "++",
+      "",
     ),
     (
-      "{ getline $getline < getline x++ < y }",
-      vec![Some("$getline < getline"), None, None],
-      vec!["x"],
+      "target and update change owners",
+      "{ getline x++ }",
+      "++",
+      "++ y",
     ),
     (
-      "{ $getline < getline x++ }",
-      vec![None, Some("x")],
-      vec!["$getline < getline x"],
+      "grammar path changes to selected path",
+      "{ getline x }",
+      "x",
+      "x++",
     ),
     (
-      "{ $getline < f(getline x++)++ < y }",
-      vec![None, None],
-      vec!["$getline < f(getline x++)", "x"],
+      "removing a group makes the comparison a file source",
+      "{ (getline x) < file }",
+      "(getline x)",
+      "getline x",
+    ),
+    (
+      "a comparison changes to a file source operator",
+      "{ getline x <= file }",
+      "<=",
+      "<",
+    ),
+    (
+      "merging arguments changes getline ownership",
+      "{ f(getline x, y++) }",
+      ",",
+      "+",
+    ),
+    (
+      "merging subscripts changes getline ownership",
+      "{ a[getline x, y++] }",
+      ",",
+      "+",
+    ),
+    (
+      "an update after a target subscript needs selection",
+      "{ getline a[i++] }",
+      "]",
+      "]++",
     ),
   ] {
-    let tree = parse(source, source);
-    let mut pending = vec![tree.root_node()];
-    let mut actual_targets = Vec::new();
-    let mut actual_operands = Vec::new();
-    while let Some(node) = pending.pop() {
-      if node.kind() == "simple_get" {
-        actual_targets.push(
-          node
-            .child_by_field_name("target")
-            .map(|target| &source[target.byte_range()]),
-        );
-      }
-      if let Some(operator) = node.child_by_field_name("operator")
-        && matches!(operator.kind(), "incr" | "decr")
-      {
-        let operand = node.child_by_field_name("operand").unwrap();
-        assert_eq!(operand.kind(), "lvalue", "{source}");
-        actual_operands.push(&source[operand.byte_range()]);
-      }
-      for index in (0..node.child_count()).rev() {
-        pending.push(node.child(index).unwrap());
-      }
+    let mut parser = parser();
+    let mut text = source.as_bytes().to_vec();
+    let mut tree = parse(source, name);
+    let start = source.find(removed).unwrap();
+    for (deleted, inserted) in [
+      (removed.len(), inserted),
+      (inserted.len(), removed),
+      (removed.len(), inserted),
+    ] {
+      edit(&mut tree, &mut text, start, deleted, inserted);
+      let next = parser.parse(&text, Some(&tree)).unwrap();
+      let fresh = parser.parse(&text, None).unwrap();
+      assert!(!fresh.root_node().has_error(), "{name}");
+      assert_same_cst(next.root_node(), fresh.root_node(), name);
+      assert_changed_scopes(&tree, &next, name);
+      tree = next;
     }
-    assert_eq!(actual_targets, targets, "{source}: targets");
-    assert_eq!(actual_operands, operands, "{source}: update operands");
   }
 }
 

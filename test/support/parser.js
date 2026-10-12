@@ -3,25 +3,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { createTreeSitter, grammars, root } from "../../scripts/tree-sitter.js";
+import { clean, parseCst, sourceEndPoint } from "./cst.js";
 
+const commandTimeoutMs = 60_000;
+const cstOutputLimitBytes = 16 * 1024 * 1024;
+const summaryTimeoutMicros = 10_000_000;
 const grammar = grammars[0];
-const runtime = createTreeSitter();
 
-const nativeLibrary = path.join(
-  runtime.directory,
-  process.platform === "win32" ? "parser.dll" : "parser",
-);
+let runtime;
+let nativeLibrary;
 
 let sourceSequence = 0;
 
-const continuationMarker = JSON.stringify("\\");
-
 before(() => {
+  runtime = createTreeSitter();
+  nativeLibrary = path.join(
+    runtime.directory,
+    process.platform === "win32" ? "parser.dll" : "parser",
+  );
   const result = runtime.run(
     ["build", "--output", nativeLibrary, path.join(root, grammar.path)],
     {
       stdio: "inherit",
-      timeout: 60_000,
+      timeout: commandTimeoutMs,
     },
   );
   assert.ifError(result.error);
@@ -29,7 +33,7 @@ before(() => {
 });
 
 after(() => {
-  runtime.close();
+  runtime?.close();
 });
 
 function applyEdits(source, edits) {
@@ -63,38 +67,16 @@ function formatEdit({ byte, deleteBytes, insert }) {
   return `${byte} ${deleteBytes} ${insert}`;
 }
 
-function sourceEndPoint(source) {
-  const bytes = Buffer.from(source);
-  let row = 0;
-  for (const byte of bytes) if (byte === 10) row += 1;
-  return `${row}:${bytes.length - bytes.lastIndexOf(10) - 1}`;
-}
-
 function lines(...sourceLines) {
   return `${sourceLines.join("\n")}\n`;
 }
 
 function writeSource(label, source) {
   sourceSequence += 1;
-  const filename = `${String(sourceSequence).padStart(3, "0")}-${label}.awk`;
+  const filename = `${sourceSequence}-${label}.awk`;
   const sourcePath = path.join(runtime.directory, filename);
   fs.writeFileSync(sourcePath, source);
   return sourcePath;
-}
-
-function normalizeParseTree(stdout, sourcePath) {
-  return stdout
-    .split("\n")
-    .filter((line) => {
-      if (line.startsWith(sourcePath)) {
-        const suffix = line.slice(sourcePath.length);
-        if (/^[ \t]+Parse:[ \t]/.test(suffix)) {
-          return false;
-        }
-      }
-      return !/^[ \t]*Edit:[ \t]/.test(line);
-    })
-    .join("\n");
 }
 
 function captureParse(sourcePath, edits = []) {
@@ -113,22 +95,14 @@ function captureParse(sourcePath, edits = []) {
   }
 
   const result = runtime.run(args, {
-    maxBuffer: 16 * 1024 * 1024,
-    timeout: 60_000,
+    maxBuffer: cstOutputLimitBytes,
+    timeout: commandTimeoutMs,
   });
   if (result.error !== undefined) {
     throw result.error;
   }
-  const tree = normalizeParseTree(result.stdout, sourcePath);
-  const end = /^[0-9]+:[0-9]+ +- +([0-9]+:[0-9]+)/.exec(tree)?.[1];
   const source = applyEdits(fs.readFileSync(sourcePath), edits);
-  assert.equal(
-    end,
-    sourceEndPoint(source),
-    "root must reach the edited source end",
-  );
-  if (result.status === 0 && !hasRecovery(tree))
-    assertContinuationRanges(tree, source);
+  const tree = parseCst(result.stdout, sourcePath, source, result.status);
   return {
     status: result.status,
     stderr: result.stderr,
@@ -179,83 +153,6 @@ function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
   return fresh.tree;
 }
 
-function contains(tree, expected) {
-  assert.ok(
-    tree.includes(expected),
-    `Expected CST to contain: ${expected}\n${tree}`,
-  );
-}
-
-function excludes(tree, unexpected) {
-  assert.ok(
-    !tree.includes(unexpected),
-    `Expected CST not to contain: ${unexpected}\n${tree}`,
-  );
-}
-
-// Missing named leaves omit MISSING; use the root --cst error marker.
-
-const recoveryMarker = /^[0-9: \t-]+•/m;
-
-function clean(tree) {
-  assert.doesNotMatch(tree, recoveryMarker, tree);
-}
-
-function continuationRanges(tree) {
-  const ranges = [];
-  for (const line of tree.split("\n")) {
-    const match = /^([0-9]+):([0-9]+) +- +([0-9]+):([0-9]+) +(.+)$/.exec(line);
-    if (match?.[5] === continuationMarker)
-      ranges.push(match.slice(1, 5).map(Number));
-  }
-  return ranges;
-}
-
-function assertContinuationRanges(tree, source) {
-  const lineStarts = [0];
-  for (let byte = 0; byte < source.length; byte++) {
-    if (source[byte] === 10) lineStarts.push(byte + 1);
-  }
-  for (const [startRow, startColumn, endRow, endColumn] of continuationRanges(
-    tree,
-  )) {
-    assert.equal(
-      endRow,
-      startRow,
-      "a continuation marker must exclude its newline",
-    );
-    assert.equal(
-      endColumn,
-      startColumn + 1,
-      "a continuation marker must span one byte",
-    );
-    const byte = lineStarts[startRow] + startColumn;
-    assert.deepEqual(
-      source.subarray(byte, byte + 2),
-      Buffer.from("\\\n"),
-      "a continuation marker must span its backslash before a newline",
-    );
-    assert.equal(
-      lineStarts[startRow + 1],
-      byte + 2,
-      "a continuation marker must end its physical source line",
-    );
-  }
-}
-
-function cleanContinuation(tree) {
-  contains(tree, continuationMarker);
-  clean(tree);
-}
-
-function dirty(tree) {
-  assert.match(tree, recoveryMarker, tree);
-}
-
-function matchingLineCount(tree, pattern) {
-  return tree.split("\n").filter((line) => pattern.test(line)).length;
-}
-
 function freshTest(name, source, assertions) {
   test(`posix_awk: ${name}`, () => assertions(assertFresh(name, source)));
 }
@@ -283,7 +180,10 @@ function editHistoryTest(name, source, edits) {
   determinismTest(name, source, source, [...edits, ...reverts]);
 }
 
-function parseSummary(source, timeout = 10_000_000) {
+function parseSummary(
+  source,
+  { timeoutMicros = summaryTimeoutMicros, completionOnly = false } = {},
+) {
   const sourcePath = writeSource("summary", source);
   const result = runtime.run(
     [
@@ -294,11 +194,10 @@ function parseSummary(source, timeout = 10_000_000) {
       grammar.name,
       "--quiet",
       "--json-summary",
-      "--timeout",
-      String(timeout),
+      ...(completionOnly ? [] : ["--timeout", String(timeoutMicros)]),
       sourcePath,
     ],
-    { timeout: 60_000 },
+    { timeout: commandTimeoutMs },
   );
   assert.ifError(result.error);
   assert.ok(
@@ -323,28 +222,15 @@ function parseSummary(source, timeout = 10_000_000) {
   return summary;
 }
 
-function hasRecovery(cst) {
-  return /^[0-9: \t-]+•/m.test(cst);
-}
-
 export {
   applyEdits,
   assertDeterministicEdit,
   assertStatus,
   captureParse,
-  clean,
-  cleanContinuation,
-  contains,
-  continuationMarker,
-  continuationRanges,
   determinismTest,
-  dirty,
   editHistoryTest,
-  excludes,
   freshTest,
-  hasRecovery,
   lines,
-  matchingLineCount,
   nativeLibrary,
   parseDescription,
   parseSummary,

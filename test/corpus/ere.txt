@@ -1,26 +1,30 @@
 ==================
 an empty ERE has no expression node
+:cst
 ==================
 //
 
----
+------------------
 
-(program
-  (item_list
-    (item
-      (normal_pattern
-        (expr
-          (non_unary_expr
-            (ere)))))
-    (terminator
-      (newline))))
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:2       item: item
+0:0 - 0:2         pattern: normal_pattern
+0:0 - 0:2           expr
+0:0 - 0:2             non_unary_expr
+0:0 - 0:2               ere
+0:0 - 0:1                 "/"
+0:1 - 0:2                 "/"
+0:2 - 1:0       terminator: terminator
+0:2 - 1:0         newline
+0:2 - 0:3           `\n`
 
 ==================
 an empty ERE group retains its parentheses without an inner expression
 ==================
 /()/
 
----
+------------------
 
 (program
   (item_list
@@ -44,7 +48,7 @@ BEGIN {
   print /a/
 }
 
----
+------------------
 
 (program
   (item_list
@@ -85,7 +89,7 @@ ordinary characters include blank, hash, non-ASCII, and hyphen
 
 BEGIN { print /1 #犬-/ }
 
----
+------------------
 
 (program
   (item_list
@@ -133,7 +137,7 @@ escapes in AWK preserve source-neutral ERE classifications
 
 BEGIN { print /\/\\\.\[\(\*\+\?\{\|\^\$\a\b\f\n\r\t\v\1\12\1234\0000\400\052\057\134.\q\x\"/ }
 
----
+------------------
 
 (program
   (item_list
@@ -275,7 +279,7 @@ BEGIN {
   print x ~ /a/
 }
 
----
+------------------
 
 (program
   (item_list
@@ -321,7 +325,7 @@ a leading plus and trailing hyphen remain bracket list literals
 
 BEGIN { print /[+-]?[a]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -374,7 +378,7 @@ a leading closer remains a list literal before a range
 ==================
 BEGIN { print /[]-a][]--]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -429,7 +433,7 @@ matching and nonmatching lists preserve first bracket and last hyphen
 
 BEGIN { print /[]a-][^]b-][-][^-]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -510,7 +514,7 @@ ranges, collating forms, classes, and escapes preserve bracket hierarchy
 
 BEGIN { print /[a-c][[][[.ch.]][[.a.b.]][[.-.]][[=a=]][[=a=b=]][[:alpha:]][\q\/]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -645,7 +649,7 @@ alternation, grouping, anchors, and repetitions follow ERE hierarchy
 
 BEGIN { print /^a.(b|c)*?d+?e??f{2}?g{3,}?h{4,5}?$/ }
 
----
+------------------
 
 (program
   (item_list
@@ -726,7 +730,7 @@ closing ERE special characters remain quoted characters
 
 BEGIN { print /\)\}\]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -768,7 +772,7 @@ hash stays regex content in escape and compound bracket positions
 
 BEGIN { print /\#[\#][[.#.]][[=#=]]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -836,7 +840,7 @@ range expressions end at a hyphen anywhere in the list
 
 BEGIN { print /[%--@][a---][^--@]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -906,7 +910,7 @@ BEGIN { print /[%--@][a---][^--@]/ }
 circumflex inside a collating symbol remains a collating element
 ==================
 /[[.^.]]/
----
+------------------
 
 (program
   (item
@@ -934,7 +938,7 @@ collating payloads preserve literal fragments around escapes
 
 BEGIN { print /[[.a\nb.]][[=a\tb=]][[.a\141-].]][[=日\q犬=]]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -1022,7 +1026,7 @@ escaped slashes remain whole atoms across ERE contexts
 
 BEGIN { print /\/[\/][[.a\/b.]][[=a\/b=]]/ }
 
----
+------------------
 
 (program
   (item_list
@@ -1097,7 +1101,7 @@ ERE groups keep escaped parentheses and leave unmatched closers outside
 
 /((a|\))))/
 
----
+------------------
 
 (program
   (item_list
@@ -1128,3 +1132,1399 @@ ERE groups keep escaped parentheses and leave unmatched closers outside
                       (ordinary_character))))))))))
     (terminator
       (newline))))
+
+==================
+an ERE class name retains trailing digits
+:cst
+==================
+/[[:al1:]]/
+------------------
+
+0:0  - 0:11   program
+0:0  - 0:11     item
+0:0  - 0:11       pattern: normal_pattern
+0:0  - 0:11         expr
+0:0  - 0:11           non_unary_expr
+0:0  - 0:11             ere
+0:0  - 0:1                "/"
+0:1  - 0:10               expression: extended_reg_exp
+0:1  - 0:10                 ere_branch
+0:1  - 0:10                   ere_expression
+0:1  - 0:10                     one_char_or_coll_elem_ere
+0:1  - 0:10                       bracket_expression
+0:1  - 0:2                          "["
+0:2  - 0:9                          matching_list
+0:2  - 0:9                            bracket_list
+0:2  - 0:9                              follow_list
+0:2  - 0:9                                expression_term
+0:2  - 0:9                                  single_expression
+0:2  - 0:9                                    character_class
+0:2  - 0:3                                      "["
+0:3  - 0:4                                      ":"
+0:4  - 0:7                                      name: class_name `al1`
+0:7  - 0:8                                      ":"
+0:8  - 0:9                                      "]"
+0:9  - 0:10                         "]"
+0:10 - 0:11               "/"
+
+==================
+a token-boundary continuation preserves closed ERE and operator
+:cst
+==================
+{ print /a/\
++ 1 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:5        item: item
+0:0  - 1:5          action: action
+0:0  - 0:1            "{"
+0:2  - 1:3            body: unterminated_statement_list
+0:2  - 1:3              unterminated_statement
+0:2  - 1:3                statement: terminatable_statement
+0:2  - 1:3                  simple_statement
+0:2  - 1:3                    print_statement
+0:2  - 1:3                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:3                        arguments: print_expr_list
+0:8  - 1:3                          print_expr
+0:8  - 1:3                            non_unary_print_expr
+0:8  - 0:11                             left: non_unary_print_expr
+0:8  - 0:11                               ere
+0:8  - 0:9                                  "/"
+0:9  - 0:10                                 expression: extended_reg_exp
+0:9  - 0:10                                   ere_branch
+0:9  - 0:10                                     ere_expression
+0:9  - 0:10                                       one_char_or_coll_elem_ere
+0:9  - 0:10                                         ordinary_character `a`
+0:10 - 0:11                                 "/"
+0:11 - 0:12                             "\\"
+1:0  - 1:1                              "+"
+1:2  - 1:3                              right: print_expr
+1:2  - 1:3                                non_unary_print_expr
+1:2  - 1:3                                  number `1`
+1:4  - 1:5            "}"
+1:5  - 2:0        terminator: terminator
+1:5  - 2:0          newline
+1:5  - 1:6            `\n`
+
+==================
+an ERE escape after its opening slash is not a continuation
+:cst
+==================
+{ print /\=/, /\foo/ }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:22       item: item
+0:0  - 0:22         action: action
+0:0  - 0:1            "{"
+0:2  - 0:20           body: unterminated_statement_list
+0:2  - 0:20             unterminated_statement
+0:2  - 0:20               statement: terminatable_statement
+0:2  - 0:20                 simple_statement
+0:2  - 0:20                   print_statement
+0:2  - 0:20                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:20                       arguments: print_expr_list
+0:8  - 0:12                         print_expr
+0:8  - 0:12                           non_unary_print_expr
+0:8  - 0:12                             ere
+0:8  - 0:9                                "/"
+0:9  - 0:11                               expression: extended_reg_exp
+0:9  - 0:11                                 ere_branch
+0:9  - 0:11                                   ere_expression
+0:9  - 0:11                                     one_char_or_coll_elem_ere
+0:9  - 0:11                                       escape_sequence `\\=`
+0:11 - 0:12                               "/"
+0:12 - 0:13                         ","
+0:14 - 0:20                         print_expr
+0:14 - 0:20                           non_unary_print_expr
+0:14 - 0:20                             ere
+0:14 - 0:15                               "/"
+0:15 - 0:19                               expression: extended_reg_exp
+0:15 - 0:19                                 ere_branch
+0:15 - 0:17                                   ere_expression
+0:15 - 0:17                                     one_char_or_coll_elem_ere
+0:15 - 0:17                                       ordinary_character
+0:15 - 0:17                                         escape: escape_sequence `\\f`
+0:17 - 0:18                                   ere_expression
+0:17 - 0:18                                     one_char_or_coll_elem_ere
+0:17 - 0:18                                       ordinary_character `o`
+0:18 - 0:19                                   ere_expression
+0:18 - 0:19                                     one_char_or_coll_elem_ere
+0:18 - 0:19                                       ordinary_character `o`
+0:19 - 0:20                               "/"
+0:21 - 0:22           "}"
+0:22 - 1:0        terminator: terminator
+0:22 - 1:0          newline
+0:22 - 0:23           `\n`
+
+==================
+an equality closing sequence stays inside a collating symbol
+:cst
+==================
+/[[.=].]]/
+------------------
+
+0:0  - 0:10   program
+0:0  - 0:10     item
+0:0  - 0:10       pattern: normal_pattern
+0:0  - 0:10         expr
+0:0  - 0:10           non_unary_expr
+0:0  - 0:10             ere
+0:0  - 0:1                "/"
+0:1  - 0:9                expression: extended_reg_exp
+0:1  - 0:9                  ere_branch
+0:1  - 0:9                    ere_expression
+0:1  - 0:9                      one_char_or_coll_elem_ere
+0:1  - 0:9                        bracket_expression
+0:1  - 0:2                          "["
+0:2  - 0:8                          matching_list
+0:2  - 0:8                            bracket_list
+0:2  - 0:8                              follow_list
+0:2  - 0:8                                expression_term
+0:2  - 0:8                                  single_expression
+0:2  - 0:8                                    end_range
+0:2  - 0:8                                      collating_symbol
+0:2  - 0:3                                        "["
+0:3  - 0:4                                        "."
+0:4  - 0:6                                        element: collating_element_multi `=]`
+0:6  - 0:7                                        "."
+0:7  - 0:8                                        "]"
+0:8  - 0:9                          "]"
+0:9  - 0:10               "/"
+
+==================
+a dot closing sequence stays inside an equivalence class
+:cst
+==================
+/[[=.]=]]/
+------------------
+
+0:0  - 0:10   program
+0:0  - 0:10     item
+0:0  - 0:10       pattern: normal_pattern
+0:0  - 0:10         expr
+0:0  - 0:10           non_unary_expr
+0:0  - 0:10             ere
+0:0  - 0:1                "/"
+0:1  - 0:9                expression: extended_reg_exp
+0:1  - 0:9                  ere_branch
+0:1  - 0:9                    ere_expression
+0:1  - 0:9                      one_char_or_coll_elem_ere
+0:1  - 0:9                        bracket_expression
+0:1  - 0:2                          "["
+0:2  - 0:8                          matching_list
+0:2  - 0:8                            bracket_list
+0:2  - 0:8                              follow_list
+0:2  - 0:8                                expression_term
+0:2  - 0:8                                  single_expression
+0:2  - 0:8                                    equivalence_class
+0:2  - 0:3                                      "["
+0:3  - 0:4                                      "="
+0:4  - 0:6                                      element: collating_element_multi `.]`
+0:6  - 0:7                                      "="
+0:7  - 0:8                                      "]"
+0:8  - 0:9                          "]"
+0:9  - 0:10               "/"
+
+==================
+a colon closing sequence stays inside a collating symbol
+:cst
+==================
+/[[.:].]]/
+------------------
+
+0:0  - 0:10   program
+0:0  - 0:10     item
+0:0  - 0:10       pattern: normal_pattern
+0:0  - 0:10         expr
+0:0  - 0:10           non_unary_expr
+0:0  - 0:10             ere
+0:0  - 0:1                "/"
+0:1  - 0:9                expression: extended_reg_exp
+0:1  - 0:9                  ere_branch
+0:1  - 0:9                    ere_expression
+0:1  - 0:9                      one_char_or_coll_elem_ere
+0:1  - 0:9                        bracket_expression
+0:1  - 0:2                          "["
+0:2  - 0:8                          matching_list
+0:2  - 0:8                            bracket_list
+0:2  - 0:8                              follow_list
+0:2  - 0:8                                expression_term
+0:2  - 0:8                                  single_expression
+0:2  - 0:8                                    end_range
+0:2  - 0:8                                      collating_symbol
+0:2  - 0:3                                        "["
+0:3  - 0:4                                        "."
+0:4  - 0:6                                        element: collating_element_multi `:]`
+0:6  - 0:7                                        "."
+0:7  - 0:8                                        "]"
+0:8  - 0:9                          "]"
+0:9  - 0:10               "/"
+
+==================
+an escaped slash excludes the closing delimiter
+:cst
+==================
+/\//
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:4       item: item
+0:0 - 0:4         pattern: normal_pattern
+0:0 - 0:4           expr
+0:0 - 0:4             non_unary_expr
+0:0 - 0:4               ere
+0:0 - 0:1                 "/"
+0:1 - 0:3                 expression: extended_reg_exp
+0:1 - 0:3                   ere_branch
+0:1 - 0:3                     ere_expression
+0:1 - 0:3                       one_char_or_coll_elem_ere
+0:1 - 0:3                         ordinary_character
+0:1 - 0:3                           escape: escaped_delimiter `\\/`
+0:3 - 0:4                 "/"
+0:4 - 1:0       terminator: terminator
+0:4 - 1:0         newline
+0:4 - 0:5           `\n`
+
+==================
+an ERE class name excludes compound delimiters
+:cst
+==================
+/[[:alpha:]]/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:13       item: item
+0:0  - 0:13         pattern: normal_pattern
+0:0  - 0:13           expr
+0:0  - 0:13             non_unary_expr
+0:0  - 0:13               ere
+0:0  - 0:1                  "/"
+0:1  - 0:12                 expression: extended_reg_exp
+0:1  - 0:12                   ere_branch
+0:1  - 0:12                     ere_expression
+0:1  - 0:12                       one_char_or_coll_elem_ere
+0:1  - 0:12                         bracket_expression
+0:1  - 0:2                            "["
+0:2  - 0:11                           matching_list
+0:2  - 0:11                             bracket_list
+0:2  - 0:11                               follow_list
+0:2  - 0:11                                 expression_term
+0:2  - 0:11                                   single_expression
+0:2  - 0:11                                     character_class
+0:2  - 0:3                                        "["
+0:3  - 0:4                                        ":"
+0:4  - 0:9                                        name: class_name `alpha`
+0:9  - 0:10                                       ":"
+0:10 - 0:11                                       "]"
+0:11 - 0:12                           "]"
+0:12 - 0:13                 "/"
+0:13 - 1:0        terminator: terminator
+0:13 - 1:0          newline
+0:13 - 0:14           `\n`
+
+==================
+an ERE repetition count remains one leaf
+:cst
+==================
+/a{12}/
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:7       item: item
+0:0 - 0:7         pattern: normal_pattern
+0:0 - 0:7           expr
+0:0 - 0:7             non_unary_expr
+0:0 - 0:7               ere
+0:0 - 0:1                 "/"
+0:1 - 0:6                 expression: extended_reg_exp
+0:1 - 0:6                   ere_branch
+0:1 - 0:6                     ere_expression
+0:1 - 0:2                       one_char_or_coll_elem_ere
+0:1 - 0:2                         ordinary_character `a`
+0:2 - 0:6                       ere_dupl_symbol
+0:2 - 0:3                         "{"
+0:3 - 0:5                         minimum: duplication_count `12`
+0:5 - 0:6                         "}"
+0:6 - 0:7                 "/"
+0:7 - 1:0       terminator: terminator
+0:7 - 1:0         newline
+0:7 - 0:8           `\n`
+
+==================
+empty groups retain delimiters within alternation and repetition
+:cst
+==================
+/(()|())*?/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:11       item: item
+0:0  - 0:11         pattern: normal_pattern
+0:0  - 0:11           expr
+0:0  - 0:11             non_unary_expr
+0:0  - 0:11               ere
+0:0  - 0:1                  "/"
+0:1  - 0:10                 expression: extended_reg_exp
+0:1  - 0:10                   ere_branch
+0:1  - 0:10                     ere_expression
+0:1  - 0:2                        "("
+0:2  - 0:7                        expression: extended_reg_exp
+0:2  - 0:4                          ere_branch
+0:2  - 0:4                            ere_expression
+0:2  - 0:3                              "("
+0:3  - 0:4                              ")"
+0:4  - 0:5                          "|"
+0:5  - 0:7                          ere_branch
+0:5  - 0:7                            ere_expression
+0:5  - 0:6                              "("
+0:6  - 0:7                              ")"
+0:7  - 0:8                        ")"
+0:8  - 0:10                       ere_dupl_symbol
+0:8  - 0:9                          "*"
+0:9  - 0:10                         modifier: repetition_modifier `?`
+0:10 - 0:11                 "/"
+0:11 - 1:0        terminator: terminator
+0:11 - 1:0          newline
+0:11 - 0:12           `\n`
+
+==================
+ordinary characters and complete escapes retain their source ranges
+:cst
+==================
+/a é)}.\n\/\\\141\q(a*?)/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:26       item: item
+0:0  - 0:26         pattern: normal_pattern
+0:0  - 0:26           expr
+0:0  - 0:26             non_unary_expr
+0:0  - 0:26               ere
+0:0  - 0:1                  "/"
+0:1  - 0:25                 expression: extended_reg_exp
+0:1  - 0:25                   ere_branch
+0:1  - 0:2                      ere_expression
+0:1  - 0:2                        one_char_or_coll_elem_ere
+0:1  - 0:2                          ordinary_character `a`
+0:2  - 0:3                      ere_expression
+0:2  - 0:3                        one_char_or_coll_elem_ere
+0:2  - 0:3                          ordinary_character ` `
+0:3  - 0:5                      ere_expression
+0:3  - 0:5                        one_char_or_coll_elem_ere
+0:3  - 0:5                          ordinary_character `é`
+0:5  - 0:6                      ere_expression
+0:5  - 0:6                        one_char_or_coll_elem_ere
+0:5  - 0:6                          ordinary_character `)`
+0:6  - 0:7                      ere_expression
+0:6  - 0:7                        one_char_or_coll_elem_ere
+0:6  - 0:7                          ordinary_character `}`
+0:7  - 0:8                      ere_expression
+0:7  - 0:8                        one_char_or_coll_elem_ere
+0:7  - 0:8                          "."
+0:8  - 0:10                     ere_expression
+0:8  - 0:10                       one_char_or_coll_elem_ere
+0:8  - 0:10                         ordinary_character
+0:8  - 0:10                           escape: escape_sequence `\\n`
+0:10 - 0:12                     ere_expression
+0:10 - 0:12                       one_char_or_coll_elem_ere
+0:10 - 0:12                         ordinary_character
+0:10 - 0:12                           escape: escaped_delimiter `\\/`
+0:12 - 0:14                     ere_expression
+0:12 - 0:14                       one_char_or_coll_elem_ere
+0:12 - 0:14                         quoted_character `\\\\`
+0:14 - 0:18                     ere_expression
+0:14 - 0:18                       one_char_or_coll_elem_ere
+0:14 - 0:18                         escape_sequence `\\141`
+0:18 - 0:20                     ere_expression
+0:18 - 0:20                       one_char_or_coll_elem_ere
+0:18 - 0:20                         escape_sequence `\\q`
+0:20 - 0:25                     ere_expression
+0:20 - 0:21                       "("
+0:21 - 0:24                       expression: extended_reg_exp
+0:21 - 0:24                         ere_branch
+0:21 - 0:24                           ere_expression
+0:21 - 0:22                             one_char_or_coll_elem_ere
+0:21 - 0:22                               ordinary_character `a`
+0:22 - 0:24                             ere_dupl_symbol
+0:22 - 0:23                               "*"
+0:23 - 0:24                               modifier: repetition_modifier `?`
+0:24 - 0:25                       ")"
+0:25 - 0:26                 "/"
+0:26 - 1:0        terminator: terminator
+0:26 - 1:0          newline
+0:26 - 0:27           `\n`
+
+==================
+a blank before an escape remains content in every literal position
+:cst
+==================
+/ \.[ \]][[. \..]]/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:19       item: item
+0:0  - 0:19         pattern: normal_pattern
+0:0  - 0:19           expr
+0:0  - 0:19             non_unary_expr
+0:0  - 0:19               ere
+0:0  - 0:1                  "/"
+0:1  - 0:18                 expression: extended_reg_exp
+0:1  - 0:18                   ere_branch
+0:1  - 0:2                      ere_expression
+0:1  - 0:2                        one_char_or_coll_elem_ere
+0:1  - 0:2                          ordinary_character ` `
+0:2  - 0:4                      ere_expression
+0:2  - 0:4                        one_char_or_coll_elem_ere
+0:2  - 0:4                          quoted_character `\\.`
+0:4  - 0:9                      ere_expression
+0:4  - 0:9                        one_char_or_coll_elem_ere
+0:4  - 0:9                          bracket_expression
+0:4  - 0:5                            "["
+0:5  - 0:8                            matching_list
+0:5  - 0:8                              bracket_list
+0:5  - 0:8                                follow_list
+0:5  - 0:6                                  expression_term
+0:5  - 0:6                                    single_expression
+0:5  - 0:6                                      end_range
+0:5  - 0:6                                        collating_element_single ` `
+0:6  - 0:8                                  expression_term
+0:6  - 0:8                                    single_expression
+0:6  - 0:8                                      end_range
+0:6  - 0:8                                        collating_element
+0:6  - 0:8                                          escape_sequence `\\]`
+0:8  - 0:9                            "]"
+0:9  - 0:18                     ere_expression
+0:9  - 0:18                       one_char_or_coll_elem_ere
+0:9  - 0:18                         bracket_expression
+0:9  - 0:10                           "["
+0:10 - 0:17                           matching_list
+0:10 - 0:17                             bracket_list
+0:10 - 0:17                               follow_list
+0:10 - 0:17                                 expression_term
+0:10 - 0:17                                   single_expression
+0:10 - 0:17                                     end_range
+0:10 - 0:17                                       collating_symbol
+0:10 - 0:11                                         "["
+0:11 - 0:12                                         "."
+0:12 - 0:15                                         element: collating_element
+0:12 - 0:13                                           collating_element_content ` `
+0:13 - 0:15                                           escape_sequence `\\.`
+0:15 - 0:16                                         "."
+0:16 - 0:17                                         "]"
+0:17 - 0:18                           "]"
+0:18 - 0:19                 "/"
+0:19 - 1:0        terminator: terminator
+0:19 - 1:0          newline
+0:19 - 0:20           `\n`
+
+==================
+collating forms separate raw fragments from adjacent escapes
+:cst
+==================
+/[[.a\nb.][=é\t犬=][.\/\141\q.]]/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:35       item: item
+0:0  - 0:35         pattern: normal_pattern
+0:0  - 0:35           expr
+0:0  - 0:35             non_unary_expr
+0:0  - 0:35               ere
+0:0  - 0:1                  "/"
+0:1  - 0:34                 expression: extended_reg_exp
+0:1  - 0:34                   ere_branch
+0:1  - 0:34                     ere_expression
+0:1  - 0:34                       one_char_or_coll_elem_ere
+0:1  - 0:34                         bracket_expression
+0:1  - 0:2                            "["
+0:2  - 0:33                           matching_list
+0:2  - 0:33                             bracket_list
+0:2  - 0:33                               follow_list
+0:2  - 0:10                                 expression_term
+0:2  - 0:10                                   single_expression
+0:2  - 0:10                                     end_range
+0:2  - 0:10                                       collating_symbol
+0:2  - 0:3                                          "["
+0:3  - 0:4                                          "."
+0:4  - 0:8                                          element: collating_element
+0:4  - 0:5                                            collating_element_content `a`
+0:5  - 0:7                                            escape_sequence `\\n`
+0:7  - 0:8                                            collating_element_content `b`
+0:8  - 0:9                                          "."
+0:9  - 0:10                                         "]"
+0:10 - 0:21                                 expression_term
+0:10 - 0:21                                   single_expression
+0:10 - 0:21                                     equivalence_class
+0:10 - 0:11                                       "["
+0:11 - 0:12                                       "="
+0:12 - 0:19                                       element: collating_element
+0:12 - 0:14                                         collating_element_content `é`
+0:14 - 0:16                                         escape_sequence `\\t`
+0:16 - 0:19                                         collating_element_content `犬`
+0:19 - 0:20                                       "="
+0:20 - 0:21                                       "]"
+0:21 - 0:33                                 expression_term
+0:21 - 0:33                                   single_expression
+0:21 - 0:33                                     end_range
+0:21 - 0:33                                       collating_symbol
+0:21 - 0:22                                         "["
+0:22 - 0:23                                         "."
+0:23 - 0:31                                         element: collating_element
+0:23 - 0:25                                           escaped_delimiter `\\/`
+0:25 - 0:29                                           escape_sequence `\\141`
+0:29 - 0:31                                           escape_sequence `\\q`
+0:31 - 0:32                                         "."
+0:32 - 0:33                                         "]"
+0:33 - 0:34                           "]"
+0:34 - 0:35                 "/"
+0:35 - 1:0        terminator: terminator
+0:35 - 1:0          newline
+0:35 - 0:36           `\n`
+
+==================
+raw compound punctuation spaces and Unicode share one payload leaf
+:cst
+==================
+/[[. a-]🙂.]]/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:16       item: item
+0:0  - 0:16         pattern: normal_pattern
+0:0  - 0:16           expr
+0:0  - 0:16             non_unary_expr
+0:0  - 0:16               ere
+0:0  - 0:1                  "/"
+0:1  - 0:15                 expression: extended_reg_exp
+0:1  - 0:15                   ere_branch
+0:1  - 0:15                     ere_expression
+0:1  - 0:15                       one_char_or_coll_elem_ere
+0:1  - 0:15                         bracket_expression
+0:1  - 0:2                            "["
+0:2  - 0:14                           matching_list
+0:2  - 0:14                             bracket_list
+0:2  - 0:14                               follow_list
+0:2  - 0:14                                 expression_term
+0:2  - 0:14                                   single_expression
+0:2  - 0:14                                     end_range
+0:2  - 0:14                                       collating_symbol
+0:2  - 0:3                                          "["
+0:3  - 0:4                                          "."
+0:4  - 0:12                                         element: collating_element_multi ` a-]🙂`
+0:12 - 0:13                                         "."
+0:13 - 0:14                                         "]"
+0:14 - 0:15                           "]"
+0:15 - 0:16                 "/"
+0:16 - 1:0        terminator: terminator
+0:16 - 1:0          newline
+0:16 - 0:17           `\n`
+
+==================
+bracket literals distinguish raw brackets and a trailing hyphen
+:cst
+==================
+/[]a[\/\n-]/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:12       item: item
+0:0  - 0:12         pattern: normal_pattern
+0:0  - 0:12           expr
+0:0  - 0:12             non_unary_expr
+0:0  - 0:12               ere
+0:0  - 0:1                  "/"
+0:1  - 0:11                 expression: extended_reg_exp
+0:1  - 0:11                   ere_branch
+0:1  - 0:11                     ere_expression
+0:1  - 0:11                       one_char_or_coll_elem_ere
+0:1  - 0:11                         bracket_expression
+0:1  - 0:2                            "["
+0:2  - 0:10                           matching_list
+0:2  - 0:10                             bracket_list
+0:2  - 0:9                                follow_list
+0:2  - 0:3                                  expression_term
+0:2  - 0:3                                    single_expression
+0:2  - 0:3                                      end_range
+0:2  - 0:3                                        collating_element_single `]`
+0:3  - 0:4                                  expression_term
+0:3  - 0:4                                    single_expression
+0:3  - 0:4                                      end_range
+0:3  - 0:4                                        collating_element_single `a`
+0:4  - 0:5                                  expression_term
+0:4  - 0:5                                    single_expression
+0:4  - 0:5                                      end_range
+0:4  - 0:5                                        collating_element_single `[`
+0:5  - 0:7                                  expression_term
+0:5  - 0:7                                    single_expression
+0:5  - 0:7                                      end_range
+0:5  - 0:7                                        collating_element
+0:5  - 0:7                                          escaped_delimiter `\\/`
+0:7  - 0:9                                  expression_term
+0:7  - 0:9                                    single_expression
+0:7  - 0:9                                      end_range
+0:7  - 0:9                                        collating_element
+0:7  - 0:9                                          escape_sequence `\\n`
+0:9  - 0:10                               "-"
+0:10 - 0:11                           "]"
+0:11 - 0:12                 "/"
+0:12 - 1:0        terminator: terminator
+0:12 - 1:0          newline
+0:12 - 0:13           `\n`
+
+==================
+a leading hyphen is a named endpoint before range and list hyphens
+:cst
+==================
+/[--ac-]/
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:9       item: item
+0:0 - 0:9         pattern: normal_pattern
+0:0 - 0:9           expr
+0:0 - 0:9             non_unary_expr
+0:0 - 0:9               ere
+0:0 - 0:1                 "/"
+0:1 - 0:8                 expression: extended_reg_exp
+0:1 - 0:8                   ere_branch
+0:1 - 0:8                     ere_expression
+0:1 - 0:8                       one_char_or_coll_elem_ere
+0:1 - 0:8                         bracket_expression
+0:1 - 0:2                           "["
+0:2 - 0:7                           matching_list
+0:2 - 0:7                             bracket_list
+0:2 - 0:6                               follow_list
+0:2 - 0:5                                 expression_term
+0:2 - 0:5                                   range_expression
+0:2 - 0:4                                     start_range
+0:2 - 0:3                                       end_range
+0:2 - 0:3                                         collating_element_single `-`
+0:3 - 0:4                                       "-"
+0:4 - 0:5                                     end_range
+0:4 - 0:5                                       collating_element_single `a`
+0:5 - 0:6                                 expression_term
+0:5 - 0:6                                   single_expression
+0:5 - 0:6                                     end_range
+0:5 - 0:6                                       collating_element_single `c`
+0:6 - 0:7                               "-"
+0:7 - 0:8                           "]"
+0:8 - 0:9                 "/"
+0:9 - 1:0       terminator: terminator
+0:9 - 1:0         newline
+0:9 - 0:10           `\n`
+
+==================
+an empty ERE forms a print argument
+:cst
+==================
+BEGIN { print // }
+------------------
+
+0:0  - 0:18   program
+0:0  - 0:18     item
+0:0  - 0:5        pattern: pattern
+0:0  - 0:5          special_pattern
+0:0  - 0:5            begin_keyword `BEGIN`
+0:6  - 0:18       action: action
+0:6  - 0:7          "{"
+0:8  - 0:16         body: unterminated_statement_list
+0:8  - 0:16           unterminated_statement
+0:8  - 0:16             statement: terminatable_statement
+0:8  - 0:16               simple_statement
+0:8  - 0:16                 print_statement
+0:8  - 0:16                   statement: simple_print_statement
+0:8  - 0:13                     print_keyword `print`
+0:14 - 0:16                     arguments: print_expr_list
+0:14 - 0:16                       print_expr
+0:14 - 0:16                         non_unary_print_expr
+0:14 - 0:16                           ere
+0:14 - 0:15                             "/"
+0:15 - 0:16                             "/"
+0:17 - 0:18         "}"
+
+==================
+an empty ERE forms a match operand
+:cst
+==================
+$0 ~ //
+------------------
+
+0:0 - 0:7   program
+0:0 - 0:7     item
+0:0 - 0:7       pattern: normal_pattern
+0:0 - 0:7         expr
+0:0 - 0:7           non_unary_expr
+0:0 - 0:2             left: non_unary_expr
+0:0 - 0:2               lvalue
+0:0 - 0:1                 "$"
+0:1 - 0:2                 operand: expr
+0:1 - 0:2                   non_unary_expr
+0:1 - 0:2                     number `0`
+0:3 - 0:4             "~"
+0:5 - 0:7             right: expr
+0:5 - 0:7               non_unary_expr
+0:5 - 0:7                 ere
+0:5 - 0:6                   "/"
+0:6 - 0:7                   "/"
+
+==================
+an empty ERE forms a builtin argument
+:cst
+==================
+BEGIN { sub(//, "x") }
+------------------
+
+0:0  - 0:22   program
+0:0  - 0:22     item
+0:0  - 0:5        pattern: pattern
+0:0  - 0:5          special_pattern
+0:0  - 0:5            begin_keyword `BEGIN`
+0:6  - 0:22       action: action
+0:6  - 0:7          "{"
+0:8  - 0:20         body: unterminated_statement_list
+0:8  - 0:20           unterminated_statement
+0:8  - 0:20             statement: terminatable_statement
+0:8  - 0:20               simple_statement
+0:8  - 0:20                 expr
+0:8  - 0:20                   non_unary_expr
+0:8  - 0:11                     builtin_func_name `sub`
+0:11 - 0:12                     "("
+0:12 - 0:19                     expr_list
+0:12 - 0:19                       multiple_expr_list
+0:12 - 0:14                         expr
+0:12 - 0:14                           non_unary_expr
+0:12 - 0:14                             ere
+0:12 - 0:13                               "/"
+0:13 - 0:14                               "/"
+0:14 - 0:15                         ","
+0:16 - 0:19                         expr
+0:16 - 0:19                           non_unary_expr
+0:16 - 0:19                             string
+0:16 - 0:17                               "\""
+0:17 - 0:18                               string_content `x`
+0:18 - 0:19                               "\""
+0:19 - 0:20                     ")"
+0:21 - 0:22         "}"
+
+==================
+an empty ERE forms a getline source
+:cst
+==================
+{ getline < // }
+------------------
+
+0:0  - 0:16   program
+0:0  - 0:16     item
+0:0  - 0:16       action: action
+0:0  - 0:1          "{"
+0:2  - 0:14         body: unterminated_statement_list
+0:2  - 0:14           unterminated_statement
+0:2  - 0:14             statement: terminatable_statement
+0:2  - 0:14               simple_statement
+0:2  - 0:14                 expr
+0:2  - 0:14                   non_unary_expr
+0:2  - 0:14                     non_unary_input_function
+0:2  - 0:9                        get: simple_get
+0:2  - 0:9                          getline_keyword `getline`
+0:10 - 0:11                       "<"
+0:12 - 0:14                       source: expr
+0:12 - 0:14                         non_unary_expr
+0:12 - 0:14                           ere
+0:12 - 0:13                             "/"
+0:13 - 0:14                             "/"
+0:15 - 0:16         "}"
+
+==================
+an empty ERE forms a division operand
+:cst
+==================
+BEGIN { print 1 / // }
+------------------
+
+0:0  - 0:22   program
+0:0  - 0:22     item
+0:0  - 0:5        pattern: pattern
+0:0  - 0:5          special_pattern
+0:0  - 0:5            begin_keyword `BEGIN`
+0:6  - 0:22       action: action
+0:6  - 0:7          "{"
+0:8  - 0:20         body: unterminated_statement_list
+0:8  - 0:20           unterminated_statement
+0:8  - 0:20             statement: terminatable_statement
+0:8  - 0:20               simple_statement
+0:8  - 0:20                 print_statement
+0:8  - 0:20                   statement: simple_print_statement
+0:8  - 0:13                     print_keyword `print`
+0:14 - 0:20                     arguments: print_expr_list
+0:14 - 0:20                       print_expr
+0:14 - 0:20                         non_unary_print_expr
+0:14 - 0:15                           left: non_unary_print_expr
+0:14 - 0:15                             number `1`
+0:16 - 0:17                           "/"
+0:18 - 0:20                           right: print_expr
+0:18 - 0:20                             non_unary_print_expr
+0:18 - 0:20                               ere
+0:18 - 0:19                                 "/"
+0:19 - 0:20                                 "/"
+0:21 - 0:22         "}"
+
+==================
+an empty ERE precedes division
+:cst
+==================
+BEGIN { print // / 2 }
+------------------
+
+0:0  - 0:22   program
+0:0  - 0:22     item
+0:0  - 0:5        pattern: pattern
+0:0  - 0:5          special_pattern
+0:0  - 0:5            begin_keyword `BEGIN`
+0:6  - 0:22       action: action
+0:6  - 0:7          "{"
+0:8  - 0:20         body: unterminated_statement_list
+0:8  - 0:20           unterminated_statement
+0:8  - 0:20             statement: terminatable_statement
+0:8  - 0:20               simple_statement
+0:8  - 0:20                 print_statement
+0:8  - 0:20                   statement: simple_print_statement
+0:8  - 0:13                     print_keyword `print`
+0:14 - 0:20                     arguments: print_expr_list
+0:14 - 0:20                       print_expr
+0:14 - 0:20                         non_unary_print_expr
+0:14 - 0:16                           left: non_unary_print_expr
+0:14 - 0:16                             ere
+0:14 - 0:15                               "/"
+0:15 - 0:16                               "/"
+0:17 - 0:18                           "/"
+0:19 - 0:20                           right: print_expr
+0:19 - 0:20                             non_unary_print_expr
+0:19 - 0:20                               number `2`
+0:21 - 0:22         "}"
+
+==================
+nested empty group
+:cst
+==================
+/(())/
+------------------
+
+0:0 - 0:6   program
+0:0 - 0:6     item
+0:0 - 0:6       pattern: normal_pattern
+0:0 - 0:6         expr
+0:0 - 0:6           non_unary_expr
+0:0 - 0:6             ere
+0:0 - 0:1               "/"
+0:1 - 0:5               expression: extended_reg_exp
+0:1 - 0:5                 ere_branch
+0:1 - 0:5                   ere_expression
+0:1 - 0:2                     "("
+0:2 - 0:4                     expression: extended_reg_exp
+0:2 - 0:4                       ere_branch
+0:2 - 0:4                         ere_expression
+0:2 - 0:3                           "("
+0:3 - 0:4                           ")"
+0:4 - 0:5                     ")"
+0:5 - 0:6               "/"
+
+==================
+concatenated empty group
+:cst
+==================
+/a()b/
+------------------
+
+0:0 - 0:6   program
+0:0 - 0:6     item
+0:0 - 0:6       pattern: normal_pattern
+0:0 - 0:6         expr
+0:0 - 0:6           non_unary_expr
+0:0 - 0:6             ere
+0:0 - 0:1               "/"
+0:1 - 0:5               expression: extended_reg_exp
+0:1 - 0:5                 ere_branch
+0:1 - 0:2                   ere_expression
+0:1 - 0:2                     one_char_or_coll_elem_ere
+0:1 - 0:2                       ordinary_character `a`
+0:2 - 0:4                   ere_expression
+0:2 - 0:3                     "("
+0:3 - 0:4                     ")"
+0:4 - 0:5                   ere_expression
+0:4 - 0:5                     one_char_or_coll_elem_ere
+0:4 - 0:5                       ordinary_character `b`
+0:5 - 0:6               "/"
+
+==================
+left alternation empty group
+:cst
+==================
+/()|a/
+------------------
+
+0:0 - 0:6   program
+0:0 - 0:6     item
+0:0 - 0:6       pattern: normal_pattern
+0:0 - 0:6         expr
+0:0 - 0:6           non_unary_expr
+0:0 - 0:6             ere
+0:0 - 0:1               "/"
+0:1 - 0:5               expression: extended_reg_exp
+0:1 - 0:3                 ere_branch
+0:1 - 0:3                   ere_expression
+0:1 - 0:2                     "("
+0:2 - 0:3                     ")"
+0:3 - 0:4                 "|"
+0:4 - 0:5                 ere_branch
+0:4 - 0:5                   ere_expression
+0:4 - 0:5                     one_char_or_coll_elem_ere
+0:4 - 0:5                       ordinary_character `a`
+0:5 - 0:6               "/"
+
+==================
+right alternation empty group
+:cst
+==================
+/(a|())/
+------------------
+
+0:0 - 0:8   program
+0:0 - 0:8     item
+0:0 - 0:8       pattern: normal_pattern
+0:0 - 0:8         expr
+0:0 - 0:8           non_unary_expr
+0:0 - 0:8             ere
+0:0 - 0:1               "/"
+0:1 - 0:7               expression: extended_reg_exp
+0:1 - 0:7                 ere_branch
+0:1 - 0:7                   ere_expression
+0:1 - 0:2                     "("
+0:2 - 0:6                     expression: extended_reg_exp
+0:2 - 0:3                       ere_branch
+0:2 - 0:3                         ere_expression
+0:2 - 0:3                           one_char_or_coll_elem_ere
+0:2 - 0:3                             ordinary_character `a`
+0:3 - 0:4                       "|"
+0:4 - 0:6                       ere_branch
+0:4 - 0:6                         ere_expression
+0:4 - 0:5                           "("
+0:5 - 0:6                           ")"
+0:6 - 0:7                     ")"
+0:7 - 0:8               "/"
+
+==================
+empty group before a literal closer
+:cst
+==================
+/())/
+------------------
+
+0:0 - 0:5   program
+0:0 - 0:5     item
+0:0 - 0:5       pattern: normal_pattern
+0:0 - 0:5         expr
+0:0 - 0:5           non_unary_expr
+0:0 - 0:5             ere
+0:0 - 0:1               "/"
+0:1 - 0:4               expression: extended_reg_exp
+0:1 - 0:4                 ere_branch
+0:1 - 0:3                   ere_expression
+0:1 - 0:2                     "("
+0:2 - 0:3                     ")"
+0:3 - 0:4                   ere_expression
+0:3 - 0:4                     one_char_or_coll_elem_ere
+0:3 - 0:4                       ordinary_character `)`
+0:4 - 0:5               "/"
+
+==================
+a continuation follows a complete static ERE
+:cst
+==================
+/a/\
+&& /b/
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:6       item: item
+0:0 - 1:6         pattern: normal_pattern
+0:0 - 1:6           expr
+0:0 - 1:6             non_unary_expr
+0:0 - 0:3               left: non_unary_expr
+0:0 - 0:3                 ere
+0:0 - 0:1                   "/"
+0:1 - 0:2                   expression: extended_reg_exp
+0:1 - 0:2                     ere_branch
+0:1 - 0:2                       ere_expression
+0:1 - 0:2                         one_char_or_coll_elem_ere
+0:1 - 0:2                           ordinary_character `a`
+0:2 - 0:3                   "/"
+0:3 - 0:4               "\\"
+1:0 - 1:2               operator: and `&&`
+1:3 - 1:6               right: expr
+1:3 - 1:6                 non_unary_expr
+1:3 - 1:6                   ere
+1:3 - 1:4                     "/"
+1:4 - 1:5                     expression: extended_reg_exp
+1:4 - 1:5                       ere_branch
+1:4 - 1:5                         ere_expression
+1:4 - 1:5                           one_char_or_coll_elem_ere
+1:4 - 1:5                             ordinary_character `b`
+1:5 - 1:6                     "/"
+1:6 - 2:0       terminator: terminator
+1:6 - 2:0         newline
+1:6 - 1:7           `\n`
+
+==================
+ERE content rejects an internal physical newline
+:error
+==================
+{ print /a\
+b/ }
+
+------------------
+
+==================
+ERE opening boundary rejects an internal physical newline
+:error
+==================
+{ print /\
+a/ }
+
+------------------
+
+==================
+ERE closing boundary rejects an internal physical newline
+:error
+==================
+{ print /a\
+/ }
+
+------------------
+
+==================
+ERE compound bracket form rejects an internal physical newline
+:error
+==================
+{ print /[[:al\
+pha:]]/ }
+
+------------------
+
+==================
+ERE bracket range rejects an internal physical newline
+:error
+==================
+{ print /[a-\
+z]/ }
+
+------------------
+
+==================
+ERE duplication count rejects an internal physical newline
+:error
+==================
+{ print /a{1\
+2}/ }
+
+------------------
+
+==================
+ERE escaped delimiter rejects an internal physical newline
+:error
+==================
+{ print /a\\
+/b/ }
+
+------------------
+
+==================
+an empty ERE cannot span a physical newline
+:error
+==================
+BEGIN { print /\
+/ }
+
+------------------
+
+==================
+ERE collating payload rejects NUL
+:error
+==================
+{ print /[[.a .]]/ }
+
+------------------
+
+==================
+ERE escape rejects NUL
+:error
+==================
+{ print /a\ / }
+
+------------------
+
+==================
+an ERE alternation requires a nonempty left branch
+:error
+==================
+/|a/
+
+------------------
+
+==================
+an ERE alternation requires a nonempty right branch
+:error
+==================
+/a|/
+
+------------------
+
+==================
+an empty ERE group cannot span a physical newline
+:error
+==================
+BEGIN { print /(\
+)/ }
+
+------------------
+
+==================
+an ERE group alternation requires a nonempty left branch
+:error
+==================
+/(|a)/
+
+------------------
+
+==================
+an ERE group alternation requires a nonempty right branch
+:error
+==================
+/(a|)/
+
+------------------
+
+==================
+an ERE group cannot contain only an alternation operator
+:error
+==================
+/(|)/
+
+------------------
+
+==================
+an ERE alternation requires a nonempty middle branch
+:error
+==================
+/a||b/
+
+------------------
+
+==================
+an ERE closing parenthesis cannot supply an empty alternation branch
+:error
+==================
+/(a|)b)/
+
+------------------
+
+==================
+a continued closing parenthesis cannot supply a nested ERE branch
+:error
+==================
+/((a|\
+)b)\
+)/
+
+------------------
+
+==================
+two slashes after an operand cannot replace division with an empty ERE
+:error
+==================
+BEGIN { print x // }
+
+------------------
+
+==================
+hashes inside ERE class names and interval counts are rejected
+:error
+==================
+BEGIN {
+  print /[[:alpha#:]]/
+  print /a{2#}/
+  print /[[:#:]]/
+  print /a{#}/
+}
+
+------------------
+
+==================
+a blank after an ERE interval opening cannot expose a backslash as a continuation
+:error
+==================
+/a{ \1}/
+
+------------------
+
+==================
+a blank after an ERE interval count cannot expose a backslash as a continuation
+:error
+==================
+/a{1 \}/
+
+------------------
+
+==================
+a blank after an ERE interval separator cannot expose a backslash as a continuation
+:error
+==================
+/a{1, \2}/
+
+------------------
+
+==================
+a blank after an ERE interval maximum cannot expose a backslash as a continuation
+:error
+==================
+/a{1,2	\}/
+
+------------------
+
+==================
+a blank after an ERE class opening cannot expose a backslash as a continuation
+:error
+==================
+/[[: \alpha:]]/
+
+------------------
+
+==================
+a blank after an ERE class name cannot expose a backslash as a continuation
+:error
+==================
+/[[:alpha \:]]/
+
+------------------
+
+==================
+a raw hyphen cannot be the sole equivalence class payload
+:error
+==================
+/[[=-=]]/
+
+------------------
+
+==================
+an empty collating symbol cannot consume a later terminator
+:error
+==================
+/[[..].]]/
+
+------------------
+
+==================
+an empty equivalence class cannot consume a later terminator
+:error
+==================
+/[[==]=]]/
+
+------------------
+
+==================
+a continued compound terminator cannot become payload
+:error
+==================
+/[[..\
+].]]/
+
+------------------
+
+==================
+a raw closing bracket cannot be the sole equivalence class payload
+:error
+==================
+/[[=]=]]/
+
+------------------
+
+==================
+a missing ERE closing slash before a raw newline is rejected
+:error
+==================
+BEGIN { print /broken
+}
+
+------------------
+
+==================
+a missing ERE closing slash at EOF is rejected
+:error
+==================
+BEGIN { print /broken
+------------------
+
+==================
+an ERE class opener ending at a raw newline is rejected
+:error
+==================
+BEGIN { print /[[:
+}
+
+------------------
+
+==================
+an ERE class name ending at a raw newline is rejected
+:error
+==================
+BEGIN { print /[[:alpha
+}
+
+------------------
+
+==================
+an ERE interval opener ending at a raw newline is rejected
+:error
+==================
+BEGIN { print /a{
+}
+
+------------------
+
+==================
+an ERE interval count ending at a raw newline is rejected
+:error
+==================
+BEGIN { print /a{1,
+}
+
+------------------

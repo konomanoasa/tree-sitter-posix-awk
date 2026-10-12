@@ -2,7 +2,7 @@
 decimal fractions and exponents each remain one number
 ==================
 BEGIN { print 1.5 1. .5 1e+2 }
----
+------------------
 
 (program
   (item
@@ -35,7 +35,7 @@ BEGIN { print 1.5 1. .5 1e+2 }
 floating suffixes remain inside their decimal number tokens
 ==================
 BEGIN { print 1.0f, .5F, 1e2l, 1.L }
----
+------------------
 
 (program
   (item
@@ -68,7 +68,7 @@ BEGIN { print 1.0f, .5F, 1e2l, 1.L }
 hexadecimal spelling does not become one number
 ==================
 BEGIN { print 0x10 }
----
+------------------
 
 (program
   (item
@@ -97,7 +97,7 @@ an integer followed by a continued name retains both tokens
 ==================
 1\
 f
----
+------------------
 
 (program
   (item
@@ -115,7 +115,7 @@ continued decimal digits remain separate numbers
 ==================
 1\
 2
----
+------------------
 
 (program
   (item
@@ -126,3 +126,1044 @@ continued decimal digits remain separate numbers
             (number))
           (non_unary_expr
             (number)))))))
+
+==================
+number boundary in <TAB>1.5
+:cst
+==================
+{ print 	1.5 }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:14       item: item
+0:0  - 0:14         action: action
+0:0  - 0:1            "{"
+0:2  - 0:12           body: unterminated_statement_list
+0:2  - 0:12             unterminated_statement
+0:2  - 0:12               statement: terminatable_statement
+0:2  - 0:12                 simple_statement
+0:2  - 0:12                   print_statement
+0:2  - 0:12                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:9  - 0:12                       arguments: print_expr_list
+0:9  - 0:12                         print_expr
+0:9  - 0:12                           non_unary_print_expr
+0:9  - 0:12                             number `1.5`
+0:13 - 0:14           "}"
+0:14 - 1:0        terminator: terminator
+0:14 - 1:0          newline
+0:14 - 0:15           `\n`
+
+==================
+number boundary in 123
+:cst
+==================
+{ print 123 }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:13       item: item
+0:0  - 0:13         action: action
+0:0  - 0:1            "{"
+0:2  - 0:11           body: unterminated_statement_list
+0:2  - 0:11             unterminated_statement
+0:2  - 0:11               statement: terminatable_statement
+0:2  - 0:11                 simple_statement
+0:2  - 0:11                   print_statement
+0:2  - 0:11                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:11                       arguments: print_expr_list
+0:8  - 0:11                         print_expr
+0:8  - 0:11                           non_unary_print_expr
+0:8  - 0:11                             number `123`
+0:12 - 0:13           "}"
+0:13 - 1:0        terminator: terminator
+0:13 - 1:0          newline
+0:13 - 0:14           `\n`
+
+==================
+number boundary in .5
+:cst
+==================
+{ print .5 }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:12       item: item
+0:0  - 0:12         action: action
+0:0  - 0:1            "{"
+0:2  - 0:10           body: unterminated_statement_list
+0:2  - 0:10             unterminated_statement
+0:2  - 0:10               statement: terminatable_statement
+0:2  - 0:10                 simple_statement
+0:2  - 0:10                   print_statement
+0:2  - 0:10                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:10                       arguments: print_expr_list
+0:8  - 0:10                         print_expr
+0:8  - 0:10                           non_unary_print_expr
+0:8  - 0:10                             number `.5`
+0:11 - 0:12           "}"
+0:12 - 1:0        terminator: terminator
+0:12 - 1:0          newline
+0:12 - 0:13           `\n`
+
+==================
+number boundary in 1.5e+2
+:cst
+==================
+{ print 1.5e+2 }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:16       item: item
+0:0  - 0:16         action: action
+0:0  - 0:1            "{"
+0:2  - 0:14           body: unterminated_statement_list
+0:2  - 0:14             unterminated_statement
+0:2  - 0:14               statement: terminatable_statement
+0:2  - 0:14                 simple_statement
+0:2  - 0:14                   print_statement
+0:2  - 0:14                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:14                       arguments: print_expr_list
+0:8  - 0:14                         print_expr
+0:8  - 0:14                           non_unary_print_expr
+0:8  - 0:14                             number `1.5e+2`
+0:15 - 0:16           "}"
+0:16 - 1:0        terminator: terminator
+0:16 - 1:0          newline
+0:16 - 0:17           `\n`
+
+==================
+number boundary in 1.0f
+:cst
+==================
+{ print 1.0f }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:14       item: item
+0:0  - 0:14         action: action
+0:0  - 0:1            "{"
+0:2  - 0:12           body: unterminated_statement_list
+0:2  - 0:12             unterminated_statement
+0:2  - 0:12               statement: terminatable_statement
+0:2  - 0:12                 simple_statement
+0:2  - 0:12                   print_statement
+0:2  - 0:12                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:12                       arguments: print_expr_list
+0:8  - 0:12                         print_expr
+0:8  - 0:12                           non_unary_print_expr
+0:8  - 0:12                             number `1.0f`
+0:13 - 0:14           "}"
+0:14 - 1:0        terminator: terminator
+0:14 - 1:0          newline
+0:14 - 0:15           `\n`
+
+==================
+number boundary in .5F
+:cst
+==================
+{ print .5F }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:13       item: item
+0:0  - 0:13         action: action
+0:0  - 0:1            "{"
+0:2  - 0:11           body: unterminated_statement_list
+0:2  - 0:11             unterminated_statement
+0:2  - 0:11               statement: terminatable_statement
+0:2  - 0:11                 simple_statement
+0:2  - 0:11                   print_statement
+0:2  - 0:11                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:11                       arguments: print_expr_list
+0:8  - 0:11                         print_expr
+0:8  - 0:11                           non_unary_print_expr
+0:8  - 0:11                             number `.5F`
+0:12 - 0:13           "}"
+0:13 - 1:0        terminator: terminator
+0:13 - 1:0          newline
+0:13 - 0:14           `\n`
+
+==================
+number boundary in 1e2l
+:cst
+==================
+{ print 1e2l }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:14       item: item
+0:0  - 0:14         action: action
+0:0  - 0:1            "{"
+0:2  - 0:12           body: unterminated_statement_list
+0:2  - 0:12             unterminated_statement
+0:2  - 0:12               statement: terminatable_statement
+0:2  - 0:12                 simple_statement
+0:2  - 0:12                   print_statement
+0:2  - 0:12                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:12                       arguments: print_expr_list
+0:8  - 0:12                         print_expr
+0:8  - 0:12                           non_unary_print_expr
+0:8  - 0:12                             number `1e2l`
+0:13 - 0:14           "}"
+0:14 - 1:0        terminator: terminator
+0:14 - 1:0          newline
+0:14 - 0:15           `\n`
+
+==================
+number boundary in 1.L
+:cst
+==================
+{ print 1.L }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:13       item: item
+0:0  - 0:13         action: action
+0:0  - 0:1            "{"
+0:2  - 0:11           body: unterminated_statement_list
+0:2  - 0:11             unterminated_statement
+0:2  - 0:11               statement: terminatable_statement
+0:2  - 0:11                 simple_statement
+0:2  - 0:11                   print_statement
+0:2  - 0:11                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:11                       arguments: print_expr_list
+0:8  - 0:11                         print_expr
+0:8  - 0:11                           non_unary_print_expr
+0:8  - 0:11                             number `1.L`
+0:12 - 0:13           "}"
+0:13 - 1:0        terminator: terminator
+0:13 - 1:0          newline
+0:13 - 0:14           `\n`
+
+==================
+number boundary in 1.5e+2F
+:cst
+==================
+{ print 1.5e+2F }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:17       item: item
+0:0  - 0:17         action: action
+0:0  - 0:1            "{"
+0:2  - 0:15           body: unterminated_statement_list
+0:2  - 0:15             unterminated_statement
+0:2  - 0:15               statement: terminatable_statement
+0:2  - 0:15                 simple_statement
+0:2  - 0:15                   print_statement
+0:2  - 0:15                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:15                       arguments: print_expr_list
+0:8  - 0:15                         print_expr
+0:8  - 0:15                           non_unary_print_expr
+0:8  - 0:15                             number `1.5e+2F`
+0:16 - 0:17           "}"
+0:17 - 1:0        terminator: terminator
+0:17 - 1:0          newline
+0:17 - 0:18           `\n`
+
+==================
+number boundary in 1.5ff
+:cst
+==================
+{ print 1.5ff }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:15       item: item
+0:0  - 0:15         action: action
+0:0  - 0:1            "{"
+0:2  - 0:13           body: unterminated_statement_list
+0:2  - 0:13             unterminated_statement
+0:2  - 0:13               statement: terminatable_statement
+0:2  - 0:13                 simple_statement
+0:2  - 0:13                   print_statement
+0:2  - 0:13                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:13                       arguments: print_expr_list
+0:8  - 0:13                         print_expr
+0:8  - 0:13                           non_unary_print_expr
+0:8  - 0:12                             left: non_unary_print_expr
+0:8  - 0:12                               number `1.5f`
+0:12 - 0:13                             right: non_unary_print_expr
+0:12 - 0:13                               lvalue
+0:12 - 0:13                                 name `f`
+0:14 - 0:15           "}"
+0:15 - 1:0        terminator: terminator
+0:15 - 1:0          newline
+0:15 - 0:16           `\n`
+
+==================
+number boundary in 1e2LL
+:cst
+==================
+{ print 1e2LL }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:15       item: item
+0:0  - 0:15         action: action
+0:0  - 0:1            "{"
+0:2  - 0:13           body: unterminated_statement_list
+0:2  - 0:13             unterminated_statement
+0:2  - 0:13               statement: terminatable_statement
+0:2  - 0:13                 simple_statement
+0:2  - 0:13                   print_statement
+0:2  - 0:13                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:13                       arguments: print_expr_list
+0:8  - 0:13                         print_expr
+0:8  - 0:13                           non_unary_print_expr
+0:8  - 0:12                             left: non_unary_print_expr
+0:8  - 0:12                               number `1e2L`
+0:12 - 0:13                             right: non_unary_print_expr
+0:12 - 0:13                               lvalue
+0:12 - 0:13                                 name `L`
+0:14 - 0:15           "}"
+0:15 - 1:0        terminator: terminator
+0:15 - 1:0          newline
+0:15 - 0:16           `\n`
+
+==================
+number boundary in 1f
+:cst
+==================
+{ print 1f }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:12       item: item
+0:0  - 0:12         action: action
+0:0  - 0:1            "{"
+0:2  - 0:10           body: unterminated_statement_list
+0:2  - 0:10             unterminated_statement
+0:2  - 0:10               statement: terminatable_statement
+0:2  - 0:10                 simple_statement
+0:2  - 0:10                   print_statement
+0:2  - 0:10                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:10                       arguments: print_expr_list
+0:8  - 0:10                         print_expr
+0:8  - 0:10                           non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:10                             right: non_unary_print_expr
+0:9  - 0:10                               lvalue
+0:9  - 0:10                                 name `f`
+0:11 - 0:12           "}"
+0:12 - 1:0        terminator: terminator
+0:12 - 1:0          newline
+0:12 - 0:13           `\n`
+
+==================
+number boundary in 1e+ x
+:cst
+==================
+{ print 1e+ x }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:15       item: item
+0:0  - 0:15         action: action
+0:0  - 0:1            "{"
+0:2  - 0:13           body: unterminated_statement_list
+0:2  - 0:13             unterminated_statement
+0:2  - 0:13               statement: terminatable_statement
+0:2  - 0:13                 simple_statement
+0:2  - 0:13                   print_statement
+0:2  - 0:13                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:13                       arguments: print_expr_list
+0:8  - 0:13                         print_expr
+0:8  - 0:13                           non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:13                             right: non_unary_print_expr
+0:9  - 0:10                               left: non_unary_print_expr
+0:9  - 0:10                                 lvalue
+0:9  - 0:10                                   name `e`
+0:10 - 0:11                               "+"
+0:12 - 0:13                               right: print_expr
+0:12 - 0:13                                 non_unary_print_expr
+0:12 - 0:13                                   lvalue
+0:12 - 0:13                                     name `x`
+0:14 - 0:15           "}"
+0:15 - 1:0        terminator: terminator
+0:15 - 1:0          newline
+0:15 - 0:16           `\n`
+
+==================
+number boundary in 1ef
+:cst
+==================
+{ print 1ef }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:13       item: item
+0:0  - 0:13         action: action
+0:0  - 0:1            "{"
+0:2  - 0:11           body: unterminated_statement_list
+0:2  - 0:11             unterminated_statement
+0:2  - 0:11               statement: terminatable_statement
+0:2  - 0:11                 simple_statement
+0:2  - 0:11                   print_statement
+0:2  - 0:11                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:11                       arguments: print_expr_list
+0:8  - 0:11                         print_expr
+0:8  - 0:11                           non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:11                             right: non_unary_print_expr
+0:9  - 0:11                               lvalue
+0:9  - 0:11                                 name `ef`
+0:12 - 0:13           "}"
+0:13 - 1:0        terminator: terminator
+0:13 - 1:0          newline
+0:13 - 0:14           `\n`
+
+==================
+number boundary in 1.e+f
+:cst
+==================
+{ print 1.e+f }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:15       item: item
+0:0  - 0:15         action: action
+0:0  - 0:1            "{"
+0:2  - 0:13           body: unterminated_statement_list
+0:2  - 0:13             unterminated_statement
+0:2  - 0:13               statement: terminatable_statement
+0:2  - 0:13                 simple_statement
+0:2  - 0:13                   print_statement
+0:2  - 0:13                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:13                       arguments: print_expr_list
+0:8  - 0:13                         print_expr
+0:8  - 0:13                           non_unary_print_expr
+0:8  - 0:10                             left: non_unary_print_expr
+0:8  - 0:10                               number `1.`
+0:10 - 0:13                             right: non_unary_print_expr
+0:10 - 0:11                               left: non_unary_print_expr
+0:10 - 0:11                                 lvalue
+0:10 - 0:11                                   name `e`
+0:11 - 0:12                               "+"
+0:12 - 0:13                               right: print_expr
+0:12 - 0:13                                 non_unary_print_expr
+0:12 - 0:13                                   lvalue
+0:12 - 0:13                                     name `f`
+0:14 - 0:15           "}"
+0:15 - 1:0        terminator: terminator
+0:15 - 1:0          newline
+0:15 - 0:16           `\n`
+
+==================
+number boundary in .5eL
+:cst
+==================
+{ print .5eL }
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:14       item: item
+0:0  - 0:14         action: action
+0:0  - 0:1            "{"
+0:2  - 0:12           body: unterminated_statement_list
+0:2  - 0:12             unterminated_statement
+0:2  - 0:12               statement: terminatable_statement
+0:2  - 0:12                 simple_statement
+0:2  - 0:12                   print_statement
+0:2  - 0:12                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 0:12                       arguments: print_expr_list
+0:8  - 0:12                         print_expr
+0:8  - 0:12                           non_unary_print_expr
+0:8  - 0:10                             left: non_unary_print_expr
+0:8  - 0:10                               number `.5`
+0:10 - 0:12                             right: non_unary_print_expr
+0:10 - 0:12                               lvalue
+0:10 - 0:12                                 name `eL`
+0:13 - 0:14           "}"
+0:14 - 1:0        terminator: terminator
+0:14 - 1:0          newline
+0:14 - 0:15           `\n`
+
+==================
+integer digits stay separate across a continuation
+:cst
+==================
+{ print 1\
+2*3 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:5        item: item
+0:0  - 1:5          action: action
+0:0  - 0:1            "{"
+0:2  - 1:3            body: unterminated_statement_list
+0:2  - 1:3              unterminated_statement
+0:2  - 1:3                statement: terminatable_statement
+0:2  - 1:3                  simple_statement
+0:2  - 1:3                    print_statement
+0:2  - 1:3                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:3                        arguments: print_expr_list
+0:8  - 1:3                          print_expr
+0:8  - 1:3                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:10                             "\\"
+1:0  - 1:3                              right: non_unary_print_expr
+1:0  - 1:1                                left: non_unary_print_expr
+1:0  - 1:1                                  number `2`
+1:1  - 1:2                                "*"
+1:2  - 1:3                                right: print_expr
+1:2  - 1:3                                  non_unary_print_expr
+1:2  - 1:3                                    number `3`
+1:4  - 1:5            "}"
+1:5  - 2:0        terminator: terminator
+1:5  - 2:0          newline
+1:5  - 1:6            `\n`
+
+==================
+decimal point stay separate across a continuation
+:cst
+==================
+{ print 1\
+.2 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:4        item: item
+0:0  - 1:4          action: action
+0:0  - 0:1            "{"
+0:2  - 1:2            body: unterminated_statement_list
+0:2  - 1:2              unterminated_statement
+0:2  - 1:2                statement: terminatable_statement
+0:2  - 1:2                  simple_statement
+0:2  - 1:2                    print_statement
+0:2  - 1:2                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:2                        arguments: print_expr_list
+0:8  - 1:2                          print_expr
+0:8  - 1:2                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:10                             "\\"
+1:0  - 1:2                              right: non_unary_print_expr
+1:0  - 1:2                                number `.2`
+1:3  - 1:4            "}"
+1:4  - 2:0        terminator: terminator
+1:4  - 2:0          newline
+1:4  - 1:5            `\n`
+
+==================
+fraction digits stay separate across a continuation
+:cst
+==================
+{ print 1.\
+2 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:10                             left: non_unary_print_expr
+0:8  - 0:10                               number `1.`
+0:10 - 0:11                             "\\"
+1:0  - 1:1                              right: non_unary_print_expr
+1:0  - 1:1                                number `2`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+exponent marker stay separate across a continuation
+:cst
+==================
+{ print 1\
+e2 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:4        item: item
+0:0  - 1:4          action: action
+0:0  - 0:1            "{"
+0:2  - 1:2            body: unterminated_statement_list
+0:2  - 1:2              unterminated_statement
+0:2  - 1:2                statement: terminatable_statement
+0:2  - 1:2                  simple_statement
+0:2  - 1:2                    print_statement
+0:2  - 1:2                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:2                        arguments: print_expr_list
+0:8  - 1:2                          print_expr
+0:8  - 1:2                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:10                             "\\"
+1:0  - 1:2                              right: non_unary_print_expr
+1:0  - 1:2                                lvalue
+1:0  - 1:2                                  name `e2`
+1:3  - 1:4            "}"
+1:4  - 2:0        terminator: terminator
+1:4  - 2:0          newline
+1:4  - 1:5            `\n`
+
+==================
+exponent sign stay separate across a continuation
+:cst
+==================
+{ print 1e\
++2 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:4        item: item
+0:0  - 1:4          action: action
+0:0  - 0:1            "{"
+0:2  - 1:2            body: unterminated_statement_list
+0:2  - 1:2              unterminated_statement
+0:2  - 1:2                statement: terminatable_statement
+0:2  - 1:2                  simple_statement
+0:2  - 1:2                    print_statement
+0:2  - 1:2                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:2                        arguments: print_expr_list
+0:8  - 1:2                          print_expr
+0:8  - 1:2                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 1:2                              right: non_unary_print_expr
+0:9  - 0:10                               left: non_unary_print_expr
+0:9  - 0:10                                 lvalue
+0:9  - 0:10                                   name `e`
+0:10 - 0:11                               "\\"
+1:0  - 1:1                                "+"
+1:1  - 1:2                                right: print_expr
+1:1  - 1:2                                  non_unary_print_expr
+1:1  - 1:2                                    number `2`
+1:3  - 1:4            "}"
+1:4  - 2:0        terminator: terminator
+1:4  - 2:0          newline
+1:4  - 1:5            `\n`
+
+==================
+exponent digits stay separate across a continuation
+:cst
+==================
+{ print 1e+\
+2 }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 1:1                              right: non_unary_print_expr
+0:9  - 0:10                               left: non_unary_print_expr
+0:9  - 0:10                                 lvalue
+0:9  - 0:10                                   name `e`
+0:10 - 0:11                               "+"
+0:11 - 0:12                               "\\"
+1:0  - 1:1                                right: print_expr
+1:0  - 1:1                                  non_unary_print_expr
+1:0  - 1:1                                    number `2`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+fraction suffix stay separate across a continuation
+:cst
+==================
+{ print 1.\
+f }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:10                             left: non_unary_print_expr
+0:8  - 0:10                               number `1.`
+0:10 - 0:11                             "\\"
+1:0  - 1:1                              right: non_unary_print_expr
+1:0  - 1:1                                lvalue
+1:0  - 1:1                                  name `f`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+exponent suffix stay separate across a continuation
+:cst
+==================
+{ print 1e2\
+L }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:11                             left: non_unary_print_expr
+0:8  - 0:11                               number `1e2`
+0:11 - 0:12                             "\\"
+1:0  - 1:1                              right: non_unary_print_expr
+1:0  - 1:1                                lvalue
+1:0  - 1:1                                  name `L`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+a token-boundary continuation preserves integer and name
+:cst
+==================
+{ print 1\
+f }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:10                             "\\"
+1:0  - 1:1                              right: non_unary_print_expr
+1:0  - 1:1                                lvalue
+1:0  - 1:1                                  name `f`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+a token-boundary continuation preserves number and incomplete exponent
+:cst
+==================
+{ print 1\
+e+x }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:5        item: item
+0:0  - 1:5          action: action
+0:0  - 0:1            "{"
+0:2  - 1:3            body: unterminated_statement_list
+0:2  - 1:3              unterminated_statement
+0:2  - 1:3                statement: terminatable_statement
+0:2  - 1:3                  simple_statement
+0:2  - 1:3                    print_statement
+0:2  - 1:3                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:3                        arguments: print_expr_list
+0:8  - 1:3                          print_expr
+0:8  - 1:3                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 0:10                             "\\"
+1:0  - 1:3                              right: non_unary_print_expr
+1:0  - 1:1                                left: non_unary_print_expr
+1:0  - 1:1                                  lvalue
+1:0  - 1:1                                    name `e`
+1:1  - 1:2                                "+"
+1:2  - 1:3                                right: print_expr
+1:2  - 1:3                                  non_unary_print_expr
+1:2  - 1:3                                    lvalue
+1:2  - 1:3                                      name `x`
+1:4  - 1:5            "}"
+1:5  - 2:0        terminator: terminator
+1:5  - 2:0          newline
+1:5  - 1:6            `\n`
+
+==================
+a token-boundary continuation preserves incomplete exponent and sign
+:cst
+==================
+{ print 1e\
++x }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:4        item: item
+0:0  - 1:4          action: action
+0:0  - 0:1            "{"
+0:2  - 1:2            body: unterminated_statement_list
+0:2  - 1:2              unterminated_statement
+0:2  - 1:2                statement: terminatable_statement
+0:2  - 1:2                  simple_statement
+0:2  - 1:2                    print_statement
+0:2  - 1:2                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:2                        arguments: print_expr_list
+0:8  - 1:2                          print_expr
+0:8  - 1:2                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 1:2                              right: non_unary_print_expr
+0:9  - 0:10                               left: non_unary_print_expr
+0:9  - 0:10                                 lvalue
+0:9  - 0:10                                   name `e`
+0:10 - 0:11                               "\\"
+1:0  - 1:1                                "+"
+1:1  - 1:2                                right: print_expr
+1:1  - 1:2                                  non_unary_print_expr
+1:1  - 1:2                                    lvalue
+1:1  - 1:2                                      name `x`
+1:3  - 1:4            "}"
+1:4  - 2:0        terminator: terminator
+1:4  - 2:0          newline
+1:4  - 1:5            `\n`
+
+==================
+a token-boundary continuation preserves incomplete exponent sign and name
+:cst
+==================
+{ print 1e+\
+x }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                number `1`
+0:9  - 1:1                              right: non_unary_print_expr
+0:9  - 0:10                               left: non_unary_print_expr
+0:9  - 0:10                                 lvalue
+0:9  - 0:10                                   name `e`
+0:10 - 0:11                               "+"
+0:11 - 0:12                               "\\"
+1:0  - 1:1                                right: print_expr
+1:0  - 1:1                                  non_unary_print_expr
+1:0  - 1:1                                    lvalue
+1:0  - 1:1                                      name `x`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+a token-boundary continuation preserves number suffix and name
+:cst
+==================
+{ print 1.0f\
+oo }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:4        item: item
+0:0  - 1:4          action: action
+0:0  - 0:1            "{"
+0:2  - 1:2            body: unterminated_statement_list
+0:2  - 1:2              unterminated_statement
+0:2  - 1:2                statement: terminatable_statement
+0:2  - 1:2                  simple_statement
+0:2  - 1:2                    print_statement
+0:2  - 1:2                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:2                        arguments: print_expr_list
+0:8  - 1:2                          print_expr
+0:8  - 1:2                            non_unary_print_expr
+0:8  - 0:12                             left: non_unary_print_expr
+0:8  - 0:12                               number `1.0f`
+0:12 - 0:13                             "\\"
+1:0  - 1:2                              right: non_unary_print_expr
+1:0  - 1:2                                lvalue
+1:0  - 1:2                                  name `oo`
+1:3  - 1:4            "}"
+1:4  - 2:0        terminator: terminator
+1:4  - 2:0          newline
+1:4  - 1:5            `\n`
+
+==================
+a decimal constant includes its exponent and suffix
+:cst
+==================
+1.2e+3F
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:7       item: item
+0:0 - 0:7         pattern: normal_pattern
+0:0 - 0:7           expr
+0:0 - 0:7             non_unary_expr
+0:0 - 0:7               number `1.2e+3F`
+0:7 - 1:0       terminator: terminator
+0:7 - 1:0         newline
+0:7 - 0:8           `\n`
+
+==================
+a continuation separates two numbers
+:cst
+==================
+1\
+2
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:1       item: item
+0:0 - 1:1         pattern: normal_pattern
+0:0 - 1:1           expr
+0:0 - 1:1             non_unary_expr
+0:0 - 0:1               left: non_unary_expr
+0:0 - 0:1                 number `1`
+0:1 - 0:2               "\\"
+1:0 - 1:1               right: non_unary_expr
+1:0 - 1:1                 number `2`
+1:1 - 2:0       terminator: terminator
+1:1 - 2:0         newline
+1:1 - 1:2           `\n`
+
+==================
+a leading decimal point cannot join following digits
+:error
+==================
+{ print .\
+2 }
+
+------------------

@@ -6,7 +6,7 @@ BEGIN {
   delete whole
 }
 
----
+------------------
 
 (program
   (item_list
@@ -37,7 +37,7 @@ BEGIN {
   delete indexed[first, second]
 }
 
----
+------------------
 
 (program
   (item_list
@@ -78,7 +78,7 @@ BEGIN {
   break
 }
 
----
+------------------
 
 (program
   (item_list
@@ -107,7 +107,7 @@ BEGIN {
   continue
 }
 
----
+------------------
 
 (program
   (item_list
@@ -136,7 +136,7 @@ BEGIN {
   next
 }
 
----
+------------------
 
 (program
   (item_list
@@ -165,7 +165,7 @@ BEGIN {
   nextfile
 }
 
----
+------------------
 
 (program
   (item_list
@@ -194,7 +194,7 @@ BEGIN {
   exit
 }
 
----
+------------------
 
 (program
   (item_list
@@ -223,7 +223,7 @@ BEGIN {
   exit status + 1
 }
 
----
+------------------
 
 (program
   (item_list
@@ -260,7 +260,7 @@ BEGIN {
   return
 }
 
----
+------------------
 
 (program
   (item_list
@@ -289,7 +289,7 @@ BEGIN {
   return value
 }
 
----
+------------------
 
 (program
   (item_list
@@ -324,7 +324,7 @@ BEGIN {
   by_newline
   { nested } final }
 
----
+------------------
 
 (program
   (item_list
@@ -387,7 +387,7 @@ BEGIN {
 ;
 }
 
----
+------------------
 
 (program
   (item_list
@@ -420,7 +420,7 @@ BEGIN {
 ;\
 x
 }
----
+------------------
 
 (program
   (item
@@ -440,3 +440,186 @@ x
                   (lvalue
                     (name))))))
           (newline))))))
+
+==================
+named member fields belong to their public owners
+:cst
+==================
+
+BEGIN {
+  if (cond) left = right; else i++
+  do delete arr[i, j]; while (top)
+  print a, b > "out"
+  "cmd" | getline target
+  for (k in rows) break
+}
+function plus(first) { return first }
+
+------------------
+
+0:0  - 9:0    program
+0:0  - 9:0      item_list
+0:0  - 1:0        leading: newline_opt
+0:0  - 1:0          newline
+0:0  - 0:1            `\n`
+1:0  - 7:1        item: item
+1:0  - 1:5          pattern: pattern
+1:0  - 1:5            special_pattern
+1:0  - 1:5              begin_keyword `BEGIN`
+1:6  - 7:1          action: action
+1:6  - 1:7            "{"
+1:7  - 2:0            newline_opt
+1:7  - 2:0              newline
+1:7  - 1:8                `\n`
+2:2  - 7:0            body: terminated_statement_list
+2:2  - 3:0              terminated_statement
+2:2  - 2:4                if_keyword `if`
+2:5  - 2:6                "("
+2:6  - 2:10               condition: expr
+2:6  - 2:10                 non_unary_expr
+2:6  - 2:10                   lvalue
+2:6  - 2:10                     name `cond`
+2:10 - 2:11               ")"
+2:12 - 2:25               consequence: terminated_statement
+2:12 - 2:24                 statement: terminatable_statement
+2:12 - 2:24                   simple_statement
+2:12 - 2:24                     expr
+2:12 - 2:24                       non_unary_expr
+2:12 - 2:16                         left: lvalue
+2:12 - 2:16                           name `left`
+2:17 - 2:18                         "="
+2:19 - 2:24                         right: expr
+2:19 - 2:24                           non_unary_expr
+2:19 - 2:24                             lvalue
+2:19 - 2:24                               name `right`
+2:24 - 2:25                 ";"
+2:26 - 2:30               else_keyword `else`
+2:31 - 3:0                alternative: terminated_statement
+2:31 - 2:34                 statement: terminatable_statement
+2:31 - 2:34                   simple_statement
+2:31 - 2:34                     expr
+2:31 - 2:34                       non_unary_expr
+2:31 - 2:32                         operand: lvalue
+2:31 - 2:32                           name `i`
+2:32 - 2:34                         operator: incr `++`
+2:34 - 3:0                  terminator: newline
+2:34 - 2:35                   `\n`
+3:2  - 4:0              terminated_statement
+3:2  - 3:34               statement: terminatable_statement
+3:2  - 3:4                  do_keyword `do`
+3:5  - 3:22                 body: terminated_statement
+3:5  - 3:21                   statement: terminatable_statement
+3:5  - 3:21                     simple_statement
+3:5  - 3:11                       delete_keyword `delete`
+3:12 - 3:15                       array: name `arr`
+3:15 - 3:16                       "["
+3:16 - 3:20                       subscripts: expr_list
+3:16 - 3:20                         multiple_expr_list
+3:16 - 3:17                           expr
+3:16 - 3:17                             non_unary_expr
+3:16 - 3:17                               lvalue
+3:16 - 3:17                                 name `i`
+3:17 - 3:18                           ","
+3:19 - 3:20                           expr
+3:19 - 3:20                             non_unary_expr
+3:19 - 3:20                               lvalue
+3:19 - 3:20                                 name `j`
+3:20 - 3:21                       "]"
+3:21 - 3:22                   ";"
+3:23 - 3:28                 while_keyword `while`
+3:29 - 3:30                 "("
+3:30 - 3:33                 condition: expr
+3:30 - 3:33                   non_unary_expr
+3:30 - 3:33                     lvalue
+3:30 - 3:33                       name `top`
+3:33 - 3:34                 ")"
+3:34 - 4:0                terminator: newline
+3:34 - 3:35                 `\n`
+4:2  - 5:0              terminated_statement
+4:2  - 4:20               statement: terminatable_statement
+4:2  - 4:20                 simple_statement
+4:2  - 4:20                   print_statement
+4:2  - 4:12                     statement: simple_print_statement
+4:2  - 4:7                        print_keyword `print`
+4:8  - 4:12                       arguments: print_expr_list
+4:8  - 4:9                          print_expr
+4:8  - 4:9                            non_unary_print_expr
+4:8  - 4:9                              lvalue
+4:8  - 4:9                                name `a`
+4:9  - 4:10                         ","
+4:11 - 4:12                         print_expr
+4:11 - 4:12                           non_unary_print_expr
+4:11 - 4:12                             lvalue
+4:11 - 4:12                               name `b`
+4:13 - 4:20                     redirection: output_redirection
+4:13 - 4:14                       ">"
+4:15 - 4:20                       expr
+4:15 - 4:20                         non_unary_expr
+4:15 - 4:20                           string
+4:15 - 4:16                             "\""
+4:16 - 4:19                             string_content `out`
+4:19 - 4:20                             "\""
+4:20 - 5:0                terminator: newline
+4:20 - 4:21                 `\n`
+5:2  - 6:0              terminated_statement
+5:2  - 5:24               statement: terminatable_statement
+5:2  - 5:24                 simple_statement
+5:2  - 5:24                   expr
+5:2  - 5:24                     non_unary_expr
+5:2  - 5:24                       non_unary_input_function
+5:2  - 5:7                          source: non_unary_expr
+5:2  - 5:7                            string
+5:2  - 5:3                              "\""
+5:3  - 5:6                              string_content `cmd`
+5:6  - 5:7                              "\""
+5:8  - 5:9                          "|"
+5:10 - 5:24                         get: simple_get
+5:10 - 5:17                           getline_keyword `getline`
+5:18 - 5:24                           target: lvalue
+5:18 - 5:24                             name `target`
+5:24 - 6:0                terminator: newline
+5:24 - 5:25                 `\n`
+6:2  - 7:0              terminated_statement
+6:2  - 6:5                for_keyword `for`
+6:6  - 6:7                "("
+6:7  - 6:8                variable: name `k`
+6:9  - 6:11               in_keyword `in`
+6:12 - 6:16               array: name `rows`
+6:16 - 6:17               ")"
+6:18 - 7:0                body: terminated_statement
+6:18 - 6:23                 statement: terminatable_statement
+6:18 - 6:23                   break_keyword `break`
+6:23 - 7:0                  terminator: newline
+6:23 - 6:24                   `\n`
+7:0  - 7:1            "}"
+7:1  - 8:0        terminator: terminator
+7:1  - 8:0          newline
+7:1  - 7:2            `\n`
+8:0  - 8:37       item: item
+8:0  - 8:8          function_keyword `function`
+8:9  - 8:13         name: func_name `plus`
+8:13 - 8:14         "("
+8:14 - 8:19         parameters: param_list
+8:14 - 8:19           name `first`
+8:19 - 8:20         ")"
+8:21 - 8:37         body: action
+8:21 - 8:22           "{"
+8:23 - 8:35           body: unterminated_statement_list
+8:23 - 8:35             unterminated_statement
+8:23 - 8:35               statement: terminatable_statement
+8:23 - 8:29                 return_keyword `return`
+8:30 - 8:35                 expr
+8:30 - 8:35                   non_unary_expr
+8:30 - 8:35                     lvalue
+8:30 - 8:35                       name `first`
+8:36 - 8:37           "}"
+8:37 - 9:0        terminator: terminator
+8:37 - 9:0          newline
+8:37 - 8:38           `\n`
+
+==================
+an unterminated action at EOF is rejected
+:error
+==================
+BEGIN { print value
+------------------

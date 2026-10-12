@@ -3,7 +3,7 @@ an action accepts an omitted pattern
 ==================
 {}
 
----
+------------------
 
 (program
   (item_list
@@ -17,7 +17,7 @@ an expression pattern accepts an omitted action
 ==================
 ready
 
----
+------------------
 
 (program
   (item_list
@@ -35,7 +35,7 @@ a range pattern accepts an omitted action
 ==================
 low, high
 
----
+------------------
 
 (program
   (item_list
@@ -57,7 +57,7 @@ an expression pattern accepts an action
 ==================
 active {}
 
----
+------------------
 
 (program
   (item_list
@@ -78,7 +78,7 @@ a range pattern accepts a newline after its separator
 start,
 stop {}
 
----
+------------------
 
 (program
   (item_list
@@ -106,7 +106,7 @@ from,
 # range continuation
 through {}
 
----
+------------------
 
 (program
   (item_list
@@ -134,7 +134,7 @@ an ERE pattern accepts an action
 ==================
 /record/ {}
 
----
+------------------
 
 (program
   (item_list
@@ -173,7 +173,7 @@ a division expression forms a pattern
 ==================
 total / count {}
 
----
+------------------
 
 (program
   (item_list
@@ -198,7 +198,7 @@ the BEGIN keyword forms a special pattern
 ==================
 BEGIN {}
 
----
+------------------
 
 (program
   (item_list
@@ -214,7 +214,7 @@ BEGIN {}
 the END keyword forms a special pattern
 ==================
 END {}
----
+------------------
 
 (program
   (item
@@ -230,7 +230,7 @@ top-level terminators preserve semicolon newlines and a final item
 
 
 final
----
+------------------
 
 (program
   (item_list
@@ -258,7 +258,7 @@ single unterminated top-level item remains under program
 ==================
 
 BEGIN {}
----
+------------------
 
 (program
   (item_list
@@ -269,3 +269,115 @@ BEGIN {}
       (special_pattern
         (begin_keyword)))
     (action)))
+
+==================
+keyword range excludes blanks and continuation
+:cst
+==================
+  END\
+{}
+------------------
+
+0:2 - 1:2   program
+0:2 - 1:2     item
+0:2 - 0:5       pattern: pattern
+0:2 - 0:5         special_pattern
+0:2 - 0:5           end_keyword `END`
+0:5 - 0:6       "\\"
+1:0 - 1:2       action: action
+1:0 - 1:1         "{"
+1:1 - 1:2         "}"
+
+==================
+special pattern stay separate across a continuation
+:cst
+==================
+BE\
+GIN {}
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:6       item: item
+0:0 - 1:3         pattern: pattern
+0:0 - 1:3           normal_pattern
+0:0 - 1:3             expr
+0:0 - 1:3               non_unary_expr
+0:0 - 0:2                 left: non_unary_expr
+0:0 - 0:2                   lvalue
+0:0 - 0:2                     name `BE`
+0:2 - 0:3                 "\\"
+1:0 - 1:3                 right: non_unary_expr
+1:0 - 1:3                   lvalue
+1:0 - 1:3                     name `GIN`
+1:4 - 1:6         action: action
+1:4 - 1:5           "{"
+1:5 - 1:6           "}"
+1:6 - 2:0       terminator: terminator
+1:6 - 2:0         newline
+1:6 - 1:7           `\n`
+
+==================
+a keyword excludes its following continuation
+:cst
+==================
+BEGIN\
+{}
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:2       item: item
+0:0 - 0:5         pattern: pattern
+0:0 - 0:5           special_pattern
+0:0 - 0:5             begin_keyword `BEGIN`
+0:5 - 0:6         "\\"
+1:0 - 1:2         action: action
+1:0 - 1:1           "{"
+1:1 - 1:2           "}"
+1:2 - 2:0       terminator: terminator
+1:2 - 2:0         newline
+1:2 - 1:3           `\n`
+
+==================
+a missing terminator between actions is rejected
+:error
+==================
+BEGIN {} END {}
+
+------------------
+
+==================
+a missing terminator after an actionless pattern is rejected
+:error
+==================
+active BEGIN {}
+
+------------------
+
+==================
+a missing special pattern action is rejected
+:error
+==================
+BEGIN
+END {}
+
+------------------
+
+==================
+a missing left range arm is rejected
+:error
+==================
+, right {}
+
+------------------
+
+==================
+a missing right range arm is rejected
+:error
+==================
+left, {}
+
+------------------

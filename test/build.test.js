@@ -19,6 +19,10 @@ import {
   root,
 } from "../scripts/tree-sitter.js";
 
+const commandTimeoutMs = 60_000;
+const archiveTimeoutMs = 120_000;
+const archiveOutputLimitBytes = 64 * 1024 * 1024;
+
 const configuration = JSON.parse(
   readFileSync(join(root, "tree-sitter.json"), "utf8"),
 );
@@ -56,7 +60,7 @@ test(`${language}: generated checks reject stale and missing files without rewri
         {
           cwd: directory,
           encoding: "utf8",
-          timeout: 60_000,
+          timeout: commandTimeoutMs,
           killSignal: "SIGKILL",
         },
       );
@@ -172,7 +176,7 @@ syncBuiltinESMExports();
         ["--import", pathToFileURL(preload).href, script, "fuzz-all"],
         {
           encoding: "utf8",
-          timeout: 60_000,
+          timeout: commandTimeoutMs,
           killSignal: "SIGKILL",
         },
       );
@@ -217,8 +221,8 @@ function run(command, arguments_, cwd = root) {
   const result = spawnSync(command, arguments_, {
     cwd,
     encoding: "utf8",
-    timeout: 120000,
-    maxBuffer: 64 * 1024 * 1024,
+    timeout: archiveTimeoutMs,
+    maxBuffer: archiveOutputLimitBytes,
     killSignal: "SIGKILL",
   });
   assert.ifError(result.error);

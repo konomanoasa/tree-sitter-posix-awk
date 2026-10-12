@@ -4,7 +4,7 @@ a function parameter comma accepts a raw newline
 function f(a,
     b) { return a }
 
----
+------------------
 
 (program
   (item_list
@@ -38,7 +38,7 @@ function spaced (first, # first \
 
     third) {}
 
----
+------------------
 
 (program
   (item_list
@@ -70,7 +70,7 @@ BEGIN {
   f()
 }
 
----
+------------------
 
 (program
   (item_list
@@ -102,7 +102,7 @@ BEGIN {
   f(value)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -139,7 +139,7 @@ BEGIN {
   f (value)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -178,7 +178,7 @@ BEGIN {
   length
 }
 
----
+------------------
 
 (program
   (item_list
@@ -210,7 +210,7 @@ BEGIN {
   length()
 }
 
----
+------------------
 
 (program
   (item_list
@@ -242,7 +242,7 @@ BEGIN {
   length (value)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -279,7 +279,7 @@ BEGIN {
   atan2(1, 2)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -319,7 +319,7 @@ BEGIN {
   f(atan2, close, cos, exp, fflush, gsub, index, int, length, log, match, rand, sin, split, sprintf, sqrt, srand, sub, substr, system, tolower, toupper)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -416,7 +416,7 @@ a function definition accepts an adjacent empty parameter list
 ==================
 function adjacent() {}
 
----
+------------------
 
 (program
   (item_list
@@ -435,7 +435,7 @@ function spaced (first, second)
   return first
 }
 
----
+------------------
 
 (program
   (item_list
@@ -467,7 +467,7 @@ a function definition accepts a continuation inside its parameter list
 ==================
 function continued(param,\
 other) {}
----
+------------------
 
 (program
   (item
@@ -487,7 +487,7 @@ BEGIN {
 (value)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -527,7 +527,7 @@ BEGIN {
 (value)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -561,7 +561,7 @@ continuation after a bare builtin name preserves concatenation
 ==================
 BEGIN { x = length \
 y }
----
+------------------
 
 (program
   (item
@@ -594,7 +594,7 @@ BEGIN {
 )
 }
 
----
+------------------
 
 (program
   (item_list
@@ -628,7 +628,7 @@ a function definition accepts a name separated from its header by a continuation
 ==================
 function call\
 (value) {}
----
+------------------
 
 (program
   (item
@@ -637,3 +637,610 @@ function call\
     (param_list
       (name))
     (action)))
+
+==================
+a prefix update before a spaced call spelling applies to the name
+:cst
+==================
+{ ++follow (x) }
+------------------
+
+0:0  - 0:16   program
+0:0  - 0:16     item
+0:0  - 0:16       action: action
+0:0  - 0:1          "{"
+0:2  - 0:14         body: unterminated_statement_list
+0:2  - 0:14           unterminated_statement
+0:2  - 0:14             statement: terminatable_statement
+0:2  - 0:14               simple_statement
+0:2  - 0:14                 expr
+0:2  - 0:14                   non_unary_expr
+0:2  - 0:10                     left: non_unary_expr
+0:2  - 0:4                        operator: incr `++`
+0:4  - 0:10                       operand: lvalue
+0:4  - 0:10                         name `follow`
+0:11 - 0:14                     right: non_unary_expr
+0:11 - 0:12                       "("
+0:12 - 0:13                       expr
+0:12 - 0:13                         non_unary_expr
+0:12 - 0:13                           lvalue
+0:12 - 0:13                             name `x`
+0:13 - 0:14                       ")"
+0:15 - 0:16         "}"
+
+==================
+a builtin call crosses layout without changing its name range
+:cst
+==================
+{ length 	\
+ \
+	(1) }
+
+------------------
+
+0:0  - 3:0    program
+0:0  - 3:0      item_list
+0:0  - 2:6        item: item
+0:0  - 2:6          action: action
+0:0  - 0:1            "{"
+0:2  - 2:4            body: unterminated_statement_list
+0:2  - 2:4              unterminated_statement
+0:2  - 2:4                statement: terminatable_statement
+0:2  - 2:4                  simple_statement
+0:2  - 2:4                    expr
+0:2  - 2:4                      non_unary_expr
+0:2  - 0:8                        builtin_func_name `length`
+0:10 - 0:11                       "\\"
+1:1  - 1:2                        "\\"
+2:1  - 2:2                        "("
+2:2  - 2:3                        expr_list
+2:2  - 2:3                          expr
+2:2  - 2:3                            non_unary_expr
+2:2  - 2:3                              number `1`
+2:3  - 2:4                        ")"
+2:5  - 2:6            "}"
+2:6  - 3:0        terminator: terminator
+2:6  - 3:0          newline
+2:6  - 2:7            `\n`
+
+==================
+a bare builtin before a raw newline does not become a call
+:cst
+==================
+{ length \
+
+(1) }
+
+------------------
+
+0:0  - 3:0    program
+0:0  - 3:0      item_list
+0:0  - 2:5        item: item
+0:0  - 2:5          action: action
+0:0  - 0:1            "{"
+0:2  - 2:3            body: unterminated_statement_list
+0:2  - 2:0              terminated_statement
+0:2  - 0:8                statement: terminatable_statement
+0:2  - 0:8                  simple_statement
+0:2  - 0:8                    expr
+0:2  - 0:8                      non_unary_expr
+0:2  - 0:8                        builtin_func_name `length`
+0:9  - 0:10               "\\"
+1:0  - 2:0                terminator: newline
+1:0  - 1:1                  `\n`
+2:0  - 2:3              unterminated_statement
+2:0  - 2:3                statement: terminatable_statement
+2:0  - 2:3                  simple_statement
+2:0  - 2:3                    expr
+2:0  - 2:3                      non_unary_expr
+2:0  - 2:1                        "("
+2:1  - 2:2                        expr
+2:1  - 2:2                          non_unary_expr
+2:1  - 2:2                            number `1`
+2:2  - 2:3                        ")"
+2:4  - 2:5            "}"
+2:5  - 3:0        terminator: terminator
+2:5  - 3:0          newline
+2:5  - 2:6            `\n`
+
+==================
+a bare builtin before a comment does not become a call
+:cst
+==================
+{ length \
+# note
+(1) }
+
+------------------
+
+0:0  - 3:0    program
+0:0  - 3:0      item_list
+0:0  - 2:5        item: item
+0:0  - 2:5          action: action
+0:0  - 0:1            "{"
+0:2  - 2:3            body: unterminated_statement_list
+0:2  - 2:0              terminated_statement
+0:2  - 0:8                statement: terminatable_statement
+0:2  - 0:8                  simple_statement
+0:2  - 0:8                    expr
+0:2  - 0:8                      non_unary_expr
+0:2  - 0:8                        builtin_func_name `length`
+0:9  - 0:10               "\\"
+1:0  - 1:6                comment `# note`
+1:6  - 2:0                terminator: newline
+1:6  - 1:7                  `\n`
+2:0  - 2:3              unterminated_statement
+2:0  - 2:3                statement: terminatable_statement
+2:0  - 2:3                  simple_statement
+2:0  - 2:3                    expr
+2:0  - 2:3                      non_unary_expr
+2:0  - 2:1                        "("
+2:1  - 2:2                        expr
+2:1  - 2:2                          non_unary_expr
+2:1  - 2:2                            number `1`
+2:2  - 2:3                        ")"
+2:4  - 2:5            "}"
+2:5  - 3:0        terminator: terminator
+2:5  - 3:0          newline
+2:5  - 2:6            `\n`
+
+==================
+function name stay separate across a continuation
+:cst
+==================
+{ fu\
+nc(value) }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:11       item: item
+0:0  - 1:11         action: action
+0:0  - 0:1            "{"
+0:2  - 1:9            body: unterminated_statement_list
+0:2  - 1:9              unterminated_statement
+0:2  - 1:9                statement: terminatable_statement
+0:2  - 1:9                  simple_statement
+0:2  - 1:9                    expr
+0:2  - 1:9                      non_unary_expr
+0:2  - 0:4                        left: non_unary_expr
+0:2  - 0:4                          lvalue
+0:2  - 0:4                            name `fu`
+0:4  - 0:5                        "\\"
+1:0  - 1:9                        right: non_unary_expr
+1:0  - 1:2                          func_name `nc`
+1:2  - 1:3                          "("
+1:3  - 1:8                          expr_list
+1:3  - 1:8                            expr
+1:3  - 1:8                              non_unary_expr
+1:3  - 1:8                                lvalue
+1:3  - 1:8                                  name `value`
+1:8  - 1:9                          ")"
+1:10 - 1:11           "}"
+1:11 - 2:0        terminator: terminator
+1:11 - 2:0          newline
+1:11 - 1:12           `\n`
+
+==================
+built-in name stay separate across a continuation
+:cst
+==================
+{ print len\
+gth(value) }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:12       item: item
+0:0  - 1:12         action: action
+0:0  - 0:1            "{"
+0:2  - 1:10           body: unterminated_statement_list
+0:2  - 1:10             unterminated_statement
+0:2  - 1:10               statement: terminatable_statement
+0:2  - 1:10                 simple_statement
+0:2  - 1:10                   print_statement
+0:2  - 1:10                     statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:10                       arguments: print_expr_list
+0:8  - 1:10                         print_expr
+0:8  - 1:10                           non_unary_print_expr
+0:8  - 0:11                             left: non_unary_print_expr
+0:8  - 0:11                               lvalue
+0:8  - 0:11                                 name `len`
+0:11 - 0:12                             "\\"
+1:0  - 1:10                             right: non_unary_print_expr
+1:0  - 1:3                                func_name `gth`
+1:3  - 1:4                                "("
+1:4  - 1:9                                expr_list
+1:4  - 1:9                                  expr
+1:4  - 1:9                                    non_unary_expr
+1:4  - 1:9                                      lvalue
+1:4  - 1:9                                        name `value`
+1:9  - 1:10                               ")"
+1:11 - 1:12           "}"
+1:12 - 2:0        terminator: terminator
+1:12 - 2:0          newline
+1:12 - 1:13           `\n`
+
+==================
+keyword stay separate across a continuation
+:cst
+==================
+fun\
+ction f() {}
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:12       item: item
+0:0  - 1:9          pattern: pattern
+0:0  - 1:9            normal_pattern
+0:0  - 1:9              expr
+0:0  - 1:9                non_unary_expr
+0:0  - 1:5                  left: non_unary_expr
+0:0  - 0:3                    left: non_unary_expr
+0:0  - 0:3                      lvalue
+0:0  - 0:3                        name `fun`
+0:3  - 0:4                    "\\"
+1:0  - 1:5                    right: non_unary_expr
+1:0  - 1:5                      lvalue
+1:0  - 1:5                        name `ction`
+1:6  - 1:9                  right: non_unary_expr
+1:6  - 1:7                    func_name `f`
+1:7  - 1:8                    "("
+1:8  - 1:9                    ")"
+1:10 - 1:12         action: action
+1:10 - 1:11           "{"
+1:11 - 1:12           "}"
+1:12 - 2:0        terminator: terminator
+1:12 - 2:0          newline
+1:12 - 1:13           `\n`
+
+==================
+a token-boundary continuation preserves repeated function-name gaps
+:cst
+==================
+{ f\
+\
+(x) }
+
+------------------
+
+0:0 - 3:0   program
+0:0 - 3:0     item_list
+0:0 - 2:5       item: item
+0:0 - 2:5         action: action
+0:0 - 0:1           "{"
+0:2 - 2:3           body: unterminated_statement_list
+0:2 - 2:3             unterminated_statement
+0:2 - 2:3               statement: terminatable_statement
+0:2 - 2:3                 simple_statement
+0:2 - 2:3                   expr
+0:2 - 2:3                     non_unary_expr
+0:2 - 0:3                       left: non_unary_expr
+0:2 - 0:3                         lvalue
+0:2 - 0:3                           name `f`
+0:3 - 0:4                       "\\"
+1:0 - 1:1                       "\\"
+2:0 - 2:3                       right: non_unary_expr
+2:0 - 2:1                         "("
+2:1 - 2:2                         expr
+2:1 - 2:2                           non_unary_expr
+2:1 - 2:2                             lvalue
+2:1 - 2:2                               name `x`
+2:2 - 2:3                         ")"
+2:4 - 2:5           "}"
+2:5 - 3:0       terminator: terminator
+2:5 - 3:0         newline
+2:5 - 2:6           `\n`
+
+==================
+a token-boundary continuation preserves spaced function-name gap
+:cst
+==================
+{ f \
+(x) }
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:5       item: item
+0:0 - 1:5         action: action
+0:0 - 0:1           "{"
+0:2 - 1:3           body: unterminated_statement_list
+0:2 - 1:3             unterminated_statement
+0:2 - 1:3               statement: terminatable_statement
+0:2 - 1:3                 simple_statement
+0:2 - 1:3                   expr
+0:2 - 1:3                     non_unary_expr
+0:2 - 0:3                       left: non_unary_expr
+0:2 - 0:3                         lvalue
+0:2 - 0:3                           name `f`
+0:4 - 0:5                       "\\"
+1:0 - 1:3                       right: non_unary_expr
+1:0 - 1:1                         "("
+1:1 - 1:2                         expr
+1:1 - 1:2                           non_unary_expr
+1:1 - 1:2                             lvalue
+1:1 - 1:2                               name `x`
+1:2 - 1:3                         ")"
+1:4 - 1:5           "}"
+1:5 - 2:0       terminator: terminator
+1:5 - 2:0         newline
+1:5 - 1:6           `\n`
+
+==================
+a builtin excludes its following continuation
+:cst
+==================
+{length\
+(x)}
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:4       item: item
+0:0 - 1:4         action: action
+0:0 - 0:1           "{"
+0:1 - 1:3           body: unterminated_statement_list
+0:1 - 1:3             unterminated_statement
+0:1 - 1:3               statement: terminatable_statement
+0:1 - 1:3                 simple_statement
+0:1 - 1:3                   expr
+0:1 - 1:3                     non_unary_expr
+0:1 - 0:7                       builtin_func_name `length`
+0:7 - 0:8                       "\\"
+1:0 - 1:1                       "("
+1:1 - 1:2                       expr_list
+1:1 - 1:2                         expr
+1:1 - 1:2                           non_unary_expr
+1:1 - 1:2                             lvalue
+1:1 - 1:2                               name `x`
+1:2 - 1:3                       ")"
+1:3 - 1:4           "}"
+1:4 - 2:0       terminator: terminator
+1:4 - 2:0         newline
+1:4 - 1:5           `\n`
+
+==================
+a function name excludes its adjacent parenthesis
+:cst
+==================
+{foo(x)}
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:8       item: item
+0:0 - 0:8         action: action
+0:0 - 0:1           "{"
+0:1 - 0:7           body: unterminated_statement_list
+0:1 - 0:7             unterminated_statement
+0:1 - 0:7               statement: terminatable_statement
+0:1 - 0:7                 simple_statement
+0:1 - 0:7                   expr
+0:1 - 0:7                     non_unary_expr
+0:1 - 0:4                       func_name `foo`
+0:4 - 0:5                       "("
+0:5 - 0:6                       expr_list
+0:5 - 0:6                         expr
+0:5 - 0:6                           non_unary_expr
+0:5 - 0:6                             lvalue
+0:5 - 0:6                               name `x`
+0:6 - 0:7                       ")"
+0:7 - 0:8           "}"
+0:8 - 1:0       terminator: terminator
+0:8 - 1:0         newline
+0:8 - 0:9           `\n`
+
+==================
+a continuation before the parenthesis makes a variable name
+:cst
+==================
+{foo\
+(x)}
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:4       item: item
+0:0 - 1:4         action: action
+0:0 - 0:1           "{"
+0:1 - 1:3           body: unterminated_statement_list
+0:1 - 1:3             unterminated_statement
+0:1 - 1:3               statement: terminatable_statement
+0:1 - 1:3                 simple_statement
+0:1 - 1:3                   expr
+0:1 - 1:3                     non_unary_expr
+0:1 - 0:4                       left: non_unary_expr
+0:1 - 0:4                         lvalue
+0:1 - 0:4                           name `foo`
+0:4 - 0:5                       "\\"
+1:0 - 1:3                       right: non_unary_expr
+1:0 - 1:1                         "("
+1:1 - 1:2                         expr
+1:1 - 1:2                           non_unary_expr
+1:1 - 1:2                             lvalue
+1:1 - 1:2                               name `x`
+1:2 - 1:3                         ")"
+1:3 - 1:4           "}"
+1:4 - 2:0       terminator: terminator
+1:4 - 2:0         newline
+1:4 - 1:5           `\n`
+
+==================
+a continuation separates a definition name and parenthesis
+:cst
+==================
+function f\
+(){}
+------------------
+
+0:0  - 1:4    program
+0:0  - 1:4      item
+0:0  - 0:8        function_keyword `function`
+0:9  - 0:10       name: name `f`
+0:10 - 0:11       "\\"
+1:0  - 1:1        "("
+1:1  - 1:2        ")"
+1:2  - 1:4        body: action
+1:2  - 1:3          "{"
+1:3  - 1:4          "}"
+
+==================
+a continuation follows a parameter separator
+:cst
+==================
+function f(a,\
+b){}
+------------------
+
+0:0  - 1:4    program
+0:0  - 1:4      item
+0:0  - 0:8        function_keyword `function`
+0:9  - 0:10       name: func_name `f`
+0:10 - 0:11       "("
+0:11 - 1:1        parameters: param_list
+0:11 - 0:12         name `a`
+0:12 - 0:13         ","
+0:13 - 0:14         "\\"
+1:0  - 1:1          name `b`
+1:1  - 1:2        ")"
+1:2  - 1:4        body: action
+1:2  - 1:3          "{"
+1:3  - 1:4          "}"
+
+==================
+a source update cannot move out of a function argument to its field
+:error
+==================
+{ $getline < f((x) in a -- x ++) }
+
+------------------
+
+==================
+a function definition cannot join two name tokens
+:error
+==================
+function l\
+iterals() {}
+
+------------------
+
+==================
+function remains reserved outside a definition
+:error
+==================
+BEGIN { function }
+
+------------------
+
+==================
+a builtin remains reserved as an assignment target
+:error
+==================
+BEGIN { length = 1 }
+
+------------------
+
+==================
+a function name cannot become the name operand of a prefix update
+:error
+==================
+{ ++follow(x) }
+------------------
+
+==================
+a non-newline backslash before a call opening is rejected
+:error
+==================
+BEGIN {
+  f\(value)
+  after
+}
+
+------------------
+
+==================
+a non-newline backslash before a builtin call opening is rejected
+:error
+==================
+{ length \(value) }
+------------------
+
+==================
+a missing function body is rejected
+:error
+==================
+function f()
+END {}
+
+------------------
+
+==================
+a missing function parameter after a comma is rejected
+:error
+==================
+function malformed(first,) {}
+
+------------------
+
+==================
+a missing function parameter after a comma and newline is rejected
+:error
+==================
+function malformed(first,
+) {}
+
+------------------
+
+==================
+a raw newline before a function parameter comma is rejected
+:error
+==================
+function malformed(first
+,second) {}
+
+------------------
+
+==================
+a raw newline before the first function parameter is rejected
+:error
+==================
+function malformed(
+first) {}
+
+------------------
+
+==================
+a raw newline after the last function parameter is rejected
+:error
+==================
+function malformed(first
+) {}
+
+------------------
+
+==================
+a comment cannot replace a function parameter comma
+:error
+==================
+function malformed(first # comment \
+second) {}
+
+------------------
+
+==================
+a missing parenthesized function header is rejected
+:error
+==================
+function malformed {}
+
+------------------

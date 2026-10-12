@@ -7,7 +7,7 @@ BEGIN {
     raw_body
 }
 
----
+------------------
 
 (program
   (item_list
@@ -50,7 +50,7 @@ BEGIN {
     empty_alternative
 }
 
----
+------------------
 
 (program
   (item_list
@@ -99,7 +99,7 @@ BEGIN {
       inner_alternative
 }
 
----
+------------------
 
 (program
   (item_list
@@ -166,7 +166,7 @@ BEGIN {
     outer_alternative
 }
 
----
+------------------
 
 (program
   (item_list
@@ -240,7 +240,7 @@ BEGIN {
     continued_body
 }
 
----
+------------------
 
 (program
   (item_list
@@ -282,7 +282,7 @@ BEGIN {
     alternative
 }
 
----
+------------------
 
 (program
   (item_list
@@ -324,3 +324,19 @@ BEGIN {
               (newline))))))
     (terminator
       (newline))))
+
+==================
+a missing if body is rejected
+:error
+==================
+BEGIN { if (condition) }
+
+------------------
+
+==================
+missing nested control bodies are rejected
+:error
+==================
+BEGIN { if (outer) while (inner) }
+
+------------------

@@ -1,282 +1,37 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import { test } from "node:test";
-import { grammars } from "../scripts/tree-sitter.js";
-import nodeTypes from "../src/node-types.json" with { type: "json" };
 import {
-  assertStatus,
-  captureParse,
   clean,
   contains,
   continuationMarker,
   continuationRanges,
-  determinismTest,
   dirty,
+  excludes,
+  hasRecovery,
+  matchingLineCount,
+} from "./support/cst.js";
+import {
+  applyEdits,
+  assertDeterministicEdit,
+  assertStatus,
+  captureParse,
+  determinismTest,
+  editHistoryTest,
   freshTest,
   lines,
-  nativeLibrary,
-  parseDescription,
-  parseSummary,
-  runtime,
   writeSource,
 } from "./support/parser.js";
 
-const grammar = grammars[0];
-
-const fieldContractSource = `/(a|b)/, /c/ {
-  $1 = "value";
-  value = -other;
-  print -value + other;
-  print value + other;
-}
-`;
-
-const fieldContractQuery = String.raw`(action
-  opening: "{" @action.opening
-  closing: "}" @action.closing)
-
-(normal_pattern
-  separator: "," @normal-pattern.separator)
-
-(ere
-  opening: "/" @ere.opening
-  closing: "/" @ere.closing)
-
-(ere_expression
-  opening: "(" @ere-expression.opening
-  closing: ")" @ere-expression.closing)
-
-(lvalue
-  operator: "$" @lvalue.operator)
-
-(non_unary_expr
-  operator: "=" @non-unary-expr.operator)
-
-(unary_expr
-  operator: "-" @unary-expr.operator)
-
-(non_unary_print_expr
-  operator: "+" @non-unary-print-expr.operator)
-
-(unary_print_expr
-  operator: "-" @unary-print-expr.operator)
-
-(string
-  opening: "\"" @string.opening
-  closing: "\"" @string.closing)
-
-(terminated_statement
-  terminator: ";" @terminated-statement.terminator)
-`;
-
-test("posix_awk: anonymous-token field contract", () => {
-  const queryPath = path.join(runtime.directory, "fields.scm");
-  const sourcePath = writeSource("source", fieldContractSource);
-  fs.writeFileSync(queryPath, fieldContractQuery);
-  const result = runtime.run(
-    [
-      "query",
-      "--lib-path",
-      nativeLibrary,
-      "--lang-name",
-      grammar.name,
-      "--captures",
-      queryPath,
-      sourcePath,
-    ],
-    { timeout: 60_000 },
-  );
-  assertStatus("anonymous-token field query", result, 0);
-  const captures = [];
-  for (const line of result.stdout.split("\n")) {
-    const match = line.match(/ - ([^,]+), start:/);
-    if (match !== null) {
-      captures.push(match[1]);
-    }
-  }
-  captures.sort();
-  assert.deepEqual(captures, [
-    "action.closing",
-    "action.opening",
-    "ere-expression.closing",
-    "ere-expression.opening",
-    "ere.closing",
-    "ere.closing",
-    "ere.opening",
-    "ere.opening",
-    "lvalue.operator",
-    "non-unary-expr.operator",
-    "non-unary-expr.operator",
-    "non-unary-print-expr.operator",
-    "normal-pattern.separator",
-    "string.closing",
-    "string.opening",
-    "terminated-statement.terminator",
-    "terminated-statement.terminator",
-    "terminated-statement.terminator",
-    "terminated-statement.terminator",
-    "unary-expr.operator",
-    "unary-print-expr.operator",
-  ]);
-});
-
-const namedFieldSource = lines(
-  "",
-  "BEGIN {",
-  "  if (cond) left = right; else i++",
-  "  do delete arr[i, j]; while (top)",
-  '  print a, b > "out"',
-  '  "cmd" | getline target',
-  "  for (k in rows) break",
-  "}",
-  "function plus(first) { return first }",
-);
-
-freshTest("named node field contract", namedFieldSource, (tree) => {
-  for (const memberField of [
-    "leading: newline_opt",
-    "item: item",
-    "terminator: terminator",
-    "pattern: pattern",
-    "action: action",
-    "body: terminated_statement_list",
-    "statement: terminatable_statement",
-    "condition: expr",
-    "consequence: terminated_statement",
-    "alternative: terminated_statement",
-    "left: lvalue",
-    "right: expr",
-    "operand: lvalue",
-    "operator: incr",
-    "body: terminated_statement",
-    "array: name",
-    "subscripts: expr_list",
-    "statement: simple_print_statement",
-    "arguments: print_expr_list",
-    "redirection: output_redirection",
-    "source: non_unary_expr",
-    "get: simple_get",
-    "target: lvalue",
-    "variable: name",
-    "name: func_name",
-    "parameters: param_list",
-    "body: action",
-    "body: unterminated_statement_list",
-  ]) {
-    contains(tree, memberField);
-  }
-  clean(tree);
-});
-
-test("posix_awk: actions, EREs and strings require one opening and closing token", () => {
-  for (const [type, opening, closing] of [
-    ["action", "{", "}"],
-    ["ere", "/", "/"],
-    ["string", '"', '"'],
-  ]) {
-    const node = nodeTypes.find((node) => node.named && node.type === type);
-    assert.ok(node, type);
-    assert.ok(node.fields, type);
-    for (const [field, token] of [
-      ["opening", opening],
-      ["closing", closing],
-    ]) {
-      assert.deepEqual(
-        node.fields[field],
-        {
-          multiple: false,
-          required: true,
-          types: [{ type: token, named: false }],
-        },
-        `${type}.${field}`,
-      );
-    }
-  }
-});
-
-test("posix_awk: lexical tokens expose contiguous leaves", () => {
-  for (const removed of ["split_token", "token_content", "line_continuation"]) {
-    assert.equal(
-      nodeTypes.some((node) => node.type === removed),
-      false,
-      removed,
-    );
-  }
-  for (const kind of [
-    "name",
-    "func_name",
-    "builtin_func_name",
-    "begin_keyword",
-    "number",
-    "and",
-    "or",
-    "string_content",
-    "escape_sequence",
-    "escaped_delimiter",
-    "class_name",
-    "duplication_count",
-    "quoted_character",
-    "collating_element_single",
-    "collating_element_multi",
-    "repetition_modifier",
-  ]) {
-    const node = nodeTypes.find((node) => node.type === kind);
-    assert.ok(node, kind);
-    assert.deepEqual(node.fields ?? {}, {}, kind);
-    assert.equal(node.children, undefined, kind);
-  }
-});
-
-test("posix_awk: continuation markers are anonymous leaves", () => {
-  const node = nodeTypes.find((node) => node.type === "\\");
-  assert.ok(node);
-  assert.equal(node.named, false);
-  assert.equal(node.children, undefined);
-});
-
-freshTest(
-  "keyword range excludes blanks and continuation",
-  "  END\\\n{}",
-  (tree) => {
-    clean(tree);
-    assert.match(tree, /^0:2 +- +0:5 +end_keyword `END`$/m);
-  },
-);
-
-freshTest(
-  "keyword prefixes remain whole identifiers",
-  "{ BEGINNING = END_value + printable + info + if_while }",
-  (tree) => {
-    clean(tree);
-    assert.deepEqual(
-      [...tree.matchAll(/name `([^`]*)`/g)].map((match) => match[1]),
-      ["BEGINNING", "END_value", "printable", "info", "if_while"],
-    );
-  },
-);
-
-freshTest(
-  "a prefix update before a spaced call spelling applies to the name",
-  "{ ++follow (x) }",
-  (tree) => {
-    contains(tree, "name `follow`");
-    assert.doesNotMatch(tree, /func_name/);
-  },
-);
-
-freshTest(
-  "for-in permits blanks and continuations at each word boundary",
-  lines("{ for (k \\", "in \t\\", "array \\", "); }"),
-  (tree) => {
-    contains(tree, "variable: name `k`");
-    contains(tree, "array: name `array`");
-  },
-);
+const longContinuationCount = 16_384;
+const longNumberDigits = 65_536;
+const nestedGetlineRepairCount = 16;
+const precedingGetlineCount = 510;
+const getlineSourceFieldCount = 1_000;
+const getlineSourceGrowthFields = 20;
 
 freshTest(
   "a long continuation gap preserves a for-in header",
-  `{ for (k in array ${"\\\n".repeat(16_384)}); }`,
+  `{ for (k in array ${"\\\n".repeat(longContinuationCount)}); }`,
   (tree) => {
     contains(tree, "variable: name `k`");
     contains(tree, "array: name `array`");
@@ -284,116 +39,14 @@ freshTest(
 );
 
 freshTest(
-  "a builtin call crosses layout without changing its name range",
-  lines("{ length \t\\", " \\", "\t(1) }"),
-  (tree) => {
-    assert.match(tree, /^0:2 +- +0:8 +builtin_func_name `length`$/m);
-    contains(tree, "expr_list");
-  },
-);
-
-for (const [name, source] of [
-  ["a raw newline", lines("{ length \\", "", "(1) }")],
-  ["a comment", lines("{ length \\", "# note", "(1) }")],
-]) {
-  freshTest(
-    `a bare builtin before ${name} does not become a call`,
-    source,
-    (tree) => {
-      contains(tree, "builtin_func_name `length`");
-      assert.doesNotMatch(tree, /expr_list/);
-    },
-  );
-}
-
-for (const { source, spelling, start = 8, end } of [
-  { source: "\t1.5", spelling: "1.5", start: 9, end: 12 },
-  { source: "123", spelling: "123", end: 11 },
-  { source: ".5", spelling: ".5", end: 10 },
-  { source: "1.5e+2", spelling: "1.5e+2", end: 14 },
-  { source: "1.0f", spelling: "1.0f", end: 12 },
-  { source: ".5F", spelling: ".5F", end: 11 },
-  { source: "1e2l", spelling: "1e2l", end: 12 },
-  { source: "1.L", spelling: "1.L", end: 11 },
-  { source: "1.5e+2F", spelling: "1.5e+2F", end: 15 },
-  { source: "1.5ff", spelling: "1.5f", end: 12 },
-  { source: "1e2LL", spelling: "1e2L", end: 12 },
-  { source: "1f", spelling: "1", end: 9 },
-  { source: "1e+ x", spelling: "1", end: 9 },
-  { source: "1ef", spelling: "1", end: 9 },
-  { source: "1.e+f", spelling: "1.", end: 10 },
-  { source: ".5eL", spelling: ".5", end: 10 },
-]) {
-  freshTest(`number boundary in ${source}`, `{ print ${source} }\n`, (tree) => {
-    const numbers = [
-      ...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +number `([^`]*)`$/gm),
-    ];
-    assert.deepEqual(
-      numbers.map((match) => [Number(match[1]), Number(match[2]), match[3]]),
-      [[start, end, spelling]],
-    );
-  });
-}
-
-freshTest(
   "a long number remains one leaf",
-  `{ print ${"1".repeat(65_536)} }\n`,
+  `{ print ${"1".repeat(longNumberDigits)} }\n`,
   (tree) => {
     const numbers = [...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +number /gm)];
     assert.deepEqual(
       numbers.map((match) => [Number(match[1]), Number(match[2])]),
-      [[8, 65_544]],
+      [[8, 8 + longNumberDigits]],
     );
-  },
-);
-
-for (const { source, number, target } of [
-  { source: "{ getline $1.5f++ }", number: "1.5f", target: false },
-  { source: "{ getline $1f++ }", number: "1", target: true },
-  { source: "{ getline $1.5e+2F++ }", number: "1.5e+2F", target: false },
-  { source: "{ getline $1e++ }", number: "1", target: true },
-  { source: "{ getline $1.0ff++ }", number: "1.0f", target: true },
-  { source: "{ getline $1.L++ }", number: "1.L", target: false },
-]) {
-  freshTest(
-    `numeric boundaries in getline lookahead: ${source}`,
-    source,
-    (tree) => {
-      assert.equal(tree.includes("target: lvalue"), target, tree);
-      assert.deepEqual(
-        [...tree.matchAll(/number `([^`]*)`/g)].map((match) => match[1]),
-        [number],
-      );
-    },
-  );
-}
-
-freshTest(
-  "NUL stays inside string content through the closing quote",
-  '{ "a\0b\\n\0c" }',
-  (tree) => {
-    const content = [
-      ...tree.matchAll(
-        /^0:([0-9]+) +- +0:([0-9]+) +string_content `([^`]*)`$/gm,
-      ),
-    ].map((match) => [Number(match[1]), Number(match[2]), match[3]]);
-    assert.deepEqual(content, [
-      [3, 6, "a\\0b"],
-      [8, 10, "\\0c"],
-    ]);
-  },
-);
-
-freshTest(
-  "an ERE class name retains trailing digits",
-  "/[[:al1:]]/",
-  (tree) => {
-    const names = [
-      ...tree.matchAll(
-        /^0:([0-9]+) +- +0:([0-9]+) +name: class_name `([^`]*)`$/gm,
-      ),
-    ].map((match) => [Number(match[1]), Number(match[2]), match[3]]);
-    assert.deepEqual(names, [[4, 7, "al1"]]);
   },
 );
 
@@ -430,258 +83,6 @@ for (const { source, spelling, kind, start } of [
     assert.ok(separated.status === 0 || separated.status === 1);
     dirty(separated.tree);
     assert.equal(separated.tree.includes(`${kind} \`${spelling}\``), false);
-  });
-}
-
-for (const [name, source, ranges] of [
-  ["only a continuation", "\\\n", [[0, 0, 0, 1]]],
-  [
-    "repeated continuations",
-    "\\\n\\\n",
-    [
-      [0, 0, 0, 1],
-      [1, 0, 1, 1],
-    ],
-  ],
-  ["leading continuation", "\\\n{}", [[0, 0, 0, 1]]],
-  ["trailing continuation at EOF", "{}\\\n", [[0, 2, 0, 3]]],
-  ["expression boundary", "{ x\\\ny }", [[0, 3, 0, 4]]],
-  ["parameter boundary", "function f(a,\\\nb) {}", [[0, 13, 0, 14]]],
-  ["Unicode before a boundary", '{ "日本語"\\\nx }', [[0, 13, 0, 14]]],
-]) {
-  freshTest(`${name} exposes only its backslash bytes`, source, (tree) => {
-    assert.deepEqual(continuationRanges(tree), ranges, tree);
-    assert.doesNotMatch(tree, /[ \t]newline$/m, tree);
-    assert.equal(tree.includes("line_continuation"), false, tree);
-  });
-}
-
-for (const [name, source, expected, absent] of [
-  [
-    "name",
-    lines("{ print va\\", "lue }"),
-    ["name `va`", "name `lue`"],
-    "name `value`",
-  ],
-  [
-    "function name",
-    lines("{ fu\\", "nc(value) }"),
-    ["name `fu`", "func_name `nc`"],
-    "func_name `func`",
-  ],
-  [
-    "special pattern",
-    lines("BE\\", "GIN {}"),
-    ["name `BE`", "name `GIN`"],
-    "begin_keyword",
-  ],
-  [
-    "keyword",
-    lines("fun\\", "ction f() {}"),
-    ["name `fun`", "name `ction`"],
-    "function_keyword",
-  ],
-  [
-    "built-in name",
-    lines("{ print len\\", "gth(value) }"),
-    ["name `len`", "func_name `gth`"],
-    "builtin_func_name",
-  ],
-  [
-    "repeated gaps",
-    lines("{ print va\\", "\\", "lue }"),
-    ["name `va`", "name `lue`"],
-    "name `value`",
-  ],
-  [
-    "integer digits",
-    lines("{ print 1\\", "2*3 }"),
-    ["number `1`", "number `2`", "number `3`"],
-    "number `12`",
-  ],
-  [
-    "decimal point",
-    lines("{ print 1\\", ".2 }"),
-    ["number `1`", "number `.2`"],
-    "number `1.2`",
-  ],
-  [
-    "fraction digits",
-    lines("{ print 1.\\", "2 }"),
-    ["number `1.`", "number `2`"],
-    "number `1.2`",
-  ],
-  [
-    "exponent marker",
-    lines("{ print 1\\", "e2 }"),
-    ["number `1`", "name `e2`"],
-    "number `1e2`",
-  ],
-  [
-    "exponent sign",
-    lines("{ print 1e\\", "+2 }"),
-    ["number `1`", "name `e`", "number `2`"],
-    "number `1e+2`",
-  ],
-  [
-    "exponent digits",
-    lines("{ print 1e+\\", "2 }"),
-    ["number `1`", "name `e`", "number `2`"],
-    "number `1e+2`",
-  ],
-  [
-    "fraction suffix",
-    lines("{ print 1.\\", "f }"),
-    ["number `1.`", "name `f`"],
-    "number `1.f`",
-  ],
-  [
-    "exponent suffix",
-    lines("{ print 1e2\\", "L }"),
-    ["number `1e2`", "name `L`"],
-    "number `1e2L`",
-  ],
-  [
-    "plus operators",
-    lines("{ print x +\\", "+ y }"),
-    ['"+"', "name `y`"],
-    "incr",
-  ],
-  [
-    "minus operators",
-    lines("{ print x -\\", "- y }"),
-    ['"-"', "name `y`"],
-    "decr",
-  ],
-]) {
-  freshTest(`${name} stay separate across a continuation`, source, (tree) => {
-    contains(tree, continuationMarker);
-    for (const token of expected) contains(tree, token);
-    assert.equal(tree.includes(absent), false, tree);
-  });
-}
-
-for (const [name, source, expected] of [
-  ["integer and name", lines("{ print 1\\", "f }"), "number `1`"],
-  ["number and incomplete exponent", lines("{ print 1\\", "e+x }"), "name `e`"],
-  ["incomplete exponent and sign", lines("{ print 1e\\", "+x }"), "name `e`"],
-  [
-    "incomplete exponent sign and name",
-    lines("{ print 1e+\\", "x }"),
-    "name `x`",
-  ],
-  ["number suffix and name", lines("{ print 1.0f\\", "oo }"), "number `1.0f`"],
-  ["repeated function-name gaps", lines("{ f\\", "\\", "(x) }"), "name `f`"],
-  ["spaced function-name gap", lines("{ f \\", "(x) }"), "name `f`"],
-  ["division and operand", lines("{ print x /\\", "y }"), '"/"'],
-  ["adjacent strings", lines('{ print "a"\\', '"b" }'), "string_content `b`"],
-  ["closed ERE and operator", lines("{ print /a/\\", "+ 1 }"), '"+"'],
-]) {
-  freshTest(
-    `a token-boundary continuation preserves ${name}`,
-    source,
-    (tree) => {
-      contains(tree, continuationMarker);
-      contains(tree, expected);
-    },
-  );
-}
-
-freshTest(
-  "comment backslashes remain comment text",
-  lines("# name\\", "BEGIN { # += \\", "print 1 }"),
-  (tree) => {
-    assert.equal(tree.includes(continuationMarker), false, tree);
-  },
-);
-
-for (const [name, source] of [
-  ["integer", lines(String.raw`{ print 1\2 }`)],
-  ["fraction", lines(String.raw`{ print 1.\2 }`)],
-  ["exponent", lines(String.raw`{ print 1e\2 }`)],
-  ["assignment", lines(String.raw`{ x +\= 1 }`)],
-  ["division assignment", lines(String.raw`{ x /\= 1 }`)],
-  [
-    "continuation followed by a raw backslash",
-    lines("{ print 1\\", String.raw`\2 }`),
-  ],
-]) {
-  test(`posix_awk: a raw backslash inside ${name} requires recovery`, () => {
-    const result = captureParse(writeSource("raw-backslash", source));
-    assertStatus(name, result, 1);
-    dirty(result.tree);
-  });
-}
-
-freshTest(
-  "an ERE escape after its opening slash is not a continuation",
-  lines(String.raw`{ print /\=/, /\foo/ }`),
-  (tree) => {
-    contains(tree, "escape_sequence");
-    assert.equal(tree.includes(continuationMarker), false, tree);
-  },
-);
-
-freshTest(
-  "a blank after a continuation separates two word leaves",
-  lines("BEGIN { print va\\", " lue }"),
-  (tree) => {
-    contains(tree, "name `va`");
-    contains(tree, "name `lue`");
-    contains(tree, continuationMarker);
-    assert.equal(tree.includes("token_content"), false, tree);
-  },
-);
-
-test("posix_awk: range patterns expose one optional separator and two optional operands", () => {
-  const node = nodeTypes.find(
-    (node) => node.named && node.type === "normal_pattern",
-  );
-  assert.ok(node);
-  assert.ok(node.fields);
-  assert.deepEqual(Object.keys(node.fields).sort(), [
-    "left",
-    "right",
-    "separator",
-  ]);
-  for (const field of ["left", "right", "separator"]) {
-    assert.deepEqual(
-      node.fields[field],
-      {
-        multiple: false,
-        required: false,
-        types: [
-          {
-            type: field === "separator" ? "," : "expr",
-            named: field !== "separator",
-          },
-        ],
-      },
-      field,
-    );
-  }
-});
-
-for (const [name, source, kind] of [
-  [
-    "an equality closing sequence stays inside a collating symbol",
-    "/[[.=].]]/",
-    "collating_symbol",
-  ],
-  [
-    "a dot closing sequence stays inside an equivalence class",
-    "/[[=.]=]]/",
-    "equivalence_class",
-  ],
-  [
-    "a colon closing sequence stays inside a collating symbol",
-    "/[[.:].]]/",
-    "collating_symbol",
-  ],
-]) {
-  freshTest(name, source, (tree) => {
-    contains(tree, kind);
-    contains(tree, "element: collating_element_multi");
   });
 }
 
@@ -734,502 +135,6 @@ for (const {
   );
 }
 
-for (const { name, source } of membershipPrecedenceCases) {
-  test(`posix_awk: unparenthesized membership before ${name} is rejected`, () => {
-    const result = captureParse(writeSource("invalid", source));
-    assert.ok(
-      result.status === 0 || result.status === 1,
-      parseDescription(name, result),
-    );
-    dirty(result.tree);
-  });
-}
-
-const invalidSyntaxCases = [
-  {
-    name: "a getline source cannot end early to accept chained comparisons",
-    source: "{ getline < x < y < z }\n",
-  },
-  {
-    name: "a source update cannot move out of grouping to its field",
-    source: "{ $getline < ((x) in a -- x ++) }\n",
-  },
-  {
-    name: "a source update cannot move out of a function argument to its field",
-    source: "{ $getline < f((x) in a -- x ++) }\n",
-  },
-  {
-    name: "a source update cannot move out of an array subscript to its field",
-    source: "{ $getline < a[(x) in a -- x ++] }\n",
-  },
-  {
-    name: "a backslash at EOF cannot form a continuation",
-    source: "{}\\",
-  },
-  {
-    name: "a blank before the newline cannot complete a continuation",
-    source: "{}\\ \n",
-  },
-  {
-    name: "a function definition cannot join two name tokens",
-    source: lines("function l\\", "iterals() {}"),
-  },
-  {
-    name: "a leading decimal point cannot join following digits",
-    source: lines("{ print .\\", "2 }"),
-  },
-  ...[
-    ["string content", lines('{ print "a\\', 'b" }')],
-    ["string opening boundary", lines('{ print "\\', 'a" }')],
-    ["string closing boundary", lines('{ print "a\\', '" }')],
-    ["empty string", lines('{ print "\\', "\\", '" }')],
-    ["string escape", lines('{ print "\\\\', 'n" }')],
-    ["string octal escape", lines('{ print "\\1\\', '23" }')],
-    ["ERE content", lines("{ print /a\\", "b/ }")],
-    ["ERE opening boundary", lines("{ print /\\", "a/ }")],
-    ["ERE closing boundary", lines("{ print /a\\", "/ }")],
-    ["ERE compound bracket form", lines("{ print /[[:al\\", "pha:]]/ }")],
-    ["ERE bracket range", lines("{ print /[a-\\", "z]/ }")],
-    ["ERE duplication count", lines("{ print /a{1\\", "2}/ }")],
-    ["ERE escaped delimiter", lines("{ print /a\\\\", "/b/ }")],
-  ].map(([name, source]) => ({
-    name: `${name} rejects an internal physical newline`,
-    source,
-  })),
-  ...[
-    ["division assignment", "/", "="],
-    ["addition assignment", "+", "="],
-    ["subtraction assignment", "-", "="],
-    ["multiplication assignment", "*", "="],
-    ["modulus assignment", "%", "="],
-    ["power assignment", "^", "="],
-    ["logical or", "|", "|"],
-    ["logical and", "&", "&"],
-    ["non-match", "!", "~"],
-    ["less or equal", "<", "="],
-    ["inequality", "!", "="],
-    ["append", ">", ">"],
-  ].map(([name, first, second]) => ({
-    name: `separated ${name} characters cannot form one operator`,
-    source: lines(
-      `{ ${name === "append" ? "print " : ""}x ${first}\\`,
-      `${second} y }`,
-    ),
-  })),
-  {
-    name: "separated equality characters do not form a comparison",
-    source: lines("BEGIN { print (x =\\", "= y) }"),
-  },
-  {
-    name: "separated greater-than and equals do not form a comparison",
-    source: lines("BEGIN { print (x >\\", "= y) }"),
-  },
-  {
-    name: "an empty ERE cannot span a physical newline",
-    source: lines("BEGIN { print /\\", "/ }"),
-  },
-  {
-    name: "an ERE alternation requires a nonempty left branch",
-    source: lines("/|a/"),
-  },
-  {
-    name: "an ERE alternation requires a nonempty right branch",
-    source: lines("/a|/"),
-  },
-  {
-    name: "an empty ERE group cannot span a physical newline",
-    source: lines("BEGIN { print /(\\", ")/ }"),
-  },
-  {
-    name: "an ERE group alternation requires a nonempty left branch",
-    source: lines("/(|a)/"),
-  },
-  {
-    name: "an ERE group alternation requires a nonempty right branch",
-    source: lines("/(a|)/"),
-  },
-  {
-    name: "an ERE group cannot contain only an alternation operator",
-    source: lines("/(|)/"),
-  },
-  {
-    name: "an ERE alternation requires a nonempty middle branch",
-    source: lines("/a||b/"),
-  },
-  {
-    name: "an ERE closing parenthesis cannot supply an empty alternation branch",
-    source: lines("/(a|)b)/"),
-  },
-  {
-    name: "a continued closing parenthesis cannot supply a nested ERE branch",
-    source: lines("/((a|\\", ")b)\\", ")/"),
-  },
-  {
-    name: "division without a final operand is rejected",
-    source: lines("BEGIN { print x /a/ }"),
-  },
-  {
-    name: "two slashes after an operand cannot replace division with an empty ERE",
-    source: lines("BEGIN { print x // }"),
-  },
-  {
-    name: "division assignment to an invalid lvalue is rejected",
-    source: lines("BEGIN { (a) /= b }"),
-  },
-  {
-    name: "a unary operator outside a field cannot form an assignment target",
-    source: lines("BEGIN { +$a = b }"),
-  },
-  {
-    name: "a postfix field update cannot form an assignment target",
-    source: lines("BEGIN { $a++ = b }"),
-  },
-  {
-    name: "exponentiation outside a field cannot form an assignment target",
-    source: lines("BEGIN { $a^b = c }"),
-  },
-  {
-    name: "a second postfix update after a continuation still requires an lvalue",
-    source: lines("BEGIN { print $a++\\", "-- }"),
-  },
-  {
-    name: "a field cannot absorb a postfix update on a unary numeric operand",
-    source: lines("BEGIN { $-1++ }"),
-  },
-  {
-    name: "a field cannot absorb a postfix update on an exponent operand",
-    source: lines("BEGIN { $-x^2++ }"),
-  },
-  {
-    name: "a field cannot absorb a postfix update after a prefix update",
-    source: lines("BEGIN { $++x++ }"),
-  },
-  {
-    name: "a field cannot absorb a second postfix update through unary negation",
-    source: lines("BEGIN { $!x++-- }"),
-  },
-  {
-    name: "nested fields cannot bypass postfix operand precedence",
-    source: lines("BEGIN { $$-x^2++ }"),
-  },
-  {
-    name: "a print field argument preserves postfix operand precedence",
-    source: lines("BEGIN { print $-x^2++ }"),
-  },
-  {
-    name: "a printf field argument preserves postfix operand precedence",
-    source: lines("BEGIN { printf $++x++ }"),
-  },
-  {
-    name: "a continuation before a postfix token cannot bypass field operand precedence",
-    source: lines("BEGIN { $-x^2\\", "++ }"),
-  },
-  {
-    name: "a getline field target cannot bypass postfix operand precedence",
-    source: lines("BEGIN { $getline $-x^2++ }"),
-  },
-  {
-    name: "nested getline field targets cannot bypass postfix operand precedence",
-    source: lines("BEGIN { $getline $getline $++x++ }"),
-  },
-  {
-    name: "greater-than-or-equal without a right operand is rejected",
-    source: lines("BEGIN { print value >= }"),
-  },
-  {
-    name: "END remains reserved in expression context",
-    source: lines("BEGIN { value = (END) }"),
-  },
-  {
-    name: "print remains reserved in expression context",
-    source: lines("BEGIN { value = print }"),
-  },
-  {
-    name: "function remains reserved outside a definition",
-    source: lines("BEGIN { function }"),
-  },
-  {
-    name: "a builtin remains reserved as an assignment target",
-    source: lines("BEGIN { length = 1 }"),
-  },
-  {
-    name: "getline remains reserved as an assignment target",
-    source: "{ getline = 1 }",
-  },
-  {
-    name: "getline cannot become the name operand of a prefix update",
-    source: "{ ++getline }",
-  },
-  {
-    name: "a function name cannot become the name operand of a prefix update",
-    source: "{ ++follow(x) }",
-  },
-  {
-    name: "a keyword prefix cannot split the name in a for header",
-    source: "{ for (k inarray); }",
-  },
-  ...[
-    ["increment before a number", "++1"],
-    ["decrement before a number", "--1"],
-    ["increment before a parenthesized expression", "++(x)"],
-    ["decrement before a parenthesized expression", "--(x)"],
-  ].map(([name, expression]) => ({
-    name: `${name} is not split into unary signs`,
-    source: `{ ${expression} }`,
-  })),
-  {
-    name: "a non-newline backslash before a call opening is rejected",
-    source: lines("BEGIN {", String.raw`  f\(value)`, "  after", "}"),
-  },
-  {
-    name: "a non-newline backslash before a builtin call opening is rejected",
-    source: String.raw`{ length \(value) }`,
-  },
-  {
-    name: "an unparenthesized assignment in a conditional alternative is rejected",
-    source: lines("BEGIN { x = a ? b : c = d }"),
-  },
-  {
-    name: "hashes inside ERE class names and interval counts are rejected",
-    source: lines(
-      "BEGIN {",
-      "  print /[[:alpha#:]]/",
-      "  print /a{2#}/",
-      "  print /[[:#:]]/",
-      "  print /a{#}/",
-      "}",
-    ),
-  },
-  ...[
-    ["an ERE interval opening", String.raw`/a{ \1}/`],
-    ["an ERE interval count", String.raw`/a{1 \}/`],
-    ["an ERE interval separator", String.raw`/a{1, \2}/`],
-    ["an ERE interval maximum", "/a{1,2\t\\}/"],
-    ["an ERE class opening", String.raw`/[[: \alpha:]]/`],
-    ["an ERE class name", String.raw`/[[:alpha \:]]/`],
-  ].map(([name, source]) => ({
-    name: `a blank after ${name} cannot expose a backslash as a continuation`,
-    source: lines(source),
-  })),
-  {
-    name: "a raw hyphen cannot be the sole equivalence class payload",
-    source: lines("/[[=-=]]/"),
-  },
-  {
-    name: "an empty collating symbol cannot consume a later terminator",
-    source: lines("/[[..].]]/"),
-  },
-  {
-    name: "an empty equivalence class cannot consume a later terminator",
-    source: lines("/[[==]=]]/"),
-  },
-  {
-    name: "a continued compound terminator cannot become payload",
-    source: lines("/[[..\\", "].]]/"),
-  },
-  {
-    name: "a raw closing bracket cannot be the sole equivalence class payload",
-    source: lines("/[[=]=]]/"),
-  },
-  {
-    name: "a missing terminator between actions is rejected",
-    source: lines("BEGIN {} END {}"),
-  },
-  {
-    name: "a missing terminator after an actionless pattern is rejected",
-    source: lines("active BEGIN {}"),
-  },
-  {
-    name: "a missing special pattern action is rejected",
-    source: lines("BEGIN", "END {}"),
-  },
-  {
-    name: "a missing function body is rejected",
-    source: lines("function f()", "END {}"),
-  },
-  {
-    name: "a missing function parameter after a comma is rejected",
-    source: lines("function malformed(first,) {}"),
-  },
-  {
-    name: "a missing function parameter after a comma and newline is rejected",
-    source: lines("function malformed(first,", ") {}"),
-  },
-  {
-    name: "a raw newline before a function parameter comma is rejected",
-    source: lines("function malformed(first", ",second) {}"),
-  },
-  {
-    name: "a raw newline before the first function parameter is rejected",
-    source: lines("function malformed(", "first) {}"),
-  },
-  {
-    name: "a raw newline after the last function parameter is rejected",
-    source: lines("function malformed(first", ") {}"),
-  },
-  {
-    name: "a comment cannot replace a function parameter comma",
-    source: lines("function malformed(first # comment \\", "second) {}"),
-  },
-  {
-    name: "a missing parenthesized function header is rejected",
-    source: lines("function malformed {}"),
-  },
-  {
-    name: "a missing left range arm is rejected",
-    source: lines(", right {}"),
-  },
-  {
-    name: "a missing right range arm is rejected",
-    source: lines("left, {}"),
-  },
-  {
-    name: "a missing if body is rejected",
-    source: lines("BEGIN { if (condition) }"),
-  },
-  {
-    name: "a missing while body is rejected",
-    source: lines("BEGIN { while (condition) }"),
-  },
-  {
-    name: "a missing classic for body is rejected",
-    source: lines("BEGIN { for (;;) }"),
-  },
-  {
-    name: "a missing for-in body is rejected",
-    source: lines("BEGIN { for (key in values) }"),
-  },
-  ...[
-    ["a raw newline", lines("{ for (k in \\", "", "array); }")],
-    ["a comment", lines("{ for (k in array \\", "# note", "); }")],
-    ["an incomplete continuation", "{ for (k in array \\); }"],
-    ["a reserved array name", "{ for (k in length); }"],
-  ].map(([boundary, source]) => ({
-    name: `for-in rejects ${boundary}`,
-    source,
-  })),
-  {
-    name: "missing nested control bodies are rejected",
-    source: lines("BEGIN { if (outer) while (inner) }"),
-  },
-  {
-    name: "a missing do tail is rejected",
-    source: lines("BEGIN { do print value; }"),
-  },
-  {
-    name: "a missing ERE closing slash before a raw newline is rejected",
-    source: lines("BEGIN { print /broken", "}"),
-  },
-  {
-    name: "a missing ERE closing slash at EOF is rejected",
-    source: "BEGIN { print /broken",
-  },
-  {
-    name: "an ERE class opener ending at a raw newline is rejected",
-    source: lines("BEGIN { print /[[:", "}"),
-  },
-  {
-    name: "an ERE class name ending at a raw newline is rejected",
-    source: lines("BEGIN { print /[[:alpha", "}"),
-  },
-  {
-    name: "an ERE interval opener ending at a raw newline is rejected",
-    source: lines("BEGIN { print /a{", "}"),
-  },
-  {
-    name: "an ERE interval count ending at a raw newline is rejected",
-    source: lines("BEGIN { print /a{1,", "}"),
-  },
-  {
-    name: "a missing string closing quote before a raw newline is rejected",
-    source: lines('BEGIN { print "broken', "}"),
-  },
-  {
-    name: "a missing string closing quote at EOF is rejected",
-    source: 'BEGIN { print "broken',
-  },
-  {
-    name: "an unterminated action at EOF is rejected",
-    source: "BEGIN { print value",
-  },
-  {
-    name: "an unterminated parenthesized expression at EOF is rejected",
-    source: "BEGIN { print (value",
-  },
-  {
-    name: "an unterminated subscript at EOF is rejected",
-    source: "BEGIN { print array[index",
-  },
-];
-
-for (const { name, source } of invalidSyntaxCases) {
-  test(`posix_awk: ${name}; fresh recovery repeats across processes`, () => {
-    const sourcePath = writeSource("invalid", source);
-    const result = captureParse(sourcePath);
-    assert.ok(
-      result.status === 0 || result.status === 1,
-      parseDescription(`${name} fresh parse`, result),
-    );
-    dirty(result.tree);
-    const repeated = captureParse(sourcePath);
-    assert.equal(repeated.status, result.status, name);
-    assert.equal(repeated.tree, result.tree, name);
-  });
-}
-
-test("posix_awk: Unicode source retains byte ranges without normalization", () => {
-  const result = captureParse(
-    writeSource("source", 'BEGIN { print "é😀" }\n# e\u0301\n'),
-  );
-  assertStatus("Unicode source", result, 0);
-  clean(result.tree);
-  assert.match(result.tree, /^0:15 +- +0:21 +string_content `é😀`$/m);
-  assert.match(result.tree, /^1:0 +- +1:5 +comment `# é`$/m);
-});
-
-test("posix_awk: large tokens, statement lists and nested blocks parse through EOF", () => {
-  for (const [name, source] of [
-    ["long string", `BEGIN { print "${"x".repeat(80_000)}" }\n`],
-    [
-      "many names separated by continuations",
-      `BEGIN { print ${"x\\\n".repeat(16_000)}x }\n`,
-    ],
-    [
-      "many numbers separated by continuations",
-      `BEGIN { print ${"1\\\n".repeat(16_000)}1 }\n`,
-    ],
-    [
-      "many string escapes",
-      `BEGIN { print "${String.raw`\n`.repeat(16_000)}x" }\n`,
-    ],
-    [
-      "a long builtin call continuation gap",
-      `{ length ${"\\\n".repeat(32_768)}(1) }`,
-    ],
-    ["wide statement list", `BEGIN { ${"x++;".repeat(16_000)} }\n`],
-    ["deep blocks", `BEGIN ${"{".repeat(2000)}print 1;${"}".repeat(2000)}\n`],
-    [
-      "getline fields chained by prefix updates",
-      `{ ${"getline x ++ $ ".repeat(2000)}getline y }\n`,
-    ],
-    [
-      "a long concatenated getline source without a pipe",
-      `{ getline $getline < ${"a ".repeat(32_000)}x }\n`,
-    ],
-    [
-      "a long additive getline source with a pipe",
-      `{ getline $getline < ${"a + ".repeat(16_000)}x | getline }\n`,
-    ],
-  ]) {
-    assert.equal(parseSummary(source).successful, true, name);
-  }
-});
-
-test("posix_awk: long unterminated strings parse through EOF with native recovery", () => {
-  const source = `BEGIN { print "${"x".repeat(80_000)}`;
-  assert.equal(parseSummary(source).successful, false);
-});
-
 test("posix_awk: blanks before a raw newline end an unterminated literal", () => {
   for (const literal of [
     '"broken',
@@ -1258,62 +163,2094 @@ test("posix_awk: blanks before a raw newline end an unterminated literal", () =>
   }
 });
 
-test("posix_awk: ordinary nested getline sequences parse within one second", () => {
-  for (const expression of [
-    "$getline $-getline < 1 ++ ",
-    "$getline $-getline < 1 ",
-  ]) {
-    assert.equal(
-      parseSummary(`{ ${expression.repeat(64)}}\n`, 1_000_000).successful,
-      true,
-      expression,
-    );
-  }
-});
-
-test("posix_awk: extreme nested getline sequences finish without truncation", () => {
-  for (const expression of [
-    "$getline $-getline < 1 ++ ",
-    "$getline $-getline < 1 ",
-  ]) {
-    assert.equal(
-      parseSummary(`{ ${expression.repeat(1600)}}\n`, 50_000_000).successful,
-      true,
-      expression,
-    );
-  }
-});
-
-test("posix_awk: repeated incomplete expressions recover through EOF within one second", () => {
-  for (const source of [
-    `${") getline < ".repeat(1200)}\n`,
-    `BEGIN { ${"] ^ getline < , 1 ".repeat(1200)}}\n`,
-    `${"$ , ".repeat(4000)}\n`,
-    `${"$ ) ".repeat(4000)}\n`,
-    `${"! , ".repeat(4000)}\n`,
-    `${"!! , ".repeat(4000)}\n`,
-    `${"x = , ".repeat(4000)}\n`,
-  ]) {
-    assert.equal(parseSummary(source, 1_000_000).successful, false);
-  }
-});
-
-test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
-  assert.throws(() => parseSummary(`BEGIN { ${"x++;".repeat(16_000)} }\n`, 1));
-});
-
-for (const expression of [
-  "print getline x++",
-  "getline x++++",
-  "a + (1,2) in array",
-  "$getline $-x^2++",
-  'getline < "f" ++',
-  '$getline < "f" ++--',
-  "$getline < y++++++",
+for (const count of [
+  getlineSourceFieldCount,
+  getlineSourceFieldCount + getlineSourceGrowthFields,
 ]) {
-  test(`posix_awk: reject ${expression}`, () => {
-    const result = captureParse(writeSource("invalid", `{ ${expression} }\n`));
-    assert.ok(result.status === 0 || result.status === 1);
-    dirty(result.tree);
+  const innerSource = `1${" + $a".repeat(count)} + $y--`;
+  const source = `{ getline $getline < ${innerSource} < 1 < 2 }`;
+  freshTest(
+    `getline source ownership survives ${count} intervening fields`,
+    source,
+    (tree) => {
+      const sources = [
+        ...tree.matchAll(/^0:([0-9]+) +- +0:([0-9]+) +source: expr$/gm),
+      ].map((match) => source.slice(Number(match[1]), Number(match[2])));
+      assert.deepEqual(sources, [innerSource, "1"]);
+    },
+  );
+}
+
+for (const { name, ending, replacement } of [
+  { name: "missing source", ending: "", replacement: "value" },
+  { name: "invalid assignment", ending: "x y = 1", replacement: "x + 1" },
+  { name: "missing array name", ending: "x in", replacement: "x in table" },
+]) {
+  const prefix = `{ ${"getline $getline $getline < ".repeat(nestedGetlineRepairCount)}`;
+  const before = `${prefix}${ending} }`;
+  const after = `${prefix}${replacement} }`;
+  const repair = {
+    byte: prefix.length,
+    deleteBytes: ending.length,
+    insert: replacement,
+  };
+  determinismTest(`repair nested getline ${name}`, before, after, [repair]);
+  determinismTest(`undo and redo nested getline ${name}`, after, after, [
+    {
+      byte: prefix.length,
+      deleteBytes: replacement.length,
+      insert: ending,
+    },
+    repair,
+  ]);
+}
+
+for (const { name, before, after } of [
+  {
+    name: "parent file source survives grouping its nested source",
+    before: "{ getline $getline < z + $y-- < 1 < 2 }",
+    after: "{ getline $getline < (z) + $y-- < 1 < 2 }",
+  },
+  {
+    name: "parent file source survives a nested call becoming a subscript",
+    before: "{ getline $getline < f(z) + $y-- < 1 < 2 }",
+    after: "{ getline $getline < a[z] + $y-- < 1 < 2 }",
+  },
+  {
+    name: "outer field preserves an inner getline target",
+    before: "{ getline < getline x++ }",
+    after: "{ $getline < getline x++ }",
+  },
+  {
+    name: "two enclosing fields accept separate postfix updates",
+    before: "{ $getline < getline x++ }",
+    after: "{ $getline < $getline < getline x++++ }",
+  },
+  {
+    name: "grouped getline owns its decisions independently of outer updates",
+    before: "{ $getline < getline x++ }",
+    after: "{ $getline < (getline x++)++ }",
+  },
+  {
+    name: "call arguments suspend and restore pending field updates",
+    before: "{ $getline < f()++ }",
+    after: "{ $getline < f(getline x++)++ }",
+  },
+  {
+    name: "source moves across multiple nested targets",
+    before: "{ $getline $!getline $!getline < 1 }",
+    after: "{ $getline $!getline $!getline < 1 ++ }",
+  },
+]) {
+  for (const [initial, final] of [
+    [before, after],
+    [after, before],
+  ]) {
+    let start = 0;
+    while (initial[start] === final[start]) start++;
+    let suffix = 0;
+    while (
+      suffix < Math.min(initial.length, final.length) - start &&
+      initial.at(-suffix - 1) === final.at(-suffix - 1)
+    )
+      suffix++;
+    determinismTest(`${name}: ${initial} to ${final}`, initial, final, [
+      {
+        byte: start,
+        deleteBytes: initial.length - start - suffix,
+        insert: final.slice(start, final.length - suffix),
+      },
+    ]);
+  }
+}
+
+{
+  const prefix = `{ ${"$getline < 1 ".repeat(precedingGetlineCount)}`;
+  determinismTest(
+    "editing a late getline invalidates the first lookahead",
+    `${prefix}getline x++ }`,
+    `${prefix}getline x++ y }`,
+    [{ byte: prefix.length + 11, deleteBytes: 0, insert: " y" }],
+  );
+}
+
+determinismTest(
+  "semicolons change for-in to a membership expression in a classic for",
+  "{ for (k in a); }",
+  "{ for (k in a;;); }",
+  [{ byte: 13, deleteBytes: 0, insert: ";;" }],
+  (tree) => {
+    contains(tree, "initializer: simple_statement");
+    excludes(tree, "variable: name");
+  },
+);
+
+determinismTest(
+  "removing semicolons changes a classic for to for-in",
+  "{ for (k in a;;); }",
+  "{ for (k in a); }",
+  [{ byte: 13, deleteBytes: 2, insert: "" }],
+  (tree) => {
+    contains(tree, "variable: name `k`");
+    contains(tree, "array: name `a`");
+    excludes(tree, "initializer: simple_statement");
+  },
+);
+
+determinismTest(
+  "nested input source ownership is restored with a getline keyword",
+  lines("{$getlin y < $getline y < $getline y < $getline y < $getline y < x}"),
+  lines("{$getline y < $getline y < $getline y < $getline y < $getline y < x}"),
+  [{ byte: 8, deleteBytes: 0, insert: "e" }],
+  (tree) => {
+    assert.equal(matchingLineCount(tree, /target: lvalue$/), 5, tree);
+    assert.equal(matchingLineCount(tree, /source: expr$/), 5, tree);
+  },
+);
+
+for (const { label, initial, final, removed, inserted } of [
+  {
+    label: "an else without a consequence",
+    initial: "{ if (a) else }",
+    final: "{ if (a) ; }",
+    removed: "else",
+    inserted: ";",
+  },
+  {
+    label: "an incomplete for header",
+    initial: "{ for (); }",
+    final: "{ for (;;); }",
+    removed: ")",
+    inserted: ";;)",
+  },
+  {
+    label: "a do without a body or tail",
+    initial: "{ do }",
+    final: "{ do ; while (a) }",
+    removed: "do",
+    inserted: "do ; while (a)",
+  },
+  {
+    label: "a delete without an array name",
+    initial: "{ if(a) delete [] }",
+    final: "{ if(a) delete a[0] }",
+    removed: "[]",
+    inserted: "a[0]",
+  },
+  {
+    label: "a call with missing arguments",
+    initial: "{ if(a) f(,) }",
+    final: "{ if(a) f(x) }",
+    removed: ",",
+    inserted: "x",
+  },
+  {
+    label: "a membership operator without operands",
+    initial: "{ if(a) in }",
+    final: "{ if(a) x in a }",
+    removed: "in",
+    inserted: "x in a",
+  },
+]) {
+  const prefix = lines("before {}");
+  const following = "END { print after }";
+  determinismTest(
+    `repairing ${label} matches a fresh parse`,
+    prefix + lines(initial, following),
+    prefix + lines(final, following),
+    [
+      {
+        byte: prefix.length + initial.indexOf(removed),
+        deleteBytes: removed.length,
+        insert: inserted,
+      },
+    ],
+  );
+}
+
+for (const { label, initial, final, before, inserted } of [
+  {
+    label: "function body after a continuation and comment",
+    initial: lines("before {}", "function f() \\", "#", "END {}"),
+    final: lines("before {}", "function f() \\", "#", "{}", "END {}"),
+    before: "END",
+    inserted: "{}\n",
+  },
+  {
+    label: "function body after a continuation and newline",
+    initial: lines("before {}", "function f() \\", "", "END {}"),
+    final: lines("before {}", "function f() \\", "", "{}", "END {}"),
+    before: "END",
+    inserted: "{}\n",
+  },
+  {
+    label: "special pattern action before a comment's newline",
+    initial: lines("before {}", "BEGIN \\", "#", "{}", "END {}"),
+    final: lines("before {}", "BEGIN \\", "{} #", "{}", "END {}"),
+    before: "#",
+    inserted: "{} ",
+  },
+]) {
+  test(`posix_awk: restoring a missing ${label} matches a fresh parse`, () => {
+    const tree = assertDeterministicEdit(label, initial, final, [
+      { byte: initial.indexOf(before), deleteBytes: 0, insert: inserted },
+    ]);
+    contains(tree, continuationMarker);
   });
+}
+
+const division = lines("BEGIN { print x / a }");
+
+const matchEre = lines("BEGIN { print x ~ /a/ }");
+
+const divisionAssignment = lines("BEGIN { x /= 2 }");
+
+const divisionExpression = lines("BEGIN { x / 2 }");
+
+const matchOperand = lines("BEGIN { print x ~ a }");
+
+for (const { name, initial, final, edits, update } of [
+  {
+    name: "a getline target becomes a concatenated postfix increment",
+    initial: "getline x",
+    final: "getline x++",
+    edits: [{ byte: 17, deleteBytes: 0, insert: "++" }],
+    update: "incr",
+  },
+  {
+    name: "a getline array target becomes a concatenated postfix decrement",
+    initial: "getline a[1]",
+    final: "getline a[1]--",
+    edits: [{ byte: 20, deleteBytes: 0, insert: "--" }],
+    update: "decr",
+  },
+  {
+    name: "a getline field target becomes a concatenated postfix increment",
+    initial: "getline $i",
+    final: "getline $i++",
+    edits: [{ byte: 18, deleteBytes: 0, insert: "++" }],
+    update: "incr",
+  },
+  {
+    name: "a piped getline target becomes a concatenated postfix decrement",
+    initial: "command | getline x",
+    final: "command | getline x--",
+    edits: [{ byte: 27, deleteBytes: 0, insert: "--" }],
+    update: "decr",
+  },
+]) {
+  determinismTest(
+    name,
+    lines(`BEGIN { ${initial} }`),
+    lines(`BEGIN { ${final} }`),
+    edits,
+    (tree) => {
+      contains(tree, `operator: ${update}`);
+      excludes(tree, "target:");
+    },
+  );
+}
+
+determinismTest(
+  "removing a postfix update restores the getline target",
+  lines("BEGIN { getline x++ }"),
+  lines("BEGIN { getline x }"),
+  [{ byte: 17, deleteBytes: 2, insert: "" }],
+  (tree) => contains(tree, "target: lvalue"),
+);
+
+for (const { name, initial, final, edits, number } of [
+  {
+    name: "joining a floating suffix replaces concatenation with one number",
+    initial: "1.0 f",
+    final: "1.0f",
+    edits: [{ byte: 17, deleteBytes: 1, insert: "" }],
+    number: "1.0f",
+  },
+  {
+    name: "completing an exponent includes its floating suffix",
+    initial: "1.0eF",
+    final: "1.0e2F",
+    edits: [{ byte: 18, deleteBytes: 0, insert: "2" }],
+    number: "1.0e2F",
+  },
+  {
+    name: "adding a decimal point makes the following letter a floating suffix",
+    initial: "1l",
+    final: "1.l",
+    edits: [{ byte: 15, deleteBytes: 0, insert: "." }],
+    number: "1.l",
+  },
+  {
+    name: "separating a floating suffix restores concatenation",
+    initial: "1.L",
+    final: "1. L",
+    edits: [{ byte: 16, deleteBytes: 0, insert: " " }],
+    number: "1.",
+  },
+]) {
+  determinismTest(
+    name,
+    lines(`BEGIN { print ${initial} }`),
+    lines(`BEGIN { print ${final} }`),
+    edits,
+    (tree) => contains(tree, `number \`${number}\``),
+  );
+}
+
+determinismTest("division to match ERE", division, matchEre, [
+  { byte: 16, deleteBytes: 3, insert: "~ /a/" },
+]);
+
+determinismTest(
+  "insert div assign equals",
+  divisionExpression,
+  divisionAssignment,
+  [{ byte: 11, deleteBytes: 0, insert: "=" }],
+);
+
+determinismTest(
+  "delete div assign equals",
+  divisionAssignment,
+  divisionExpression,
+  [{ byte: 11, deleteBytes: 1, insert: "" }],
+);
+
+determinismTest("operand to ERE", matchOperand, matchEre, [
+  { byte: 18, deleteBytes: 1, insert: "/a/" },
+]);
+
+determinismTest("ERE to operand", matchEre, matchOperand, [
+  { byte: 18, deleteBytes: 3, insert: "a" },
+]);
+
+for (const [label, initial, final] of [
+  [
+    "expression",
+    lines("BEGIN { value = a + /b/ + c }"),
+    lines("BEGIN { value = a   /b/ + c }"),
+  ],
+  [
+    "print expression with a continuation",
+    lines("BEGIN { print a + \\", "/b/ + c }"),
+    lines("BEGIN { print a   \\", "/b/ + c }"),
+  ],
+  [
+    "top-level pattern",
+    lines("a + /b/ + c { print }"),
+    lines("a   /b/ + c { print }"),
+  ],
+]) {
+  determinismTest(
+    `removing an operator reclassifies ERE slashes as division in the ${label}`,
+    initial,
+    final,
+    [{ byte: initial.indexOf("+"), deleteBytes: 1, insert: " " }],
+    (tree) => {
+      excludes(tree, "extended_reg_exp");
+      assert.equal(
+        matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
+        2,
+        "Expected both slashes to be division tokens in the valid expression",
+      );
+    },
+  );
+}
+
+const membershipBeforeLogicalAnd = lines("BEGIN { x = (a in b) && c }");
+
+const membershipBeforeMatch = lines("BEGIN { x = (a in b) ~ c }");
+
+determinismTest(
+  "membership logical and to match",
+  membershipBeforeLogicalAnd,
+  membershipBeforeMatch,
+  [{ byte: 21, deleteBytes: 2, insert: "~" }],
+  (tree) => {
+    contains(tree, '"~"');
+    excludes(tree, "operator: and");
+  },
+);
+
+determinismTest(
+  "membership match to logical and",
+  membershipBeforeMatch,
+  membershipBeforeLogicalAnd,
+  [{ byte: 21, deleteBytes: 1, insert: "&&" }],
+  (tree) => {
+    contains(tree, "operator: and");
+    excludes(tree, '"~"');
+  },
+);
+
+const plainMembership = lines("BEGIN { x = (a in b) }");
+
+const concatenatedMembership = lines("BEGIN { x = (a in b) c }");
+
+determinismTest(
+  "insert membership concatenation operand",
+  plainMembership,
+  concatenatedMembership,
+  [{ byte: 20, deleteBytes: 0, insert: " c" }],
+  (tree) => {
+    assert.match(tree, /^[ \t0-9:-]+right: name `b`$/m);
+    assert.match(tree, /^[ \t0-9:-]+right: non_unary_expr$/m);
+  },
+);
+
+determinismTest(
+  "delete membership concatenation operand",
+  concatenatedMembership,
+  plainMembership,
+  [{ byte: 20, deleteBytes: 2, insert: "" }],
+);
+
+const plainBracketList = lines("BEGIN { print /[+]?[a]/ }");
+
+const trailingHyphenBracketList = lines("BEGIN { print /[+-]?[a]/ }");
+
+determinismTest(
+  "insert trailing bracket hyphen",
+  plainBracketList,
+  trailingHyphenBracketList,
+  [{ byte: 17, deleteBytes: 0, insert: "-" }],
+  (tree) => {
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+bracket_expression$/),
+      2,
+      "Expected trailing bracket hyphen source to contain two bracket expressions",
+    );
+    contains(tree, "ere_dupl_symbol");
+    excludes(tree, "range_expression");
+  },
+);
+
+const shortRangeEre = lines("BEGIN { print /[%-@]/ }");
+
+const hyphenEndedRangeEre = lines("BEGIN { print /[%--@]/ }");
+
+determinismTest(
+  "insert range ending hyphen",
+  shortRangeEre,
+  hyphenEndedRangeEre,
+  [{ byte: 18, deleteBytes: 0, insert: "-" }],
+  (tree) => {
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+range_expression$/),
+      1,
+      "Expected one range expression ending at the inserted hyphen",
+    );
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element_single `/),
+      2,
+      "Expected the range start and the following element only",
+    );
+  },
+);
+
+determinismTest(
+  "delete range ending hyphen",
+  hyphenEndedRangeEre,
+  shortRangeEre,
+  [{ byte: 18, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+collating_element_single `/),
+      2,
+      "Expected a plain range between two collating elements",
+    );
+  },
+);
+
+determinismTest(
+  "deleting the ERE body removes its expression node",
+  "/a/",
+  "//",
+  [{ byte: 1, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    contains(tree, "ere");
+    excludes(tree, "extended_reg_exp");
+  },
+);
+
+determinismTest(
+  "inserting an ERE body creates its expression node",
+  "//",
+  "/a/",
+  [{ byte: 1, deleteBytes: 0, insert: "a" }],
+  (tree) => contains(tree, "expression: extended_reg_exp"),
+);
+
+determinismTest(
+  "a closing slash completes an empty ERE at EOF",
+  "/",
+  "//",
+  [{ byte: 1, deleteBytes: 0, insert: "/" }],
+  (tree) => {
+    contains(tree, "ere");
+    excludes(tree, "extended_reg_exp");
+  },
+);
+
+determinismTest(
+  "deleting an ERE group body leaves only its delimiters",
+  "/(a)/",
+  "/()/",
+  [{ byte: 2, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    assert.equal(matchingLineCount(tree, /expression: extended_reg_exp$/), 1);
+    excludes(tree, "ordinary_character");
+  },
+);
+
+determinismTest(
+  "inserting an ERE group body restores its expression field",
+  "/()/",
+  "/(a)/",
+  [{ byte: 2, deleteBytes: 0, insert: "a" }],
+  (tree) => {
+    assert.equal(matchingLineCount(tree, /expression: extended_reg_exp$/), 2);
+    contains(tree, "ordinary_character");
+  },
+);
+
+determinismTest(
+  "a closing parenthesis completes an empty ERE group",
+  "/(/",
+  "/()/",
+  [{ byte: 2, deleteBytes: 0, insert: ")" }],
+);
+
+determinismTest(
+  "inserting an empty group supplies a missing alternation branch",
+  "/(a|)/",
+  "/(a|())/",
+  [{ byte: 4, deleteBytes: 0, insert: "()" }],
+);
+
+const closedEre = lines("BEGIN { print /abc/", "print /ok/ }");
+
+const unclosedEre = lines("BEGIN { print /abc", "print /ok/ }");
+
+determinismTest(
+  "escaping an empty ERE group's closer moves it into the group body",
+  lines("/())/"),
+  lines(String.raw`/(\))/`),
+  [{ byte: 2, deleteBytes: 0, insert: "\\" }],
+  (tree) => contains(tree, "quoted_character"),
+);
+
+determinismTest(
+  "unescaping an ERE group's closer leaves the unmatched parenthesis outside",
+  lines(String.raw`/(\))/`),
+  lines("/())/"),
+  [{ byte: 2, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    excludes(tree, "quoted_character");
+    contains(tree, "ordinary_character");
+  },
+);
+
+editHistoryTest(
+  "an ERE group opening reclassifies its closing parenthesis and back",
+  lines("/a))/"),
+  [{ byte: 1, deleteBytes: 0, insert: "(" }],
+);
+
+determinismTest("insert ERE closing slash", unclosedEre, closedEre, [
+  { byte: 18, deleteBytes: 0, insert: "/" },
+]);
+
+const plainEreDelimiter = lines("BEGIN { print /ab/ }");
+
+const escapedEreDelimiter = lines(String.raw`BEGIN { print /ab\/c/ }`);
+
+determinismTest(
+  "escape ERE closing slash",
+  plainEreDelimiter,
+  escapedEreDelimiter,
+  [{ byte: 17, deleteBytes: 1, insert: String.raw`\/c/` }],
+  (tree) => {
+    contains(tree, "escaped_delimiter");
+  },
+);
+
+determinismTest(
+  "division through broken to escaped ERE",
+  division,
+  escapedEreDelimiter,
+  [
+    { byte: 14, deleteBytes: 5, insert: String.raw`/ab\/c/` },
+    { byte: 20, deleteBytes: 1, insert: "" },
+    { byte: 20, deleteBytes: 0, insert: "/" },
+  ],
+);
+
+determinismTest(
+  "restore ERE closing slash",
+  escapedEreDelimiter,
+  plainEreDelimiter,
+  [{ byte: 17, deleteBytes: 4, insert: "/" }],
+  (tree) => excludes(tree, "escaped_delimiter"),
+);
+
+const threeDigitOctalEre = lines(String.raw`BEGIN { print /\124/ }`);
+
+const octalFollowedByCharacterEre = lines(String.raw`BEGIN { print /\1234/ }`);
+
+determinismTest(
+  "split ERE octal at three digits",
+  threeDigitOctalEre,
+  octalFollowedByCharacterEre,
+  [{ byte: 18, deleteBytes: 0, insert: "3" }],
+  (tree) => {
+    contains(tree, "escape_sequence");
+    assert.match(tree, /^[ \t0-9:-]+ordinary_character `/m);
+  },
+);
+
+determinismTest(
+  "join ERE octal at three digits",
+  octalFollowedByCharacterEre,
+  threeDigitOctalEre,
+  [{ byte: 18, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    contains(tree, "escape_sequence");
+    excludes(tree, "ordinary_character");
+  },
+);
+
+const greedyEre = lines("BEGIN { print /a*/ }");
+
+const shortestEre = lines("BEGIN { print /a*?/ }");
+
+determinismTest(
+  "insert ERE repetition modifier",
+  greedyEre,
+  shortestEre,
+  [{ byte: 17, deleteBytes: 0, insert: "?" }],
+  (tree) => contains(tree, "repetition_modifier"),
+);
+
+determinismTest(
+  "delete ERE repetition modifier",
+  shortestEre,
+  greedyEre,
+  [{ byte: 17, deleteBytes: 1, insert: "" }],
+  (tree) => excludes(tree, "repetition_modifier"),
+);
+
+const equivalenceEre = lines("BEGIN { print /[[=a=]]/ }");
+
+determinismTest(
+  "a collating caret becomes a meta character when replaced by a hyphen",
+  lines("/[[.^.]]/"),
+  lines("/[[.-.]]/"),
+  [{ byte: 4, deleteBytes: 1, insert: "-" }],
+  (tree) => contains(tree, "meta_character `-`"),
+);
+
+determinismTest(
+  "an equivalence class accepts a caret in place of a raw hyphen",
+  lines("/[[=-=]]/"),
+  lines("/[[=^=]]/"),
+  [{ byte: 4, deleteBytes: 1, insert: "^" }],
+  (tree) => {
+    contains(tree, "equivalence_class");
+    contains(tree, "collating_element_single `^`");
+    excludes(tree, "meta_character");
+  },
+);
+
+determinismTest(
+  "a multi-character equivalence payload can begin with a closing bracket",
+  lines("/[[=]=]]/"),
+  lines("/[[=]a=]]/"),
+  [{ byte: 5, deleteBytes: 0, insert: "a" }],
+  (tree) => {
+    contains(tree, "equivalence_class");
+    contains(tree, "collating_element_multi");
+    excludes(tree, "meta_character");
+  },
+);
+
+for (const marker of [".", "="]) {
+  const plain = lines(`/[[${marker}aé日${marker}]]/`);
+  const escaped = lines(`/[[${marker}a\\né日${marker}]]/`);
+  determinismTest(
+    `inserting the first ${marker} compound escape splits the raw payload`,
+    plain,
+    escaped,
+    [{ byte: 5, deleteBytes: 0, insert: String.raw`\n` }],
+    (tree) => {
+      contains(tree, "element: collating_element\n");
+      contains(tree, "collating_element_content `a`");
+      contains(tree, "collating_element_content `é`");
+      contains(tree, "collating_element_content `日`");
+      excludes(tree, "collating_element_multi");
+    },
+  );
+  determinismTest(
+    `deleting the last ${marker} compound escape restores one raw payload leaf`,
+    escaped,
+    plain,
+    [{ byte: 5, deleteBytes: 2, insert: "" }],
+    (tree) => {
+      contains(tree, "element: collating_element_multi `aé日`");
+      excludes(tree, "collating_element_content");
+    },
+  );
+  determinismTest(
+    `extending a single Unicode ${marker} compound payload changes its lexical class`,
+    lines(`/[[${marker}é${marker}]]/`),
+    lines(`/[[${marker}é日${marker}]]/`),
+    [{ byte: 6, deleteBytes: 0, insert: "日" }],
+    (tree) => contains(tree, "element: collating_element_multi `é日`"),
+  );
+}
+
+for (const { name, escaped, plain } of [
+  {
+    name: "collating symbol",
+    escaped: lines(String.raw`/[[.a\né\141 \e\/日.]]/`),
+    plain: lines(String.raw`/[[.aé\141 \e\/日.]]/`),
+  },
+  {
+    name: "equivalence class",
+    escaped: lines(String.raw`/[[=a\né\141 \e\/日=]]/`),
+    plain: lines(String.raw`/[[=aé\141 \e\/日=]]/`),
+  },
+]) {
+  determinismTest(
+    `inserting a ${name} escape preserves neighboring Unicode content leaves`,
+    plain,
+    escaped,
+    [{ byte: 5, deleteBytes: 0, insert: String.raw`\n` }],
+    (tree) => {
+      contains(tree, "collating_element_content `a`");
+      contains(tree, "collating_element_content `é`");
+      contains(tree, "collating_element_content `日`");
+    },
+  );
+  determinismTest(
+    `deleting a ${name} escape preserves neighboring Unicode content leaves`,
+    escaped,
+    plain,
+    [{ byte: 5, deleteBytes: 2, insert: "" }],
+  );
+  editHistoryTest(
+    `a ${name} regains its content leaves after delimiter and Unicode repairs`,
+    escaped,
+    [
+      { byte: 21, deleteBytes: 1, insert: "" },
+      { byte: 16, deleteBytes: 1, insert: "" },
+      { byte: 7, deleteBytes: 2, insert: "🙂" },
+    ],
+  );
+}
+
+const classEre = lines("BEGIN { print /[[:alpha:]]/ }");
+
+for (const [kind, marker] of [
+  ["collating symbol", "."],
+  ["equivalence class", "="],
+]) {
+  determinismTest(
+    `inserting an escape repairs an empty ${kind}`,
+    `/[[${marker}${marker}]]/`,
+    `/[[${marker}\\n${marker}]]/`,
+    [{ byte: 4, deleteBytes: 0, insert: String.raw`\n` }],
+    (tree) => contains(tree, "escape_sequence"),
+  );
+}
+
+determinismTest(
+  "changing compound markers restores the correct lexical mode",
+  "/[[.alpha.]]/",
+  "/[[:alpha:]]/",
+  [
+    { byte: 3, deleteBytes: 1, insert: ":" },
+    { byte: 9, deleteBytes: 1, insert: ":" },
+  ],
+  (tree) => contains(tree, "class_name `alpha`"),
+);
+
+for (const [first, second, operand, kind] of [
+  ["/", "=", "5", "div_assign"],
+  ["+", "=", "5", "add_assign"],
+  ["-", "=", "5", "sub_assign"],
+  ["*", "=", "5", "mul_assign"],
+  ["%", "=", "5", "mod_assign"],
+  ["^", "=", "5", "pow_assign"],
+  ["|", "|", "5", "or"],
+  ["&", "&", "5", "and"],
+  ["+", "+", "", "incr"],
+  ["-", "-", "", "decr"],
+]) {
+  determinismTest(
+    `removing a continuation joins ${kind} characters into one token`,
+    `{x${first}\\\n${second}${operand}}`,
+    `{x${first}${second}${operand}}`,
+    [{ byte: 3, deleteBytes: 2, insert: "" }],
+    (tree) => {
+      contains(tree, `operator: ${kind}`);
+      excludes(tree, continuationMarker);
+    },
+  );
+}
+
+for (const [marker, kind] of [
+  ["=", "equivalence_class"],
+  [".", "collating_symbol"],
+]) {
+  determinismTest(
+    `removing an internal continuation repairs a ${kind} closer`,
+    `/[[${marker}a${marker}\\\n]]/`,
+    `/[[${marker}a${marker}]]/`,
+    [{ byte: 6, deleteBytes: 2, insert: "" }],
+    (tree) => {
+      contains(tree, kind);
+      excludes(tree, continuationMarker);
+    },
+  );
+}
+
+determinismTest(
+  "equivalence to character class",
+  equivalenceEre,
+  classEre,
+  [{ byte: 16, deleteBytes: 5, insert: "[:alpha:]" }],
+  (tree) => {
+    contains(tree, "character_class");
+    contains(tree, "class_name");
+    excludes(tree, "equivalence_class");
+  },
+);
+
+determinismTest(
+  "character class to equivalence",
+  classEre,
+  equivalenceEre,
+  [{ byte: 16, deleteBytes: 9, insert: "[=a=]" }],
+  (tree) => {
+    contains(tree, "equivalence_class");
+    excludes(tree, "character_class");
+  },
+);
+
+const literalOpenBracketEre = lines("BEGIN { print /[[]/ }");
+
+const collatingSymbolEre = lines("BEGIN { print /[[.x.]]/ }");
+
+determinismTest(
+  "literal bracket to collating symbol",
+  literalOpenBracketEre,
+  collatingSymbolEre,
+  [{ byte: 17, deleteBytes: 0, insert: ".x.]" }],
+  (tree) => {
+    contains(tree, "collating_symbol");
+  },
+);
+
+determinismTest(
+  "collating symbol to literal bracket",
+  collatingSymbolEre,
+  literalOpenBracketEre,
+  [{ byte: 17, deleteBytes: 4, insert: "" }],
+  (tree) => {
+    contains(tree, "collating_element_single");
+    excludes(tree, "collating_symbol");
+  },
+);
+
+const rawStatementNewline = lines("BEGIN {", "  print 1", "}");
+
+const continuedStatementBoundary = lines("BEGIN {", "  print 1\\", "}");
+
+determinismTest(
+  "raw newline to line continuation",
+  rawStatementNewline,
+  continuedStatementBoundary,
+  [{ byte: 17, deleteBytes: 0, insert: "\\" }],
+);
+
+determinismTest(
+  "line continuation to raw newline",
+  continuedStatementBoundary,
+  rawStatementNewline,
+  [{ byte: 17, deleteBytes: 1, insert: "" }],
+);
+
+const outputPipe = lines("BEGIN { print value | command }");
+
+const logicalOrPrint = lines("BEGIN { print value || command }");
+
+determinismTest(
+  "output pipe to logical or",
+  outputPipe,
+  logicalOrPrint,
+  [{ byte: 21, deleteBytes: 0, insert: "|" }],
+  (tree) => {
+    contains(tree, "operator: or");
+    excludes(tree, "output_redirection");
+  },
+);
+
+const printArguments = lines("BEGIN { print (key, index) }");
+
+const printMembership = lines("BEGIN { print (key, index) in table }");
+
+determinismTest(
+  "print arguments to tuple membership",
+  printArguments,
+  printMembership,
+  [{ byte: 26, deleteBytes: 0, insert: " in table" }],
+  (tree) => {
+    contains(tree, "arguments: print_expr_list");
+    contains(tree, "left: multiple_expr_list");
+  },
+);
+
+determinismTest(
+  "tuple membership to print arguments",
+  printMembership,
+  printArguments,
+  [{ byte: 26, deleteBytes: 9, insert: "" }],
+  (tree) => {
+    contains(tree, "arguments: multiple_expr_list");
+    excludes(tree, "print_expr_list");
+  },
+);
+
+const plainAppend = lines("BEGIN { print value >> archive }");
+
+const continuedAppend = lines("BEGIN { print value \\", ">> archive }");
+
+determinismTest(
+  "insert append line continuation",
+  plainAppend,
+  continuedAppend,
+  [{ byte: 20, deleteBytes: 0, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "redirection: output_redirection");
+    contains(tree, "append");
+    contains(tree, continuationMarker);
+  },
+);
+
+const bodylessIf = lines("BEGIN { if (condition) }");
+
+const bodiedIf = lines("BEGIN { if (condition) body }");
+
+determinismTest("insert if body before close brace", bodylessIf, bodiedIf, [
+  { byte: 23, deleteBytes: 0, insert: "body " },
+]);
+
+const sameLineItems = lines("BEGIN {} END {}");
+
+const separatedItems = lines("BEGIN {}", "END {}");
+
+determinismTest(
+  "insert item terminator between items",
+  sameLineItems,
+  separatedItems,
+  [{ byte: 8, deleteBytes: 1, insert: "\n" }],
+  (tree) => contains(tree, "terminator: terminator"),
+);
+
+const completeReservedIf = lines(
+  "BEGIN { if (condition) print body }",
+  "END { print target }",
+);
+
+const missingReservedIf = lines(
+  "BEGIN { if (condition)",
+  "END { print target }",
+);
+
+determinismTest(
+  "restore if body before end item",
+  missingReservedIf,
+  completeReservedIf,
+  [{ byte: 22, deleteBytes: 1, insert: " print body }\n" }],
+);
+
+const completeDoTail = lines(
+  "BEGIN { do print body; while (condition) }",
+  "END { print target }",
+);
+
+const missingDoTail = lines("BEGIN { do print body;", "END { print target }");
+
+determinismTest(
+  "restore do tail before end item",
+  missingDoTail,
+  completeDoTail,
+  [{ byte: 22, deleteBytes: 1, insert: " while (condition) }\n" }],
+);
+
+const closedDoTail = lines("BEGIN { do print body", "while (condition) }");
+
+const openDoTail = lines("BEGIN { do print body", "}");
+
+determinismTest("insert do tail before close brace", openDoTail, closedDoTail, [
+  { byte: 22, deleteBytes: 0, insert: "while (condition) " },
+]);
+
+const specialPatternItems = lines("BEGIN {}", "END {}");
+
+const actionlessSpecialPattern = lines("BEGIN", "END {}");
+
+determinismTest(
+  "restore special pattern action",
+  actionlessSpecialPattern,
+  specialPatternItems,
+  [{ byte: 5, deleteBytes: 0, insert: " {}" }],
+);
+
+const functionItems = lines("function f() {}", "END {}");
+
+const bodylessFunction = lines("function f()", "END {}");
+
+determinismTest("restore function body", bodylessFunction, functionItems, [
+  { byte: 12, deleteBytes: 0, insert: " {}" },
+]);
+
+const closedSubscriptEof = "BEGIN { delete array[offset] }";
+
+const openSubscriptEof = "BEGIN { delete array[offset";
+
+determinismTest(
+  "insert subscript and action closers at EOF",
+  openSubscriptEof,
+  closedSubscriptEof,
+  [{ byte: 27, deleteBytes: 0, insert: "] }" }],
+);
+
+const commentBackslash = lines("#\\", "BEGIN {}");
+
+const leadingContinuation = lines("\\", "BEGIN {}");
+
+determinismTest(
+  "comment backslash to line continuation",
+  commentBackslash,
+  leadingContinuation,
+  [{ byte: 0, deleteBytes: 1, insert: "" }],
+);
+
+const blankCall = lines("BEGIN { f (value) }");
+
+const continuedCall = lines("BEGIN { f\\", "(value) }");
+
+determinismTest(
+  "blank to line continuation preserves concatenation",
+  blankCall,
+  continuedCall,
+  [{ byte: 9, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "name `f`");
+    excludes(tree, "func_name");
+    contains(tree, continuationMarker);
+  },
+);
+
+const plainAddAssign = lines("BEGIN { value += other }");
+
+const continuedAddAssign = lines("BEGIN { value \\", "+= other }");
+
+determinismTest(
+  "insert add assign line continuation",
+  plainAddAssign,
+  continuedAddAssign,
+  [{ byte: 14, deleteBytes: 0, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "add_assign");
+    contains(tree, continuationMarker);
+  },
+);
+
+const plainAdditive = lines("BEGIN { left + right }");
+
+const continuedAdditive = lines("BEGIN { left\\", "+ right }");
+
+determinismTest(
+  "insert additive operator line continuation",
+  plainAdditive,
+  continuedAdditive,
+  [{ byte: 12, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, '"+"');
+    contains(tree, continuationMarker);
+  },
+);
+
+const plainComparison = lines("BEGIN { left < right }");
+
+const continuedComparison = lines("BEGIN { left\\", "< right }");
+
+determinismTest(
+  "insert comparison operator line continuation",
+  plainComparison,
+  continuedComparison,
+  [{ byte: 12, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, '"<"');
+    contains(tree, continuationMarker);
+  },
+);
+
+const continuedGetlineRedirect = lines(
+  "BEGIN { getline target\\",
+  "< source }",
+);
+
+const continuedGetlineComparison = lines(
+  "BEGIN { getline target\\",
+  "<= source }",
+);
+
+determinismTest(
+  "continued getline redirect to comparison",
+  continuedGetlineRedirect,
+  continuedGetlineComparison,
+  [{ byte: 25, deleteBytes: 0, insert: "=" }],
+  (tree) => {
+    contains(tree, "operator: le");
+    excludes(tree, "source: expr");
+    contains(tree, continuationMarker);
+  },
+);
+
+const plainConditional = lines("BEGIN { condition ? yes : no }");
+
+const continuedConditional = lines("BEGIN { condition ? yes\\", ": no }");
+
+determinismTest(
+  "insert conditional colon line continuation",
+  plainConditional,
+  continuedConditional,
+  [{ byte: 23, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "alternative: expr");
+    contains(tree, continuationMarker);
+  },
+);
+
+const plainLogical = lines("BEGIN { left && right }");
+
+const continuedLogical = lines("BEGIN { left\\", "&& right }");
+
+determinismTest(
+  "insert logical operator line continuation",
+  plainLogical,
+  continuedLogical,
+  [{ byte: 12, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "and");
+    contains(tree, continuationMarker);
+  },
+);
+
+const plainPipeGetline = lines("BEGIN { source | getline target }");
+
+const continuedPipeGetline = lines("BEGIN { source\\", "| getline target }");
+
+determinismTest(
+  "insert input pipe line continuation",
+  plainPipeGetline,
+  continuedPipeGetline,
+  [{ byte: 14, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "non_unary_input_function");
+    contains(tree, continuationMarker);
+  },
+);
+
+const unaryPipeGetline = lines("BEGIN { -source | getline target }");
+
+const fieldPipeGetline = lines("BEGIN { $source | getline target }");
+
+determinismTest(
+  "unary to field pipe getline",
+  unaryPipeGetline,
+  fieldPipeGetline,
+  [{ byte: 8, deleteBytes: 1, insert: "$" }],
+  (tree) => {
+    assert.match(tree, /^[ \t0-9:-]*non_unary_input_function$/m);
+  },
+);
+
+const closedString = lines('BEGIN { print "abc"', "}");
+
+const unclosedString = lines('BEGIN { print "abc', "}");
+
+determinismTest("insert string closing quote", unclosedString, closedString, [
+  { byte: 18, deleteBytes: 0, insert: '"' },
+]);
+
+const hashString = lines('BEGIN { print "#"', "}");
+
+const hashComment = lines('BEGIN { print #"', "}");
+
+determinismTest(
+  "string to comment",
+  hashString,
+  hashComment,
+  [{ byte: 14, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    contains(tree, "comment");
+    excludes(tree, "string");
+  },
+);
+
+determinismTest(
+  "comment to string",
+  hashComment,
+  hashString,
+  [{ byte: 14, deleteBytes: 0, insert: '"' }],
+  (tree) => {
+    contains(tree, "string_content");
+    excludes(tree, "comment");
+  },
+);
+
+const hashEre = lines("BEGIN { print /#/", "}");
+
+const hashEreComment = lines("BEGIN { print #/", "}");
+
+determinismTest(
+  "ERE to comment",
+  hashEre,
+  hashEreComment,
+  [{ byte: 14, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    contains(tree, "comment");
+    excludes(tree, "ere");
+  },
+);
+
+determinismTest(
+  "comment to ERE",
+  hashEreComment,
+  hashEre,
+  [{ byte: 14, deleteBytes: 0, insert: "/" }],
+  (tree) => {
+    assert.match(tree, /^[ \t0-9:-]+ordinary_character `/m);
+    excludes(tree, "comment");
+  },
+);
+
+const plainEscape = lines('BEGIN { print "an" }');
+
+const backslashEscape = lines(String.raw`BEGIN { print "a\n" }`);
+
+determinismTest(
+  "insert string escape backslash",
+  plainEscape,
+  backslashEscape,
+  [{ byte: 16, deleteBytes: 0, insert: "\\" }],
+  (tree) => contains(tree, "escape_sequence"),
+);
+
+determinismTest(
+  "delete string escape backslash",
+  backslashEscape,
+  plainEscape,
+  [{ byte: 16, deleteBytes: 1, insert: "" }],
+  (tree) => excludes(tree, "escape_sequence"),
+);
+
+const topLevelErePattern = lines("/ready/ { print }");
+
+const topLevelDivisionPattern = lines("total / count { print }");
+
+determinismTest(
+  "top level ERE to division pattern",
+  topLevelErePattern,
+  topLevelDivisionPattern,
+  [{ byte: 0, deleteBytes: 7, insert: "total / count" }],
+  (tree) => {
+    contains(tree, "normal_pattern");
+    excludes(tree, "extended_reg_exp");
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
+      1,
+      "Expected one division slash in the top-level normal pattern",
+    );
+  },
+);
+
+determinismTest(
+  "top level division to ERE pattern",
+  topLevelDivisionPattern,
+  topLevelErePattern,
+  [{ byte: 0, deleteBytes: 13, insert: "/ready/" }],
+  (tree) => {
+    contains(tree, "normal_pattern");
+    contains(tree, "extended_reg_exp");
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]*"\/"$/),
+      2,
+      "Expected opening and closing slashes in the top-level ERE pattern",
+    );
+  },
+);
+
+const adjacentFunctionName = lines("function compute(value) {}");
+
+const continuedSpacedFunctionName = lines("function compute \\", "(value) {}");
+
+determinismTest(
+  "adjacent to continued spaced function name",
+  adjacentFunctionName,
+  continuedSpacedFunctionName,
+  [{ byte: 16, deleteBytes: 0, insert: " \\\n" }],
+  (tree) => {
+    assert.match(tree, /^[ \t0-9:-]*name:[ \t]+name[ \t]+`compute`$/m);
+    excludes(tree, "func_name");
+    contains(tree, continuationMarker);
+  },
+);
+
+determinismTest(
+  "continued spaced to adjacent function name",
+  continuedSpacedFunctionName,
+  adjacentFunctionName,
+  [{ byte: 16, deleteBytes: 3, insert: "" }],
+  (tree) => {
+    assert.match(tree, /^[ \t0-9:-]*name:[ \t]+func_name[ \t]+`compute`$/m);
+    excludes(tree, continuationMarker);
+  },
+);
+
+const compactRangePattern = lines("start,stop {}");
+
+const multilineRangePattern = lines("start,", "stop {}");
+
+determinismTest(
+  "insert range pattern newline",
+  compactRangePattern,
+  multilineRangePattern,
+  [{ byte: 6, deleteBytes: 0, insert: "\n" }],
+  (tree) => {
+    contains(tree, "normal_pattern");
+    contains(tree, "left: expr");
+    contains(tree, "right: expr");
+    contains(tree, "newline_opt");
+    assert.equal(
+      matchingLineCount(tree, /^[ \t0-9:-]+newline_opt$/),
+      1,
+      "Expected one range-pattern newline_opt owner",
+    );
+  },
+);
+
+determinismTest(
+  "delete range pattern newline",
+  multilineRangePattern,
+  compactRangePattern,
+  [{ byte: 6, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    excludes(tree, "newline_opt");
+  },
+);
+
+const separatedClosedItems = "BEGIN {}\nEND {}";
+
+const directOpenActionItem = "BEGIN {END {}";
+
+determinismTest(
+  "restore action close and item terminator",
+  directOpenActionItem,
+  separatedClosedItems,
+  [{ byte: 7, deleteBytes: 0, insert: "}\n" }],
+  (tree) => {
+    contains(tree, "terminator: terminator");
+  },
+);
+
+const bareBuiltinConcat = lines('BEGIN { x = length "" }');
+
+const continuedBuiltinConcat = lines("BEGIN { x = length\\", '"" }');
+
+determinismTest(
+  "insert builtin concat line continuation",
+  bareBuiltinConcat,
+  continuedBuiltinConcat,
+  [{ byte: 18, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, "builtin_func_name");
+    contains(tree, continuationMarker);
+  },
+);
+
+determinismTest(
+  "delete builtin concat line continuation",
+  continuedBuiltinConcat,
+  bareBuiltinConcat,
+  [{ byte: 18, deleteBytes: 2, insert: " " }],
+);
+
+const separatedEmptyStatement = lines("BEGIN {", "; x", "}");
+
+const continuedEmptyStatement = lines("BEGIN {", ";\\", "x", "}");
+
+determinismTest(
+  "insert statement gap line continuation",
+  separatedEmptyStatement,
+  continuedEmptyStatement,
+  [{ byte: 9, deleteBytes: 1, insert: "\\\n" }],
+  (tree) => {
+    contains(tree, continuationMarker);
+  },
+);
+
+determinismTest(
+  "delete statement gap line continuation",
+  continuedEmptyStatement,
+  separatedEmptyStatement,
+  [{ byte: 9, deleteBytes: 2, insert: " " }],
+);
+
+determinismTest(
+  "a parameter newline becomes a line continuation",
+  lines("function f(first,", "second) {}"),
+  lines("function f(first,\\", "second) {}"),
+  [{ byte: 17, deleteBytes: 0, insert: "\\" }],
+  (tree) => contains(tree, continuationMarker),
+);
+
+determinismTest(
+  "a parameter continuation becomes a raw newline",
+  lines("function f(first,\\", "second) {}"),
+  lines("function f(first,", "second) {}"),
+  [{ byte: 17, deleteBytes: 1, insert: "" }],
+  (tree) => {
+    contains(tree, "parameters: param_list");
+    contains(tree, "newline_opt");
+    excludes(tree, continuationMarker);
+  },
+);
+
+determinismTest(
+  "removing a parameter newline preserves a valid function",
+  lines("function f(first,", "second) {}"),
+  lines("function f(first,second) {}"),
+  [{ byte: 17, deleteBytes: 1, insert: "" }],
+  (tree) => excludes(tree, "newline_opt"),
+);
+
+determinismTest(
+  "inserting a parameter newline preserves a valid function",
+  lines("function f(first,second) {}"),
+  lines("function f(first,", "second) {}"),
+  [{ byte: 17, deleteBytes: 0, insert: "\n" }],
+  (tree) => contains(tree, "newline_opt"),
+);
+
+determinismTest(
+  "restoring a parameter after a newline repairs the function header",
+  lines("function f(first,", ") {}"),
+  lines("function f(first,", "second) {}"),
+  [{ byte: 18, deleteBytes: 0, insert: "second" }],
+  (tree) => {
+    contains(tree, "parameters: param_list");
+    contains(tree, "newline_opt");
+  },
+);
+
+function continuationHistoryTest(name, initialSource, steps) {
+  test(`posix_awk: ${name}`, () => {
+    const initial = writeSource("initial", initialSource);
+    const edits = [];
+    for (const [index, step] of steps.entries()) {
+      edits.push(...step.edits);
+      const label = `${name}, edit ${index + 1}`;
+      assert.deepEqual(
+        applyEdits(initialSource, edits),
+        Buffer.from(step.source),
+        label,
+      );
+      const fresh = captureParse(writeSource("expected", step.source));
+      const incremental = captureParse(initial, edits);
+      for (const result of [fresh, incremental]) {
+        if (step.valid === false) {
+          assert.ok(result.status === 0 || result.status === 1, label);
+          assert.equal(hasRecovery(result.tree), true, label);
+        } else {
+          assertStatus(label, result, 0);
+          clean(result.tree);
+          if (step.ranges !== undefined)
+            assert.deepEqual(
+              continuationRanges(result.tree),
+              step.ranges,
+              label,
+            );
+          if (step.newlines !== undefined)
+            assert.equal(
+              matchingLineCount(result.tree, /[ \t]newline$/),
+              step.newlines,
+              label,
+            );
+        }
+      }
+      if (step.valid !== false)
+        assert.equal(incremental.tree, fresh.tree, label);
+    }
+  });
+}
+
+continuationHistoryTest(
+  "editing each byte of repeated continuations at EOF preserves layout",
+  "{}\\",
+  [
+    {
+      edits: [{ byte: 3, deleteBytes: 0, insert: "\n" }],
+      source: "{}\\\n",
+      ranges: [[0, 2, 0, 3]],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 4, deleteBytes: 0, insert: "\\\n" }],
+      source: "{}\\\n\\\n",
+      ranges: [
+        [0, 2, 0, 3],
+        [1, 0, 1, 1],
+      ],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 1, insert: "" }],
+      source: "{}\n\\\n",
+      ranges: [[1, 0, 1, 1]],
+      newlines: 1,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 0, insert: "\\" }],
+      source: "{}\\\n\\\n",
+      ranges: [
+        [0, 2, 0, 3],
+        [1, 0, 1, 1],
+      ],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
+      source: "{}\\\\\n",
+      valid: false,
+    },
+    {
+      edits: [{ byte: 3, deleteBytes: 0, insert: "\n" }],
+      source: "{}\\\n\\\n",
+      ranges: [
+        [0, 2, 0, 3],
+        [1, 0, 1, 1],
+      ],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 4, insert: "" }],
+      source: "{}",
+      ranges: [],
+      newlines: 0,
+    },
+  ],
+);
+
+continuationHistoryTest(
+  "Unicode edits before a continuation preserve byte ranges and newline ownership",
+  '{ print "あ"\\\n x }',
+  [
+    {
+      edits: [{ byte: 12, deleteBytes: 0, insert: "界" }],
+      source: '{ print "あ界"\\\n x }',
+      ranges: [[0, 16, 0, 17]],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 16, deleteBytes: 1, insert: "" }],
+      source: '{ print "あ界"\n x }',
+      ranges: [],
+      newlines: 1,
+    },
+    {
+      edits: [{ byte: 16, deleteBytes: 0, insert: "\\" }],
+      source: '{ print "あ界"\\\n x }',
+      ranges: [[0, 16, 0, 17]],
+      newlines: 0,
+    },
+    {
+      edits: [{ byte: 12, deleteBytes: 3, insert: "" }],
+      source: '{ print "あ"\\\n x }',
+      ranges: [[0, 13, 0, 14]],
+      newlines: 0,
+    },
+  ],
+);
+
+for (const { name, before, after, valid } of [
+  {
+    name: "keyword",
+    before: "BE",
+    after: "GIN {}\n",
+    valid: true,
+  },
+  {
+    name: "name",
+    before: "BEGIN { print va",
+    after: "lue }\n",
+    valid: true,
+  },
+  {
+    name: "built-in name",
+    before: "BEGIN { print len",
+    after: "gth(x) }\n",
+    valid: true,
+  },
+  {
+    name: "assignment operator",
+    before: "BEGIN { x +",
+    after: "= 1 }\n",
+    valid: false,
+  },
+  {
+    name: "unary field assignment name",
+    before: "BEGIN { $-na",
+    after: "me = value }\n",
+    valid: false,
+  },
+  {
+    name: "unary field assignment operator",
+    before: "BEGIN { print $!array[index] +",
+    after: "= value }\n",
+    valid: false,
+  },
+  {
+    name: "exponent",
+    before: "BEGIN { print 1e+",
+    after: "2 }\n",
+    valid: true,
+  },
+  {
+    name: "number suffix",
+    before: "BEGIN { print 1.0",
+    after: "F }\n",
+    valid: true,
+  },
+  {
+    name: "string",
+    before: 'BEGIN { print "a',
+    after: 'b" }\n',
+    valid: false,
+  },
+  {
+    name: "ERE bracket",
+    before: "BEGIN { print /[a",
+    after: "-z]/ }\n",
+    valid: false,
+  },
+  {
+    name: "string escape",
+    before: 'BEGIN { print "\\',
+    after: 'n" }\n',
+    valid: false,
+  },
+  {
+    name: "octal escape",
+    before: 'BEGIN { print "\\1',
+    after: '23" }\n',
+    valid: false,
+  },
+  {
+    name: "ERE escaped delimiter",
+    before: "BEGIN { print /a\\",
+    after: "/b/ }\n",
+    valid: false,
+  },
+  {
+    name: "ERE class name",
+    before: "BEGIN { print /[[:al",
+    after: "pha:]]/ }\n",
+    valid: false,
+  },
+  {
+    name: "ERE duplication count",
+    before: "BEGIN { print /a{1",
+    after: "2}/ }\n",
+    valid: false,
+  },
+  {
+    name: "ERE compound delimiter",
+    before: "BEGIN { print /[[",
+    after: ":alpha:]]/ }\n",
+    valid: false,
+  },
+]) {
+  const initial = before + after;
+  const split = `${before}\\\n${after}`;
+  const prefix = "# shifted source\n";
+  continuationHistoryTest(
+    `${name} token boundaries recover through continuation insertion and removal`,
+    initial,
+    [
+      {
+        edits: [{ byte: before.length, deleteBytes: 0, insert: "\\\n" }],
+        source: split,
+        valid,
+      },
+      {
+        edits: [{ byte: 0, deleteBytes: 0, insert: prefix }],
+        source: prefix + split,
+        valid,
+      },
+      {
+        edits: [
+          { byte: prefix.length + before.length, deleteBytes: 2, insert: "" },
+        ],
+        source: prefix + initial,
+      },
+      {
+        edits: [{ byte: 0, deleteBytes: prefix.length, insert: "" }],
+        source: initial,
+      },
+    ],
+  );
+}
+
+continuationHistoryTest(
+  "quotes change a safe continuation into a string split and back",
+  lines("{ print a\\", "+b }"),
+  [
+    {
+      edits: [
+        { byte: 13, deleteBytes: 0, insert: '"' },
+        { byte: 8, deleteBytes: 0, insert: '"' },
+      ],
+      source: lines('{ print "a\\', '+b" }'),
+      valid: false,
+    },
+    {
+      edits: [
+        { byte: 14, deleteBytes: 1, insert: "" },
+        { byte: 8, deleteBytes: 1, insert: "" },
+      ],
+      source: lines("{ print a\\", "+b }"),
+    },
+  ],
+);
+
+continuationHistoryTest(
+  "a slash changes a division gap into an ERE split and back",
+  lines("{ print x /\\", "a/ + b }"),
+  [
+    {
+      edits: [{ byte: 10, deleteBytes: 0, insert: "~ " }],
+      source: lines("{ print x ~ /\\", "a/ + b }"),
+      valid: false,
+    },
+    {
+      edits: [{ byte: 10, deleteBytes: 2, insert: "" }],
+      source: lines("{ print x /\\", "a/ + b }"),
+    },
+  ],
+);
+
+continuationHistoryTest(
+  "a comment marker changes continuation ownership without retaining scanner state",
+  lines("{", "# fo\\", "o", "}"),
+  [
+    {
+      edits: [{ byte: 2, deleteBytes: 2, insert: "" }],
+      source: lines("{", "fo\\", "o", "}"),
+    },
+    {
+      edits: [{ byte: 2, deleteBytes: 0, insert: "# " }],
+      source: lines("{", "# fo\\", "o", "}"),
+    },
+  ],
+);
+
+continuationHistoryTest(
+  "a blank preserves two tokens separated by a continuation",
+  lines("{ f\\", "oo(x) }"),
+  [
+    {
+      edits: [{ byte: 3, deleteBytes: 0, insert: " " }],
+      source: lines("{ f \\", "oo(x) }"),
+    },
+    {
+      edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
+      source: lines("{ f\\", "oo(x) }"),
+    },
+  ],
+);
+
+for (const { name, initial, changed, removed, inserted, expected } of [
+  {
+    name: "editing a name after a continuation keeps the preceding name separate",
+    initial: lines("BE\\", "GIN { print 1 }"),
+    changed: lines("BE\\", "GUN { print 1 }"),
+    removed: "GIN",
+    inserted: "GUN",
+    expected: "name",
+  },
+  {
+    name: "editing a call name after a continuation keeps the preceding name separate",
+    initial: lines("BEGIN { print len\\", "gth(x) }"),
+    changed: lines("BEGIN { print len\\", "gtx(x) }"),
+    removed: "gth",
+    inserted: "gtx",
+    expected: "func_name",
+  },
+  {
+    name: "editing a name after a number keeps the continuation outside the number",
+    initial: lines("BEGIN { print 1\\", "e+2 }"),
+    changed: lines("BEGIN { print 1\\", "e+x }"),
+    removed: "e+2",
+    inserted: "e+x",
+    expected: "number `1`",
+  },
+]) {
+  determinismTest(
+    name,
+    initial,
+    changed,
+    [
+      {
+        byte: initial.indexOf(removed),
+        deleteBytes: removed.length,
+        insert: inserted,
+      },
+    ],
+    (tree) => contains(tree, expected),
+  );
+  determinismTest(`${name} and changes back`, changed, initial, [
+    {
+      byte: changed.indexOf(inserted),
+      deleteBytes: inserted.length,
+      insert: removed,
+    },
+  ]);
+}
+
+for (const { operator, replacementByte } of [
+  { operator: "<", replacementByte: 47 },
+  { operator: "~", replacementByte: 47 },
+  { operator: "&&", replacementByte: 48 },
+  { operator: "||", replacementByte: 48 },
+]) {
+  determinismTest(
+    `replacing an update extends the ${operator} operand following a getline source`,
+    `{ getline $getline < x ~ y | getline z ${operator} "f" ++ }\n`,
+    `{ getline $getline < x ~ y | getline z++ ${operator} "f" getline }\n`,
+    [
+      { byte: 38, deleteBytes: 0, insert: "++" },
+      { byte: replacementByte, deleteBytes: 2, insert: "getline" },
+    ],
+    (tree) => {
+      assert.match(tree, /^0:21 +- +0:22 +source: expr$/m);
+      assert.equal(matchingLineCount(tree, /target: lvalue$/), 1);
+    },
+  );
+}
+
+for (const { name, initial, final, byte, insert } of [
+  {
+    name: "a field update moves a source out of a unary operand",
+    initial: "{ $getline $-getline < 1 }\n",
+    final: "{ $getline $-getline < 1 ++ }\n",
+    byte: 24,
+    insert: " ++",
+  },
+  {
+    name: "a field update moves a source out of a logical-not operand",
+    initial: "{ $getline $!getline < x -- }\n",
+    final: "{ $getline $!getline < x -- ++ }\n",
+    byte: 27,
+    insert: " ++",
+  },
+  {
+    name: "a field update moves a source out of a prefix-update operand",
+    initial: "{ $getline $--$getline < 1 }\n",
+    final: "{ $getline $--$getline < 1 ++ }\n",
+    byte: 26,
+    insert: " ++",
+  },
+  {
+    name: "a final update follows a grouped membership source",
+    initial: "{ $getline < ((x) in a) -- x }\n",
+    final: "{ $getline < ((x) in a) -- x ++ }\n",
+    byte: 28,
+    insert: " ++",
+  },
+  {
+    name: "a final lvalue follows the update after a grouped membership source",
+    initial: "{ $getline < ((x) in a) -- x ++ }\n",
+    final: "{ $getline < ((x) in a) -- x ++ y }\n",
+    byte: 31,
+    insert: " y",
+  },
+]) {
+  determinismTest(name, initial, final, [{ byte, deleteBytes: 0, insert }]);
+  determinismTest(`reversing ${name}`, final, initial, [
+    { byte, deleteBytes: insert.length, insert: "" },
+  ]);
+}
+
+const validExpressions = [
+  "-getline x++",
+  "a + getline x++",
+  "a getline x++",
+  "q = $-getline x++",
+  "a ^ getline x++",
+  "getline $-getline x++",
+  "++$getline x--",
+  "print $-getline x++ tline y-- z",
+  "x getline y++ | getline",
+  "print $getline x++",
+  "print $-getline a[1]-- ++y z",
+  "getline $-x++",
+  "getline (x)",
+  '$getline < "f" ++',
+  '$getline < "f" --',
+  '$getline < ("f") ++',
+  "$getline < -1 ++",
+  "$getline < f() ++",
+  "$getline < /f/ ++",
+  "$getline < ++y ++",
+  '$getline x < "f" ++',
+  '$getline $-x < "f" ++',
+  'print $getline < "f" ++',
+  'printf $getline $-x < "f" --',
+  '$getline < "f" ++ | getline',
+  '$getline < "f" ++y',
+  "$getline < y++",
+  "$getline < y++++",
+  "$getline < y + 1 ++",
+  '$getline < (x = "f") ++',
+  '$getline < (a < "f") ++',
+  "$getline < getline x++",
+  "$getline < (a < getline x++) < y",
+  "$getline < (a < getline x--) < y",
+  "$getline < $getline < getline x++++",
+  "$getline < $getline < $getline < getline x++++++",
+  "getline $getline < (a < getline x++) < y",
+  "print ($getline < (a < getline x++) < y)",
+  "f($getline < (a < getline x++) < y)",
+  "x[$getline < (a < getline x++) < y]",
+  "$getline < f(getline x++)++ < y",
+  '$getline $getline < "f" ++',
+  'getline $getline $-x < "f" ++',
+  'getline line < dir "/" name',
+  "getline < file > 0",
+  "getline x++ $getline y++",
+  "getline a[i/2]++ y",
+  "getline a[i++ / 2]++",
+  'getline $getline < "f"',
+  'getline $getline < "f" ++',
+  "getline $getline < x++",
+  "getline $getline < x++++",
+  "getline $getline < (x | getline) ++",
+  "getline $getline < (a ? x : (y))++",
+  "getline $getline < 1e++",
+  "getline $getline < a && # source\n x++",
+  "getline $getline < (1 &&\\\n\n1)++",
+  "getline $getline < (1 ||\\\n# source\n1)--",
+  "getline $getline < (1 && # first\n\\\n# second\n1)++",
+  "getline x++ $getline $getline < 1 ++",
+  "getline $getline < getline $getline < x++++",
+  "getline $getline < (($getline < 1 in a) 1)++",
+  'getline $getline < (($getline < x in a) < "f") ++',
+  "getline $getline < (x < (y < z | getline)) ++",
+  "getline $getline < (x ~ (y ~ 1 | getline)) ++",
+  'getline $getline < (x ~ y | getline z ~ "f") ++',
+  "getline $getline $-x < (x | getline) ++",
+  "$getline $-getline < 1 ++",
+  "$getline $!getline < x -- ++",
+  "$getline $--$getline < 1 ++",
+  "getline $getline $-getline < 1 ++",
+  "getline $getline $!getline < x -- ++",
+  "getline $getline $--$getline < 1 ++",
+  "$getline < ((x) in a) -- x ++",
+  "getline $getline < ((x) in a) -- x ++",
+];
+
+for (const expression of validExpressions) {
+  test(`posix_awk: each single-byte repair restores ${expression}`, () => {
+    const source = `{ ${expression} }\n`;
+    const fresh = captureParse(writeSource("fresh", source));
+    assertStatus(expression, fresh, 0);
+    clean(fresh.tree);
+    for (let byte = 0; byte < source.length; byte += 1) {
+      const initial = source.slice(0, byte) + source.slice(byte + 1);
+      assertDeterministicEdit(
+        `restore byte ${byte} in getline expression`,
+        initial,
+        source,
+        [{ byte, deleteBytes: 0, insert: source[byte] }],
+      );
+    }
+  });
+}
+
+for (const [label, before, after] of [
+  ["a target update", "{ getline x }", "{ getline x++ }"],
+  ["a field update", "{ $getline x }", "{ $getline x++ }"],
+  ["a nested source", "{ $(getline $(x)) }", "{ $(getline $(x) < y) }"],
+  ["an update inside a target", "{ getline $(x) }", "{ getline $(x++) }"],
+  [
+    "a pipe inside a print condition",
+    "{ print a ? (b) : c }",
+    "{ print a ? (b | getline) : c }",
+  ],
+]) {
+  let byte = 0;
+  while (before[byte] === after[byte]) byte++;
+  const insert = after.slice(byte, byte + after.length - before.length);
+  const edit = { byte, deleteBytes: 0, insert };
+  determinismTest(
+    `expression selection changes after inserting ${label}`,
+    before,
+    after,
+    [edit],
+  );
+  editHistoryTest(
+    `expression selection survives undo and redo of ${label}`,
+    before,
+    [edit],
+  );
+}
+
+for (const [label, broken] of [
+  ["a separate action", "{ $a[] ++ }\n{ $getline x++ }"],
+  ["the preceding statement", "{ $a[] ++; $getline x++ }"],
+]) {
+  const repaired = broken.replace("[]", "[1]");
+  determinismTest(`repair ${label} before a getline field`, broken, repaired, [
+    { byte: 5, deleteBytes: 0, insert: "1" },
+  ]);
+  editHistoryTest(`undo and redo the repair in ${label}`, repaired, [
+    { byte: 5, deleteBytes: 1, insert: "" },
+  ]);
+}
+
+{
+  const prefix = `{ getline $getline < 1${" + $a".repeat(getlineSourceFieldCount)}`;
+  const tail = " + $y-- < 1 < 2 }";
+  const edit = {
+    byte: prefix.length,
+    deleteBytes: 0,
+    insert: " + $a".repeat(getlineSourceGrowthFields),
+  };
+  determinismTest(
+    "source ownership survives adding fields to a long source",
+    prefix + tail,
+    prefix + edit.insert + tail,
+    [edit],
+  );
+  editHistoryTest(
+    "source ownership survives undoing growth in a long source",
+    prefix + tail,
+    [edit],
+  );
 }

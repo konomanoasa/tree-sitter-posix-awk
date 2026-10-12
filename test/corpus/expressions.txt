@@ -6,7 +6,7 @@ BEGIN {
   scalar
 }
 
----
+------------------
 
 (program
   (item_list
@@ -39,7 +39,7 @@ BEGIN {
   array[1]
 }
 
----
+------------------
 
 (program
   (item_list
@@ -76,7 +76,7 @@ BEGIN {
   array[1, offset, 3]
 }
 
----
+------------------
 
 (program
   (item_list
@@ -122,7 +122,7 @@ BEGIN {
         second]
 }
 
----
+------------------
 
 (program
   (item_list
@@ -167,7 +167,7 @@ BEGIN {
   $(offset + 1)
 }
 
----
+------------------
 
 (program
   (item_list
@@ -210,7 +210,7 @@ BEGIN {
   $rand()++
 }
 
----
+------------------
 
 (program
   (item_list
@@ -276,7 +276,7 @@ BEGIN {
   (first, second) in table
 }
 
----
+------------------
 
 (program
   (item_list
@@ -318,7 +318,7 @@ BEGIN {
   a * b + c
 }
 
----
+------------------
 
 (program
   (item_list
@@ -361,7 +361,7 @@ BEGIN {
   a + b * c / d % e
 }
 
----
+------------------
 
 (program
   (item_list
@@ -414,7 +414,7 @@ BEGIN {
   -d ^ e + f
 }
 
----
+------------------
 
 (program
   (item_list
@@ -459,7 +459,7 @@ BEGIN {
   +a * b
 }
 
----
+------------------
 
 (program
   (item_list
@@ -499,7 +499,7 @@ BEGIN {
   g ^ h ^ i
 }
 
----
+------------------
 
 (program
   (item_list
@@ -542,7 +542,7 @@ BEGIN {
   j - k - l
 }
 
----
+------------------
 
 (program
   (item_list
@@ -585,7 +585,7 @@ BEGIN {
   m n + o
 }
 
----
+------------------
 
 (program
   (item_list
@@ -627,7 +627,7 @@ BEGIN {
   !p && q
 }
 
----
+------------------
 
 (program
   (item_list
@@ -670,7 +670,7 @@ BEGIN {
     t ? u : v
 }
 
----
+------------------
 
 (program
   (item_list
@@ -741,7 +741,7 @@ BEGIN {
   x = y = z
 }
 
----
+------------------
 
 (program
   (item_list
@@ -782,7 +782,7 @@ BEGIN {
   a in first in second
 }
 
----
+------------------
 
 (program
   (item_list
@@ -821,7 +821,7 @@ BEGIN {
   a ? b : c ? d : e
 }
 
----
+------------------
 
 (program
   (item_list
@@ -872,7 +872,7 @@ BEGIN {
   ++left ^ right-- ^ -$field
 }
 
----
+------------------
 
 (program
   (item_list
@@ -922,7 +922,7 @@ BEGIN {
   $value++
 }
 
----
+------------------
 
 (program
   (item_list
@@ -959,7 +959,7 @@ BEGIN {
   ++$value
 }
 
----
+------------------
 
 (program
   (item_list
@@ -996,7 +996,7 @@ BEGIN {
   other--
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1030,7 +1030,7 @@ BEGIN {
   --$other
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1067,7 +1067,7 @@ BEGIN {
   (a in b) ~ c
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1110,7 +1110,7 @@ BEGIN {
   (a in b) < c
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1153,7 +1153,7 @@ BEGIN {
   (a in b) c
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1195,7 +1195,7 @@ BEGIN {
   (a in b) + c
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1238,7 +1238,7 @@ BEGIN {
   (a in b) * d ^ e
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1286,7 +1286,7 @@ BEGIN {
   (-a in b) ^ c
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1331,7 +1331,7 @@ BEGIN {
   ((a, b) in c) ~ d
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1381,7 +1381,7 @@ BEGIN {
   x /= 2
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1421,7 +1421,7 @@ BEGIN {
   x / 2
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1461,7 +1461,7 @@ BEGIN {
 + right
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1500,7 +1500,7 @@ BEGIN {
 * right
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1539,7 +1539,7 @@ BEGIN {
 ^ right
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1578,7 +1578,7 @@ BEGIN {
 ~ right
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1617,7 +1617,7 @@ BEGIN {
 in table
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1654,7 +1654,7 @@ BEGIN {
 || right
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1694,7 +1694,7 @@ BEGIN {
 ? yes : no
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1737,7 +1737,7 @@ BEGIN {
 = value
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1775,7 +1775,7 @@ BEGIN {
 ++
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1810,7 +1810,7 @@ BEGIN {
 [position]
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1849,7 +1849,7 @@ BEGIN {
 ]
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1888,7 +1888,7 @@ BEGIN {
 )
 }
 
----
+------------------
 
 (program
   (item_list
@@ -1921,7 +1921,7 @@ a postfix update stays inside a unary field operand
 
 $-x++
 
----
+------------------
 
 (program
   (item_list
@@ -1948,7 +1948,7 @@ a postfix update stays in the exponent of a unary field operand
 
 $-x^y++
 
----
+------------------
 
 (program
   (item_list
@@ -1980,7 +1980,7 @@ parentheses close a unary operand before a nested field postfix update
 
 $$(-x^2)++
 
----
+------------------
 
 (program
   (item_list
@@ -2009,3 +2009,816 @@ $$(-x^2)++
             (incr)))))
     (terminator
       (newline))))
+
+==================
+keyword prefixes remain whole identifiers
+:cst
+==================
+{ BEGINNING = END_value + printable + info + if_while }
+------------------
+
+0:0  - 0:55   program
+0:0  - 0:55     item
+0:0  - 0:55       action: action
+0:0  - 0:1          "{"
+0:2  - 0:53         body: unterminated_statement_list
+0:2  - 0:53           unterminated_statement
+0:2  - 0:53             statement: terminatable_statement
+0:2  - 0:53               simple_statement
+0:2  - 0:53                 expr
+0:2  - 0:53                   non_unary_expr
+0:2  - 0:11                     left: lvalue
+0:2  - 0:11                       name `BEGINNING`
+0:12 - 0:13                     "="
+0:14 - 0:53                     right: expr
+0:14 - 0:53                       non_unary_expr
+0:14 - 0:42                         left: non_unary_expr
+0:14 - 0:35                           left: non_unary_expr
+0:14 - 0:23                             left: non_unary_expr
+0:14 - 0:23                               lvalue
+0:14 - 0:23                                 name `END_value`
+0:24 - 0:25                             "+"
+0:26 - 0:35                             right: expr
+0:26 - 0:35                               non_unary_expr
+0:26 - 0:35                                 lvalue
+0:26 - 0:35                                   name `printable`
+0:36 - 0:37                           "+"
+0:38 - 0:42                           right: expr
+0:38 - 0:42                             non_unary_expr
+0:38 - 0:42                               lvalue
+0:38 - 0:42                                 name `info`
+0:43 - 0:44                         "+"
+0:45 - 0:53                         right: expr
+0:45 - 0:53                           non_unary_expr
+0:45 - 0:53                             lvalue
+0:45 - 0:53                               name `if_while`
+0:54 - 0:55         "}"
+
+==================
+plus operators stay separate across a continuation
+:cst
+==================
+{ print x +\
++ y }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:5        item: item
+0:0  - 1:5          action: action
+0:0  - 0:1            "{"
+0:2  - 1:3            body: unterminated_statement_list
+0:2  - 1:3              unterminated_statement
+0:2  - 1:3                statement: terminatable_statement
+0:2  - 1:3                  simple_statement
+0:2  - 1:3                    print_statement
+0:2  - 1:3                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:3                        arguments: print_expr_list
+0:8  - 1:3                          print_expr
+0:8  - 1:3                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                lvalue
+0:8  - 0:9                                  name `x`
+0:10 - 0:11                             "+"
+0:11 - 0:12                             "\\"
+1:0  - 1:3                              right: print_expr
+1:0  - 1:3                                unary_print_expr
+1:0  - 1:1                                  "+"
+1:2  - 1:3                                  operand: print_expr
+1:2  - 1:3                                    non_unary_print_expr
+1:2  - 1:3                                      lvalue
+1:2  - 1:3                                        name `y`
+1:4  - 1:5            "}"
+1:5  - 2:0        terminator: terminator
+1:5  - 2:0          newline
+1:5  - 1:6            `\n`
+
+==================
+minus operators stay separate across a continuation
+:cst
+==================
+{ print x -\
+- y }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:5        item: item
+0:0  - 1:5          action: action
+0:0  - 0:1            "{"
+0:2  - 1:3            body: unterminated_statement_list
+0:2  - 1:3              unterminated_statement
+0:2  - 1:3                statement: terminatable_statement
+0:2  - 1:3                  simple_statement
+0:2  - 1:3                    print_statement
+0:2  - 1:3                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:3                        arguments: print_expr_list
+0:8  - 1:3                          print_expr
+0:8  - 1:3                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                lvalue
+0:8  - 0:9                                  name `x`
+0:10 - 0:11                             "-"
+0:11 - 0:12                             "\\"
+1:0  - 1:3                              right: print_expr
+1:0  - 1:3                                unary_print_expr
+1:0  - 1:1                                  "-"
+1:2  - 1:3                                  operand: print_expr
+1:2  - 1:3                                    non_unary_print_expr
+1:2  - 1:3                                      lvalue
+1:2  - 1:3                                        name `y`
+1:4  - 1:5            "}"
+1:5  - 2:0        terminator: terminator
+1:5  - 2:0          newline
+1:5  - 1:6            `\n`
+
+==================
+a token-boundary continuation preserves division and operand
+:cst
+==================
+{ print x /\
+y }
+
+------------------
+
+0:0  - 2:0    program
+0:0  - 2:0      item_list
+0:0  - 1:3        item: item
+0:0  - 1:3          action: action
+0:0  - 0:1            "{"
+0:2  - 1:1            body: unterminated_statement_list
+0:2  - 1:1              unterminated_statement
+0:2  - 1:1                statement: terminatable_statement
+0:2  - 1:1                  simple_statement
+0:2  - 1:1                    print_statement
+0:2  - 1:1                      statement: simple_print_statement
+0:2  - 0:7                        print_keyword `print`
+0:8  - 1:1                        arguments: print_expr_list
+0:8  - 1:1                          print_expr
+0:8  - 1:1                            non_unary_print_expr
+0:8  - 0:9                              left: non_unary_print_expr
+0:8  - 0:9                                lvalue
+0:8  - 0:9                                  name `x`
+0:10 - 0:11                             "/"
+0:11 - 0:12                             "\\"
+1:0  - 1:1                              right: print_expr
+1:0  - 1:1                                non_unary_print_expr
+1:0  - 1:1                                  lvalue
+1:0  - 1:1                                    name `y`
+1:2  - 1:3            "}"
+1:3  - 2:0        terminator: terminator
+1:3  - 2:0          newline
+1:3  - 1:4            `\n`
+
+==================
+tuple membership fields exclude their surrounding parentheses
+:cst
+==================
+{ (x, y) in values }
+------------------
+
+0:0  - 0:20   program
+0:0  - 0:20     item
+0:0  - 0:20       action: action
+0:0  - 0:1          "{"
+0:2  - 0:18         body: unterminated_statement_list
+0:2  - 0:18           unterminated_statement
+0:2  - 0:18             statement: terminatable_statement
+0:2  - 0:18               simple_statement
+0:2  - 0:18                 expr
+0:2  - 0:18                   non_unary_expr
+0:2  - 0:3                      "("
+0:3  - 0:7                      left: multiple_expr_list
+0:3  - 0:4                        expr
+0:3  - 0:4                          non_unary_expr
+0:3  - 0:4                            lvalue
+0:3  - 0:4                              name `x`
+0:4  - 0:5                        ","
+0:6  - 0:7                        expr
+0:6  - 0:7                          non_unary_expr
+0:6  - 0:7                            lvalue
+0:6  - 0:7                              name `y`
+0:7  - 0:8                      ")"
+0:9  - 0:11                     operator: in_keyword `in`
+0:12 - 0:18                     right: name `values`
+0:19 - 0:20         "}"
+
+==================
+a complete name remains one leaf
+:cst
+==================
+foo
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:3       item: item
+0:0 - 0:3         pattern: normal_pattern
+0:0 - 0:3           expr
+0:0 - 0:3             non_unary_expr
+0:0 - 0:3               lvalue
+0:0 - 0:3                 name `foo`
+0:3 - 1:0       terminator: terminator
+0:3 - 1:0         newline
+0:3 - 0:4           `\n`
+
+==================
+a logical operator excludes its following continuation
+:cst
+==================
+a||\
+b
+
+------------------
+
+0:0 - 2:0   program
+0:0 - 2:0     item_list
+0:0 - 1:1       item: item
+0:0 - 1:1         pattern: normal_pattern
+0:0 - 1:1           expr
+0:0 - 1:1             non_unary_expr
+0:0 - 0:1               left: non_unary_expr
+0:0 - 0:1                 lvalue
+0:0 - 0:1                   name `a`
+0:1 - 0:3               operator: or `||`
+0:3 - 0:4               "\\"
+1:0 - 1:1               right: expr
+1:0 - 1:1                 non_unary_expr
+1:0 - 1:1                   lvalue
+1:0 - 1:1                     name `b`
+1:1 - 2:0       terminator: terminator
+1:1 - 2:0         newline
+1:1 - 1:2           `\n`
+
+==================
+a unary field assignment supplies a parenthesized pipe
+:cst
+==================
+{($+a=b) | getline}
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:19       item: item
+0:0  - 0:19         action: action
+0:0  - 0:1            "{"
+0:1  - 0:18           body: unterminated_statement_list
+0:1  - 0:18             unterminated_statement
+0:1  - 0:18               statement: terminatable_statement
+0:1  - 0:18                 simple_statement
+0:1  - 0:18                   expr
+0:1  - 0:18                     non_unary_expr
+0:1  - 0:18                       non_unary_input_function
+0:1  - 0:8                          source: non_unary_expr
+0:1  - 0:2                            "("
+0:2  - 0:7                            expr
+0:2  - 0:7                              non_unary_expr
+0:2  - 0:5                                left: lvalue
+0:2  - 0:3                                  "$"
+0:3  - 0:5                                  operand: expr
+0:3  - 0:5                                    unary_expr
+0:3  - 0:4                                      "+"
+0:4  - 0:5                                      operand: expr
+0:4  - 0:5                                        non_unary_expr
+0:4  - 0:5                                          lvalue
+0:4  - 0:5                                            name `a`
+0:5  - 0:6                                "="
+0:6  - 0:7                                right: expr
+0:6  - 0:7                                  non_unary_expr
+0:6  - 0:7                                    lvalue
+0:6  - 0:7                                      name `b`
+0:7  - 0:8                            ")"
+0:9  - 0:10                         "|"
+0:11 - 0:18                         get: simple_get
+0:11 - 0:18                           getline_keyword `getline`
+0:18 - 0:19           "}"
+0:19 - 1:0        terminator: terminator
+0:19 - 1:0          newline
+0:19 - 0:20           `\n`
+
+==================
+a parenthesized pipe supplies a unary field assignment
+:cst
+==================
+{$+a=(b | getline)}
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:19       item: item
+0:0  - 0:19         action: action
+0:0  - 0:1            "{"
+0:1  - 0:18           body: unterminated_statement_list
+0:1  - 0:18             unterminated_statement
+0:1  - 0:18               statement: terminatable_statement
+0:1  - 0:18                 simple_statement
+0:1  - 0:18                   expr
+0:1  - 0:18                     non_unary_expr
+0:1  - 0:4                        left: lvalue
+0:1  - 0:2                          "$"
+0:2  - 0:4                          operand: expr
+0:2  - 0:4                            unary_expr
+0:2  - 0:3                              "+"
+0:3  - 0:4                              operand: expr
+0:3  - 0:4                                non_unary_expr
+0:3  - 0:4                                  lvalue
+0:3  - 0:4                                    name `a`
+0:4  - 0:5                        "="
+0:5  - 0:18                       right: expr
+0:5  - 0:18                         non_unary_expr
+0:5  - 0:6                            "("
+0:6  - 0:17                           expr
+0:6  - 0:17                             non_unary_expr
+0:6  - 0:17                               non_unary_input_function
+0:6  - 0:7                                  source: non_unary_expr
+0:6  - 0:7                                    lvalue
+0:6  - 0:7                                      name `b`
+0:8  - 0:9                                  "|"
+0:10 - 0:17                                 get: simple_get
+0:10 - 0:17                                   getline_keyword `getline`
+0:17 - 0:18                           ")"
+0:18 - 0:19           "}"
+0:19 - 1:0        terminator: terminator
+0:19 - 1:0          newline
+0:19 - 0:20           `\n`
+
+==================
+separated division assignment characters cannot form one operator
+:error
+==================
+{ x /\
+= y }
+
+------------------
+
+==================
+separated addition assignment characters cannot form one operator
+:error
+==================
+{ x +\
+= y }
+
+------------------
+
+==================
+separated subtraction assignment characters cannot form one operator
+:error
+==================
+{ x -\
+= y }
+
+------------------
+
+==================
+separated multiplication assignment characters cannot form one operator
+:error
+==================
+{ x *\
+= y }
+
+------------------
+
+==================
+separated modulus assignment characters cannot form one operator
+:error
+==================
+{ x %\
+= y }
+
+------------------
+
+==================
+separated power assignment characters cannot form one operator
+:error
+==================
+{ x ^\
+= y }
+
+------------------
+
+==================
+separated logical or characters cannot form one operator
+:error
+==================
+{ x |\
+| y }
+
+------------------
+
+==================
+separated logical and characters cannot form one operator
+:error
+==================
+{ x &\
+& y }
+
+------------------
+
+==================
+separated non-match characters cannot form one operator
+:error
+==================
+{ x !\
+~ y }
+
+------------------
+
+==================
+separated less or equal characters cannot form one operator
+:error
+==================
+{ x <\
+= y }
+
+------------------
+
+==================
+separated inequality characters cannot form one operator
+:error
+==================
+{ x !\
+= y }
+
+------------------
+
+==================
+separated equality characters do not form a comparison
+:error
+==================
+BEGIN { print (x =\
+= y) }
+
+------------------
+
+==================
+separated greater-than and equals do not form a comparison
+:error
+==================
+BEGIN { print (x >\
+= y) }
+
+------------------
+
+==================
+division without a final operand is rejected
+:error
+==================
+BEGIN { print x /a/ }
+
+------------------
+
+==================
+division assignment to an invalid lvalue is rejected
+:error
+==================
+BEGIN { (a) /= b }
+
+------------------
+
+==================
+a unary operator outside a field cannot form an assignment target
+:error
+==================
+BEGIN { +$a = b }
+
+------------------
+
+==================
+a postfix field update cannot form an assignment target
+:error
+==================
+BEGIN { $a++ = b }
+
+------------------
+
+==================
+exponentiation outside a field cannot form an assignment target
+:error
+==================
+BEGIN { $a^b = c }
+
+------------------
+
+==================
+a second postfix update after a continuation still requires an lvalue
+:error
+==================
+BEGIN { print $a++\
+-- }
+
+------------------
+
+==================
+a field cannot absorb a postfix update on a unary numeric operand
+:error
+==================
+BEGIN { $-1++ }
+
+------------------
+
+==================
+a field cannot absorb a postfix update on an exponent operand
+:error
+==================
+BEGIN { $-x^2++ }
+
+------------------
+
+==================
+a field cannot absorb a postfix update after a prefix update
+:error
+==================
+BEGIN { $++x++ }
+
+------------------
+
+==================
+a field cannot absorb a second postfix update through unary negation
+:error
+==================
+BEGIN { $!x++-- }
+
+------------------
+
+==================
+nested fields cannot bypass postfix operand precedence
+:error
+==================
+BEGIN { $$-x^2++ }
+
+------------------
+
+==================
+a print field argument preserves postfix operand precedence
+:error
+==================
+BEGIN { print $-x^2++ }
+
+------------------
+
+==================
+a printf field argument preserves postfix operand precedence
+:error
+==================
+BEGIN { printf $++x++ }
+
+------------------
+
+==================
+a continuation before a postfix token cannot bypass field operand precedence
+:error
+==================
+BEGIN { $-x^2\
+++ }
+
+------------------
+
+==================
+END remains reserved in expression context
+:error
+==================
+BEGIN { value = (END) }
+
+------------------
+
+==================
+print remains reserved in expression context
+:error
+==================
+BEGIN { value = print }
+
+------------------
+
+==================
+increment before a number is not split into unary signs
+:error
+==================
+{ ++1 }
+------------------
+
+==================
+decrement before a number is not split into unary signs
+:error
+==================
+{ --1 }
+------------------
+
+==================
+increment before a parenthesized expression is not split into unary signs
+:error
+==================
+{ ++(x) }
+------------------
+
+==================
+decrement before a parenthesized expression is not split into unary signs
+:error
+==================
+{ --(x) }
+------------------
+
+==================
+an unparenthesized assignment in a conditional alternative is rejected
+:error
+==================
+BEGIN { x = a ? b : c = d }
+
+------------------
+
+==================
+an unterminated parenthesized expression at EOF is rejected
+:error
+==================
+BEGIN { print (value
+------------------
+
+==================
+an unterminated subscript at EOF is rejected
+:error
+==================
+BEGIN { print array[index
+------------------
+
+==================
+unparenthesized membership before exponentiation is rejected
+:error
+==================
+BEGIN { a in b ^ c }
+
+------------------
+
+==================
+unparenthesized membership before multiplication is rejected
+:error
+==================
+BEGIN { a in b * c }
+
+------------------
+
+==================
+unparenthesized membership before division is rejected
+:error
+==================
+BEGIN { a in b / c }
+
+------------------
+
+==================
+unparenthesized membership before modulus is rejected
+:error
+==================
+BEGIN { a in b % c }
+
+------------------
+
+==================
+unparenthesized membership before addition is rejected
+:error
+==================
+BEGIN { a in b + c }
+
+------------------
+
+==================
+unparenthesized membership before subtraction is rejected
+:error
+==================
+BEGIN { a in b - c }
+
+------------------
+
+==================
+unparenthesized membership before concatenation is rejected
+:error
+==================
+BEGIN { a in b c }
+
+------------------
+
+==================
+unparenthesized membership before less than is rejected
+:error
+==================
+BEGIN { a in b < c }
+
+------------------
+
+==================
+unparenthesized membership before less than or equal is rejected
+:error
+==================
+BEGIN { a in b <= c }
+
+------------------
+
+==================
+unparenthesized membership before inequality is rejected
+:error
+==================
+BEGIN { a in b != c }
+
+------------------
+
+==================
+unparenthesized membership before equality is rejected
+:error
+==================
+BEGIN { a in b == c }
+
+------------------
+
+==================
+unparenthesized membership before greater than is rejected
+:error
+==================
+BEGIN { a in b > c }
+
+------------------
+
+==================
+unparenthesized membership before greater than or equal is rejected
+:error
+==================
+BEGIN { a in b >= c }
+
+------------------
+
+==================
+unparenthesized membership before ERE match is rejected
+:error
+==================
+BEGIN { a in b ~ c }
+
+------------------
+
+==================
+unparenthesized membership before ERE non-match is rejected
+:error
+==================
+BEGIN { a in b !~ c }
+
+------------------
+
+==================
+unparenthesized membership before unary exponentiation is rejected
+:error
+==================
+BEGIN { -a in b ^ c }
+
+------------------
+
+==================
+unparenthesized membership before multiple-index ERE match is rejected
+:error
+==================
+BEGIN { (a, c) in b ~ d }
+
+------------------
+
+==================
+unparenthesized membership before print addition is rejected
+:error
+==================
+BEGIN { print a in b + c }
+
+------------------
+
+==================
+unparenthesized membership before unary print exponentiation is rejected
+:error
+==================
+BEGIN { print -a in b ^ c }
+
+------------------
+
+==================
+unparenthesized membership before multiple-index print ERE match is rejected
+:error
+==================
+BEGIN { print (a, c) in b ~ d }
+
+------------------
+
+==================
+unparenthesized membership before continued addition is rejected
+:error
+==================
+BEGIN { a in b \
++ c }
+
+------------------
+
+==================
+reject a + (1,2) in array
+:error
+==================
+{ a + (1,2) in array }
+
+------------------

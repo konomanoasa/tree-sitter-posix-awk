@@ -209,11 +209,11 @@ ${entries
   .filter(([, rule]) => rule.associativity === "right")
   .map(
     ([name, rule]) =>
-      `  case ${symbol(name)}:\n    return ${symbol(rule.rightOperand ?? name)};`,
+      `    case ${symbol(name)}:\n      return ${symbol(rule.rightOperand ?? name)};`,
   )
   .join("\n")}
-  default:
-    return precedence + 1;
+    default:
+      return precedence + 1;
   }
 }
 
@@ -221,11 +221,11 @@ static bool expression_non_associative(int precedence) {
   switch (precedence) {
 ${entries
   .filter(([, rule]) => rule.associativity === "none")
-  .map(([name]) => `  case ${symbol(name)}:`)
+  .map(([name]) => `    case ${symbol(name)}:`)
   .join("\n")}
-    return true;
-  default:
-    return false;
+      return true;
+    default:
+      return false;
   }
 }`;
   return replaceScannerBlock(source, "expression rules", generated);

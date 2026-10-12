@@ -1,8 +1,24 @@
 #include <assert.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../src/scanner.c"
+
+enum {
+  SERIALIZATION_GUARD_BYTE = 0x5a,
+  SERIALIZED_HEADER_BYTES = 63,
+  SERIALIZED_OUTLINE_BYTES = 28,
+  SERIALIZED_CACHE_COUNT_OFFSET = 45,
+  OUTLINE_KIND_SHIFT = 40,
+  BOUNDARY_DIGIT_BITS = 2,
+  BOUNDARY_RADIX = 1U << BOUNDARY_DIGIT_BITS,
+  BOUNDARY_DIGIT_COUNT = sizeof(uint64_t) * CHAR_BIT / BOUNDARY_DIGIT_BITS,
+};
 
 #ifdef TREE_SITTER_REUSE_ALLOCATOR
 static size_t reuse_calloc_calls;
@@ -10,6 +26,7 @@ static size_t reuse_realloc_calls;
 static size_t reuse_free_calls;
 static size_t reuse_live_allocations;
 static bool reuse_fail_next_calloc;
+static bool reuse_fail_next_realloc;
 
 static void *reuse_calloc(size_t count, size_t size) {
   reuse_calloc_calls += 1;
@@ -35,6 +52,10 @@ static void reuse_free(void *allocation) {
 
 static void *reuse_realloc(void *allocation, size_t size) {
   reuse_realloc_calls += 1;
+  if (reuse_fail_next_realloc) {
+    reuse_fail_next_realloc = false;
+    return NULL;
+  }
   const bool allocated = allocation != NULL;
   void *result = realloc(allocation, size);
   if (result != NULL && !allocated) {
@@ -92,19 +113,23 @@ static bool mock_eof(const TSLexer *lexer) {
   return mock->offset == mock->length;
 }
 
-static MockLexer make_mock_lexer(const char *source) {
+static MockLexer make_mock_lexer_bytes(const char *source, size_t length) {
   return (MockLexer){
     .lexer =
       {
-        .lookahead = (unsigned char)source[0],
+        .lookahead = length ? (unsigned char)source[0] : 0,
         .result_symbol = UINT16_MAX,
         .advance = mock_advance,
         .mark_end = mock_mark_end,
         .eof = mock_eof,
       },
     .source = source,
-    .length = strlen(source),
+    .length = length,
   };
+}
+
+static MockLexer make_mock_lexer(const char *source) {
+  return make_mock_lexer_bytes(source, strlen(source));
 }
 
 static void resume_mock_lexer(MockLexer *mock) {
@@ -114,6 +139,47 @@ static void resume_mock_lexer(MockLexer *mock) {
   mock->lexer.result_symbol = UINT16_MAX;
   mock->lexer.lookahead =
     mock->offset < mock->length ? (unsigned char)mock->source[mock->offset] : 0;
+}
+
+static unsigned serialize_state(ScannerState *state, char *buffer) {
+  char guarded[TREE_SITTER_SERIALIZATION_BUFFER_SIZE + 2];
+  memset(guarded, SERIALIZATION_GUARD_BYTE, sizeof(guarded));
+  const unsigned length =
+    tree_sitter_posix_awk_external_scanner_serialize(state, guarded + 1);
+  assert(length <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
+  assert(guarded[0] == SERIALIZATION_GUARD_BYTE);
+  for (size_t index = length + 1; index < sizeof(guarded); index++) {
+    assert(guarded[index] == SERIALIZATION_GUARD_BYTE);
+  }
+  memcpy(buffer, guarded + 1, length);
+  return length;
+}
+
+static void
+assert_state_equal(const ScannerState *actual, const ScannerState *expected) {
+  assert(actual->mode == expected->mode);
+  const BoundaryState *left = &actual->boundary;
+  const BoundaryState *right = &expected->boundary;
+  assert(left->active == right->active);
+  assert(left->pending[0] == right->pending[0]);
+  assert(left->pending[1] == right->pending[1]);
+  assert(left->next == right->next);
+  assert(left->carry == right->carry);
+  assert(left->phase == right->phase);
+  assert(left->selected == right->selected);
+  assert(left->unary == right->unary);
+  assert(left->print == right->print);
+  assert(left->decision_hash == right->decision_hash);
+  assert(left->cache_count == right->cache_count);
+  assert(left->cache_index == right->cache_index);
+  assert(left->cache_repeats == right->cache_repeats);
+  assert(left->cache_delta == right->cache_delta);
+  for (unsigned index = 0; index < right->cache_count; index++) {
+    assert(left->cache[index].descriptor == right->cache[index].descriptor);
+    assert(left->cache[index].children[0] == right->cache[index].children[0]);
+    assert(left->cache[index].children[1] == right->cache[index].children[1]);
+    assert(left->cache[index].repeat == right->cache[index].repeat);
+  }
 }
 
 static int expect_scan_result_at(
@@ -137,10 +203,8 @@ static int expect_scan_result_at(
   bool valid = scanned == expected_scanned && state.mode == expected_mode;
   if (scanned) {
     valid = valid &&
-      mock.lexer.result_symbol ==
-      expected_symbol &&
-      mock.token_start ==
-      expected_token_start &&
+      mock.lexer.result_symbol == expected_symbol &&
+      mock.token_start == expected_token_start &&
       mock.token_end == expected_token_end;
   }
   if (valid) {
@@ -533,8 +597,7 @@ static void test_repeated_continuation_ranges_and_restoration(void) {
     assert(mock.token_end == expected_ends[index]);
     assert(state.mode == expected_modes[index]);
     char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
-    const unsigned length =
-      tree_sitter_posix_awk_external_scanner_serialize(&state, buffer);
+    const unsigned length = serialize_state(&state, buffer);
     state.mode = LEXICAL_MODE_STRING;
     tree_sitter_posix_awk_external_scanner_deserialize(&state, buffer, length);
     assert(state.mode == expected_modes[index]);
@@ -849,356 +912,367 @@ static int test_word_boundary_lookahead(void) {
   return failed;
 }
 
+static uint64_t *
+recognition_outlines(const RecognizerInput *input, size_t *length) {
+  size_t *stack = calloc(input->tree_count + 1, sizeof(*stack));
+  const size_t outline_words = 3;
+  uint64_t *outlines =
+    calloc(input->tree_count * outline_words + 1, sizeof(*outlines));
+  assert(stack != NULL && outlines != NULL);
+  size_t depth = 0;
+  *length = 0;
+  stack[depth++] = input->tree_root;
+  while (depth) {
+    BoundaryTree node = input->tree[stack[--depth] - 1];
+    outlines[(*length)++] = node.outline.descriptor;
+    outlines[(*length)++] = node.outline.children[0];
+    outlines[(*length)++] = node.outline.children[1];
+    if (node.children[1]) stack[depth++] = node.children[1];
+    if (node.children[0]) stack[depth++] = node.children[0];
+  }
+  free(stack);
+  return outlines;
+}
+
+static enum TokenType
+recognize_getline(const char *source, size_t *advances, bool compare_shared) {
+  MockLexer mock = make_mock_lexer(source);
+  InputProbe probe = {
+    .lexer =
+      {.lookahead = mock.lexer.lookahead,
+        .advance = probe_advance,
+        .mark_end = probe_mark_end,
+        .eof = probe_eof},
+    .source = &mock.lexer
+  };
+  RecognizerInput input = {0};
+  bool operand = true;
+  int questions = 0;
+  for (;;) {
+    int token = probe_token(&probe, operand);
+    if (
+      !token ||
+      character_in(token, "\n;,) ]}{#") ||
+      (token == ':' && !questions)
+    )
+      break;
+    if (token == '?') questions++;
+    if (token == ':' && questions) questions--;
+    recognizer_add_token(&input, token);
+    if (token != PROBE_UPDATE)
+      operand = token != PROBE_NAME &&
+        token != PROBE_VALUE &&
+        token != PROBE_TUPLE &&
+        token != PROBE_GETLINE;
+  }
+  enum TokenType result = GETLINE_WORD;
+  const bool recognized = input.length && recognizer_parse(&input);
+  if (compare_shared && input.length) {
+    size_t length = 0;
+    uint64_t *expected =
+      recognized ? recognition_outlines(&input, &length) : NULL;
+    assert(shared_parse(&input) == recognized);
+    if (recognized) {
+      size_t actual_length = 0;
+      uint64_t *actual = recognition_outlines(&input, &actual_length);
+      assert(length == actual_length);
+      assert(memcmp(expected, actual, length * sizeof(*expected)) == 0);
+      free(actual);
+    }
+    free(expected);
+  }
+  if (recognized) {
+    size_t index = input.tree_root;
+    while (index) {
+      BoundaryTree node = input.tree[index - 1];
+      if ((node.outline.descriptor >> OUTLINE_KIND_SHIFT) == RECOGNIZED_GET) {
+        result = node.children[0] ? SELECT_TARGET_GET : SELECT_GET;
+        break;
+      }
+      index = node.children[0];
+    }
+  }
+  *advances = mock.advance_count;
+  ts_free(probe.characters);
+  recognizer_destroy(&input);
+  return result;
+}
+
 static int test_getline_operand_lookahead(void) {
   static const struct {
     const char *name;
     const char *source;
     enum TokenType expected_symbol;
   } cases[] = {
-    {"no operand follows at the end", "getline", GETLINE_OMITTED_WORD},
-    {"a terminator is no operand", "getline;", GETLINE_OMITTED_WORD},
-    {"a source is no operand", "getline < file", GETLINE_OMITTED_WORD},
-    {"a grouping is no lvalue", "getline (x)", GETLINE_OMITTED_WORD},
-    {"a call is no lvalue", "getline f(x)", GETLINE_OMITTED_WORD},
-    {"a built-in name is no lvalue", "getline length", GETLINE_OMITTED_WORD},
-    {"a prefix update is no lvalue", "getline ++x", GETLINE_OMITTED_WORD},
-    {"a name is the target", "getline x", GETLINE_TARGET_WORD},
-    {"a source follows the target", "getline x < file", GETLINE_TARGET_WORD},
-    {"an operator follows the target", "getline x + 1", GETLINE_TARGET_WORD},
-    {"a single sign is no update", "getline x - -y", GETLINE_TARGET_WORD},
-    {"a postfix update takes the name", "getline x++", GETLINE_OMITTED_WORD},
-    {"a postfix decrement takes the name",
-      "getline x --",
-      GETLINE_OMITTED_WORD},
+    {"no operand follows at the end", "getline", SELECT_GET},
+    {"a terminator is no operand", "getline;", SELECT_GET},
+    {"a source is no operand", "getline < file", SELECT_GET},
+    {"a grouping is no lvalue", "getline (x)", SELECT_GET},
+    {"a call is no lvalue", "getline f(x)", SELECT_GET},
+    {"a built-in name is no lvalue", "getline length", SELECT_GET},
+    {"a prefix update is no lvalue", "getline ++x", SELECT_GET},
+    {"a name is the target", "getline x", SELECT_TARGET_GET},
+    {"a source follows the target", "getline x < file", SELECT_TARGET_GET},
+    {"an operator follows the target", "getline x + 1", SELECT_TARGET_GET},
+    {"a single sign is no update", "getline x - -y", SELECT_TARGET_GET},
+    {"a postfix update takes the name", "getline x++", SELECT_GET},
+    {"a postfix decrement takes the name", "getline x --", SELECT_GET},
     {"an update before an operator stays postfix",
       "getline x++ + 1",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"an update before a name becomes its prefix",
       "getline x++ y",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"an operand behind the target is not looked into",
       "getline x a[i",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"alternating updates and names end in a postfix update",
       "getline x++ y++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"alternating updates and names end in a name",
       "getline x++ y-- z",
-      GETLINE_TARGET_WORD},
-    {"an update cannot prefix a call",
-      "getline x++ f(y)",
-      GETLINE_OMITTED_WORD},
-    {"two updates cannot both prefix", "getline x++ ++y", GETLINE_OMITTED_WORD},
-    {"a subscript belongs to the target",
-      "getline a[i, j]",
-      GETLINE_TARGET_WORD},
-    {"blanks may precede the subscript",
-      "getline a \t[i]--",
-      GETLINE_OMITTED_WORD},
+      SELECT_TARGET_GET},
+    {"an update cannot prefix a call", "getline x++ f(y)", SELECT_GET},
+    {"two updates cannot both prefix", "getline x++ ++y", SELECT_GET},
+    {"a subscript belongs to the target", "getline a[i, j]", SELECT_TARGET_GET},
+    {"blanks may precede the subscript", "getline a \t[i]--", SELECT_GET},
     {"nested groups and strings are skipped",
       "getline a[b[\"]\"], (c)]++",
-      GETLINE_OMITTED_WORD},
-    {"a slash behind an operand divides",
-      "getline a[i/2]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
+    {"a slash behind an operand divides", "getline a[i/2]++", SELECT_GET},
     {"a slash behind an operator opens an ERE",
       "getline a[x ~ /]/]++",
-      GETLINE_OMITTED_WORD},
-    {"a slash behind an update divides",
-      "getline a[i++ / 2]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
+    {"a slash behind an update divides", "getline a[i++ / 2]++", SELECT_GET},
     {"a continuation inside the subscript is layout",
       "getline a[i,\\\nj]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a raw newline behind a comma is layout",
       "getline a[i,\nj]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a comment behind a logical operator is layout",
       "getline a[i || # c\n\nj]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a raw newline behind an operand breaks the subscript",
       "getline a[i\n]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a comment behind an operand breaks the subscript",
       "getline a[i # c\n]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"an unterminated subscript preserves the keyword range",
       "getline a[i",
-      GETLINE_OMITTED_WORD},
-    {"a numbered field is an lvalue", "getline $1++", GETLINE_OMITTED_WORD},
-    {"a named field is an lvalue", "getline $ NF", GETLINE_TARGET_WORD},
-    {"nested fields are one lvalue", "getline $$a[1]++", GETLINE_OMITTED_WORD},
-    {"a grouped field is an lvalue",
-      "getline $(i + 1)++ y",
-      GETLINE_TARGET_WORD},
-    {"a fractional field index is an lvalue",
-      "getline $1.5e3f++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
+    {"a numbered field is an lvalue", "getline $1++", SELECT_GET},
+    {"a named field is an lvalue", "getline $ NF", SELECT_TARGET_GET},
+    {"nested fields are one lvalue", "getline $$a[1]++", SELECT_GET},
+    {"a grouped field is an lvalue", "getline $(i + 1)++ y", SELECT_TARGET_GET},
+    {"a fractional field index is an lvalue", "getline $1.5e3f++", SELECT_GET},
     {"a name behind a field index is another operand",
       "getline $1e++",
-      GETLINE_TARGET_WORD},
-    {"a string field index is an lvalue",
-      "getline $\"f\"++",
-      GETLINE_OMITTED_WORD},
-    {"an ERE field index is an lvalue",
-      "getline $/re/++",
-      GETLINE_OMITTED_WORD},
-    {"a call field index is an lvalue",
-      "getline $f(x)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_TARGET_GET},
+    {"a string field index is an lvalue", "getline $\"f\"++", SELECT_GET},
+    {"an ERE field index is an lvalue", "getline $/re/++", SELECT_GET},
+    {"a call field index is an lvalue", "getline $f(x)++", SELECT_GET},
     {"a built-in field index may omit its arguments",
       "getline $length++ y",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a built-in field index takes spaced arguments",
       "getline $length (x)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a getline inside the subscript is skipped",
       "getline a[getline x++]++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a unary field keeps a following update inside",
       "getline $-x++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a unary target completes its enclosing getline field",
       "getline $getline $-x",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a getline field without a target is an lvalue",
       "getline $getline++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a getline field takes no target that is no lvalue",
       "getline $getline length++",
       GETLINE_WORD},
     {"the earlier getline target precedes a nested target",
       "getline $getline x++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"an update before a name follows a getline field",
       "getline $getline x++ y",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a prefix-updated getline field gives up its target",
       "getline x++ $getline y++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a prefix-updated getline field with a target settles the target",
       "getline x++ $getline y a[i",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a prefix-updated getline field needs an lvalue behind its update",
       "getline x++ $getline++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a redirected getline field remains the target",
       "getline $getline < file",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a redirected field takes the update after a constant source",
       "getline $getline < \"f\" ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a source lvalue takes its own postfix update",
       "getline $getline < x++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a continued logical source skips the following raw newline",
       "getline $getline < (1 &&\\\n\n1)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a continued logical source skips the following comment",
       "getline $getline < (1 ||\\\n# source\n1)--",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a logical source alternates comments and continuations",
       "getline $getline < (1 && # first\n\\\n# second\n1)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a continued logical source preserves its own updated lvalue",
       "getline $getline < 1 &&\\\n# source\nx++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"an inner source target defers the enclosing target decision",
       "getline $getline < a < getline x++ < y",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a parenthesized source settles its inner target decision",
       "getline $getline < (getline x++)",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"an updated source leaves the second update for the field",
       "getline $getline < x++++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a pipe source leaves the update for the field",
       "getline $getline < (x | getline)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a source conditional keeps an update on its alternative",
       "getline $getline < a ? x : y++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"a grouped alternative leaves the update for the field",
       "getline $getline < (a ? x : (y))++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a prefix-updated field can omit its own redirected target",
       "getline x++ $getline $getline < 1 ++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"an incomplete exponent leaves its name for an update",
       "getline $getline < 1e++",
-      GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
     {"membership ends before a concatenated operand outside the inner field",
       "getline $getline < (($getline < 1 in a) 1)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"membership ends before a comparison outside the inner field",
       "getline $getline < (($getline < x in a) < \"f\")++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a pipe lets a comparison become the right operand of another comparison",
       "getline $getline < (x < (y < z | getline)) ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a pipe lets a match become the right operand of another match",
       "getline $getline < (x ~ (y ~ 1 | getline)) ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a pipe wraps a completed match before the following match",
       "getline $getline < (x ~ y | getline z ~ \"f\")++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a unary field ends before its enclosing getline source",
       "getline $getline $-x < (x | getline)++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a unary getline source defers its enclosing target decision",
       "getline $getline $-getline < 1 ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a logical-not getline source defers its enclosing target decision",
       "getline $getline $!getline < x -- ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a prefix-update getline source defers its enclosing target decision",
       "getline $getline $--$getline < 1 ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
     {"a compared getline field is an lvalue",
       "getline $getline <= x++",
-      GETLINE_TARGET_WORD},
-    {"a continuation precedes the update",
-      "getline x\\\n++",
-      GETLINE_OMITTED_WORD},
-    {"a raw newline ends the lookahead", "getline x\n++", GETLINE_TARGET_WORD},
-    {"a comment ends the lookahead", "getline x # c\n++", GETLINE_TARGET_WORD},
+      SELECT_TARGET_GET},
+    {"a continuation precedes the update", "getline x\\\n++", SELECT_GET},
+    {"a raw newline ends the lookahead", "getline x\n++", SELECT_TARGET_GET},
+    {"a comment ends the lookahead", "getline x # c\n++", SELECT_TARGET_GET},
     {"a stray backslash preserves the keyword range",
       "getline x \\ ++",
-      GETLINE_OMITTED_WORD},
+      SELECT_GET},
   };
-  bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [GETLINE_WORD] = true,
-    [GETLINE_TARGET_WORD] = true,
-    [GETLINE_OMITTED_WORD] = true,
-  };
-
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      true,
-      cases[i].expected_symbol,
-      7
-    );
+    size_t advances = 0;
+    enum TokenType actual = recognize_getline(cases[i].source, &advances, true);
+    if (
+      actual != cases[i].expected_symbol || advances > strlen(cases[i].source)
+    ) {
+      fprintf(
+        stderr,
+        "%s: selected=%u expected=%u advances=%zu\n",
+        cases[i].name,
+        actual,
+        cases[i].expected_symbol,
+        advances
+      );
+      failed = 1;
+    }
   }
-
-  valid_symbols[GETLINE_FIELD_WORD] = true;
-  failed |= expect_scan_result(
-    "a prefix-updated field keeps the lookahead",
-    "getline x--",
-    valid_symbols,
-    true,
-    GETLINE_OMITTED_WORD,
-    7
-  );
-  valid_symbols[GETLINE_WORD] = false;
-  valid_symbols[GETLINE_TARGET_WORD] = false;
-  valid_symbols[GETLINE_OMITTED_WORD] = false;
-  failed |= expect_scan_result(
-    "a getline directly under a field takes any following lvalue",
-    "getline x--",
-    valid_symbols,
-    true,
-    GETLINE_FIELD_WORD,
-    7
-  );
   return failed;
 }
 
 static int test_update_operator_lookahead(void) {
-  static const struct {
-    const char *name;
-    const char *source;
-    bool scanned;
-  } cases[] = {
-    {"a name follows", "++x", true},
-    {"a field follows", "++$1", true},
-    {"blanks precede the name", "++ \tx", true},
-    {"a continuation precedes the name", "++\\\nx", true},
-    {"the source ends", "++", false},
-    {"a terminator follows", "++;", false},
-    {"a raw newline follows", "++\nx", false},
-    {"a number follows", "++1", false},
-    {"a grouping follows", "++(x)", false},
-    {"a call follows", "++f(x)", false},
-    {"a built-in name follows", "++length", false},
-    {"a keyword follows", "++getline", false},
-    {"another update follows", "++ ++x", false},
-    {"a stray backslash follows", "++\\x", false},
-  };
-  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [INCR_OPERATOR] = true,
-    [PLUS_OPERATOR] = true,
-  };
-
+  const bool valid[TOKEN_TYPE_COUNT] = {[INCR_OPERATOR] = true};
   int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    failed |= expect_scan_result(
-      cases[i].name,
-      cases[i].source,
-      valid_symbols,
-      cases[i].scanned,
-      INCR_OPERATOR,
-      2
-    );
-  }
+  failed |= expect_scan_result(
+    "a selected postfix update needs no following operand",
+    "++",
+    valid,
+    true,
+    INCR_OPERATOR,
+    2
+  );
+  failed |= expect_scan_result(
+    "a selected prefix update excludes its operand",
+    "++x",
+    valid,
+    true,
+    INCR_OPERATOR,
+    2
+  );
   return failed;
 }
 
+#ifndef GETLINE_SOURCE_LOOKAHEAD_DEPTH
+#define GETLINE_SOURCE_LOOKAHEAD_DEPTH 64
+#endif
+
 static int test_deep_getline_source_lookahead(void) {
   const char fragment[] = "getline $getline < ";
-  const size_t depth = 8192;
+  const size_t depth = GETLINE_SOURCE_LOOKAHEAD_DEPTH;
   const size_t length = depth * (sizeof(fragment) - 1);
-  char *source = malloc(length + 6);
-  assert(source != NULL);
-  for (size_t i = 0; i < depth; i++) {
-    memcpy(source + i * (sizeof(fragment) - 1), fragment, sizeof(fragment) - 1);
-  }
-  const bool valid_symbols[TOKEN_TYPE_COUNT] = {
-    [GETLINE_TARGET_WORD] = true,
-    [GETLINE_OMITTED_WORD] = true,
-  };
   const struct {
     const char *source;
     enum TokenType expected_symbol;
   } tails[] = {
-    {"x", GETLINE_TARGET_WORD},
-    {"x++++", GETLINE_TARGET_WORD},
+    {"x", SELECT_TARGET_GET},
+    {"x++++", SELECT_TARGET_GET},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(tails); i++) {
+    char *source = malloc(length + strlen(tails[i].source) + 1);
+    assert(source != NULL);
+    for (size_t index = 0; index < depth; index++) {
+      memcpy(
+        source + index * (sizeof(fragment) - 1),
+        fragment,
+        sizeof(fragment) - 1
+      );
+    }
     memcpy(source + length, tails[i].source, strlen(tails[i].source) + 1);
-    MockLexer mock = make_mock_lexer(source);
-    ScannerState state = {0};
-    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-      &state,
-      &mock.lexer,
-      valid_symbols
-    );
-    if (
-      !scanned ||
-      mock.lexer.result_symbol !=
-      tails[i].expected_symbol ||
-      mock.token_end !=
-      7 ||
-      mock.advance_count > strlen(source)
-    ) {
+    size_t advances = 0;
+    const enum TokenType actual = recognize_getline(source, &advances, false);
+    if (actual != tails[i].expected_symbol || advances > strlen(source)) {
       fprintf(
         stderr,
-        "deep getline source %zu: invalid token or repeated source reads\n",
+        "deep getline source %zu: invalid selection or repeated source reads\n",
         i
       );
       failed = 1;
     }
-    char serialized[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
-    assert(
-      tree_sitter_posix_awk_external_scanner_serialize(&state, serialized) <=
-      TREE_SITTER_SERIALIZATION_BUFFER_SIZE
-    );
+    free(source);
   }
-  free(source);
   return failed;
 }
 
@@ -1220,17 +1294,19 @@ static int test_linear_word_boundary_lookahead(void) {
     {"linear getline operand continuation lookahead",
       "getline x ",
       "++",
-      GETLINE_OMITTED_WORD,
+      GETLINE_WORD,
       7,
       true},
   };
+  const char continuation[] = "\\\n";
+  const size_t continuation_bytes = sizeof(continuation) - 1;
   const size_t continuation_count = 32768;
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
     const size_t prefix_length = strlen(cases[i].prefix);
     const size_t suffix_length = strlen(cases[i].suffix);
     const size_t source_length =
-      prefix_length + continuation_count * 2U + suffix_length;
+      prefix_length + continuation_count * continuation_bytes + suffix_length;
     char *source = malloc(source_length + 1U);
     if (source == NULL) {
       fprintf(stderr, "%s: allocation failed\n", cases[i].name);
@@ -1238,11 +1314,14 @@ static int test_linear_word_boundary_lookahead(void) {
     }
     memcpy(source, cases[i].prefix, prefix_length);
     for (size_t index = 0; index < continuation_count; index++) {
-      source[prefix_length + index * 2U] = '\\';
-      source[prefix_length + index * 2U + 1U] = '\n';
+      memcpy(
+        source + prefix_length + index * continuation_bytes,
+        continuation,
+        continuation_bytes
+      );
     }
     memcpy(
-      source + prefix_length + continuation_count * 2U,
+      source + prefix_length + continuation_count * continuation_bytes,
       cases[i].suffix,
       suffix_length + 1U
     );
@@ -1251,20 +1330,15 @@ static int test_linear_word_boundary_lookahead(void) {
     ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
     bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
     valid_symbols[cases[i].expected_symbol] = true;
-    valid_symbols[GETLINE_TARGET_WORD] =
-      cases[i].expected_symbol == GETLINE_OMITTED_WORD;
     const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
       &state,
       &mock.lexer,
       valid_symbols
     );
-    const bool valid_result = scanned ==
-      cases[i].expected_scanned &&
+    const bool valid_result = scanned == cases[i].expected_scanned &&
       (!scanned || mock.lexer.result_symbol == cases[i].expected_symbol) &&
-      mock.token_start ==
-      0 &&
-      mock.token_end ==
-      cases[i].expected_token_end &&
+      mock.token_start == 0 &&
+      mock.token_end == cases[i].expected_token_end &&
       mock.advance_count <= source_length;
     if (!valid_result) {
       fprintf(
@@ -1284,63 +1358,27 @@ static int test_linear_word_boundary_lookahead(void) {
   return failed;
 }
 
-static int test_long_token_spans(void) {
-  static const struct {
-    const char *name;
-    char character;
-    const char *suffix;
-    enum TokenType token;
-    LexicalMode mode;
-  } cases[] = {
-    {"long function name is not truncated",
-      'a',
-      "(",
-      FUNC_NAME_WORD,
-      LEXICAL_MODE_OUTSIDE},
-  };
-  const size_t token_length = 65536;
-  int failed = 0;
-  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    char *source = malloc(token_length + 2);
-    assert(source != NULL);
-    memset(source, cases[i].character, token_length);
-    memcpy(source + token_length, cases[i].suffix, 2);
-    MockLexer mock = make_mock_lexer(source);
-    ScannerState state = {.mode = cases[i].mode};
-    bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
-    valid_symbols[cases[i].token] = true;
-    const bool scanned = tree_sitter_posix_awk_external_scanner_scan(
-      &state,
-      &mock.lexer,
-      valid_symbols
-    );
-    if (
-      !scanned ||
-      mock.lexer.result_symbol !=
-      cases[i].token ||
-      mock.token_start !=
-      0 ||
-      mock.token_end !=
-      token_length ||
-      mock.advance_count >
-      token_length +
-      1 ||
-      state.mode != cases[i].mode
-    ) {
-      fprintf(
-        stderr,
-        "%s: scanned=%u start=%zu end=%zu advances=%zu\n",
-        cases[i].name,
-        scanned,
-        mock.token_start,
-        mock.token_end,
-        mock.advance_count
-      );
-      failed = 1;
-    }
-    free(source);
-  }
-  return failed;
+static void test_long_function_name(void) {
+  const size_t name_bytes = 65536;
+  const char suffix[] = "(";
+  char *source = malloc(name_bytes + sizeof(suffix));
+  assert(source != NULL);
+  memset(source, 'a', name_bytes);
+  memcpy(source + name_bytes, suffix, sizeof(suffix));
+  MockLexer mock = make_mock_lexer(source);
+  ScannerState state = {.mode = LEXICAL_MODE_OUTSIDE};
+  const bool valid_symbols[TOKEN_TYPE_COUNT] = {[FUNC_NAME_WORD] = true};
+  assert(tree_sitter_posix_awk_external_scanner_scan(
+    &state,
+    &mock.lexer,
+    valid_symbols
+  ));
+  assert(mock.lexer.result_symbol == FUNC_NAME_WORD);
+  assert(mock.token_start == 0);
+  assert(mock.token_end == name_bytes);
+  assert(mock.advance_count <= name_bytes + sizeof(suffix) - 1);
+  assert(state.mode == LEXICAL_MODE_OUTSIDE);
+  free(source);
 }
 
 static int test_ere_state_transitions(void) {
@@ -1896,20 +1934,14 @@ static int check_round_trip(
 ) {
   ScannerState source = {.mode = mode};
   ScannerState destination = {.mode = LEXICAL_MODE_STRING};
-  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE + 2];
-  memset(buffer, 0x5a, sizeof(buffer));
-  const unsigned length =
-    tree_sitter_posix_awk_external_scanner_serialize(&source, buffer + 1);
-  assert(length <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
-  assert(buffer[0] == 0x5a);
-  for (size_t index = length + 1; index < sizeof(buffer); index++) {
-    assert(buffer[index] == 0x5a);
-  }
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+  const unsigned length = serialize_state(&source, buffer);
   tree_sitter_posix_awk_external_scanner_deserialize(
     &destination,
-    buffer + 1,
+    buffer,
     length
   );
+  assert_state_equal(&destination, &source);
   return expect_length(test_name, expected_length, length) |
     expect_mode(test_name, mode, destination.mode);
 }
@@ -1922,12 +1954,43 @@ static void test_lifecycle(void) {
   tree_sitter_posix_awk_external_scanner_deserialize(state, NULL, 0);
   assert(state->mode == LEXICAL_MODE_OUTSIDE);
   tree_sitter_posix_awk_external_scanner_destroy(state);
+
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+  bool valid_symbols[TOKEN_TYPE_COUNT];
+  set_all_symbols_valid(valid_symbols);
+  MockLexer mock = make_mock_lexer("x");
+  tree_sitter_posix_awk_external_scanner_deserialize(NULL, buffer, 0);
+  assert(tree_sitter_posix_awk_external_scanner_serialize(NULL, buffer) == 0);
+  assert(!tree_sitter_posix_awk_external_scanner_scan(
+    NULL,
+    &mock.lexer,
+    valid_symbols
+  ));
+  assert(mock.advance_count == 0);
+  tree_sitter_posix_awk_external_scanner_destroy(NULL);
+}
+
+static void test_failed_probe_reads_as_end_of_input(void) {
+  MockLexer mock = make_mock_lexer("x in a)");
+  InputProbe probe = {
+    .lexer =
+      {.lookahead = mock.lexer.lookahead,
+        .advance = probe_advance,
+        .mark_end = probe_mark_end,
+        .eof = probe_eof},
+    .source = &mock.lexer
+  };
+  probe_advance(&probe.lexer, false);
+  probe.failed = true;
+  probe_restore(&probe, 0);
+  assert(probe.lexer.lookahead == 0 && probe_eof(&probe.lexer));
+  assert(scan_word_spelling(&probe.lexer) == WORD_NONE);
+  ts_free(probe.characters);
 }
 
 static void test_nul_and_eof_are_distinct(void) {
   const char source[] = "#a\0b\n";
-  MockLexer comment = make_mock_lexer(source);
-  comment.length = sizeof(source) - 1;
+  MockLexer comment = make_mock_lexer_bytes(source, sizeof(source) - 1);
   ScannerState state = {0};
   bool valid_symbols[TOKEN_TYPE_COUNT] = {[COMMENT] = true};
   assert(tree_sitter_posix_awk_external_scanner_scan(
@@ -1948,36 +2011,32 @@ static void test_nul_and_eof_are_distinct(void) {
   assert(state.mode == LEXICAL_MODE_OUTSIDE);
 }
 
-static void test_disabled_tokens_preserve_state(void) {
-  const struct {
-    const char *source;
-    size_t length;
-  } inputs[] = {
-    {"BEGIN", 5},
-    {"/", 1},
-    {"\"", 1},
-    {"#comment", 8},
-    {"\n", 1},
-    {"", 0},
-    {"\0", 1},
-  };
+static void
+assert_disabled_scan(const char *source, size_t length, LexicalMode mode) {
   const bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
+  const ScannerState initial = {.mode = mode};
+  ScannerState state = initial;
+  MockLexer mock = make_mock_lexer_bytes(source, length);
+  assert(!tree_sitter_posix_awk_external_scanner_scan(
+    &state,
+    &mock.lexer,
+    valid_symbols
+  ));
+  assert_state_equal(&state, &initial);
+}
+
+static void test_disabled_tokens_preserve_state(void) {
+  const char *sources[] = {"BEGIN", "/", "\"", "#comment", "\n", ""};
+  const char nul[] = "\0";
   for (
     LexicalMode mode = LEXICAL_MODE_OUTSIDE;
     mode <= LEXICAL_MODE_CONTINUED_NEWLINE;
     mode++
   ) {
-    for (size_t index = 0; index < ARRAY_LENGTH(inputs); index++) {
-      MockLexer mock = make_mock_lexer(inputs[index].source);
-      mock.length = inputs[index].length;
-      ScannerState state = {.mode = mode};
-      assert(!tree_sitter_posix_awk_external_scanner_scan(
-        &state,
-        &mock.lexer,
-        valid_symbols
-      ));
-      assert(state.mode == mode);
+    for (size_t index = 0; index < ARRAY_LENGTH(sources); index++) {
+      assert_disabled_scan(sources[index], strlen(sources[index]), mode);
     }
+    assert_disabled_scan(nul, sizeof(nul) - 1, mode);
   }
 }
 
@@ -1985,42 +2044,34 @@ static int test_serialization(void) {
   static const struct {
     const char *name;
     LexicalMode mode;
-    unsigned length;
   } cases[] = {
-    {"outside mode round trip", LEXICAL_MODE_OUTSIDE, 0},
-    {"ERE body mode round trip",
-      LEXICAL_MODE_ERE_BODY,
-      SERIALIZED_SCANNER_STATE_SIZE},
-    {"collating symbol mode round trip",
-      LEXICAL_MODE_ERE_COLLATING,
-      SERIALIZED_SCANNER_STATE_SIZE},
-    {"equivalence class mode round trip",
-      LEXICAL_MODE_ERE_EQUIVALENCE,
-      SERIALIZED_SCANNER_STATE_SIZE},
-    {"character class mode round trip",
-      LEXICAL_MODE_ERE_CLASS,
-      SERIALIZED_SCANNER_STATE_SIZE},
-    {"string mode round trip",
-      LEXICAL_MODE_STRING,
-      SERIALIZED_SCANNER_STATE_SIZE},
-    {"continued newline mode round trip",
-      LEXICAL_MODE_CONTINUED_NEWLINE,
-      SERIALIZED_SCANNER_STATE_SIZE},
+    {"outside mode round trip", LEXICAL_MODE_OUTSIDE},
+    {"ERE body mode round trip", LEXICAL_MODE_ERE_BODY},
+    {"collating symbol mode round trip", LEXICAL_MODE_ERE_COLLATING},
+    {"equivalence class mode round trip", LEXICAL_MODE_ERE_EQUIVALENCE},
+    {"character class mode round trip", LEXICAL_MODE_ERE_CLASS},
+    {"string mode round trip", LEXICAL_MODE_STRING},
+    {"continued newline mode round trip", LEXICAL_MODE_CONTINUED_NEWLINE},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
-    failed |= check_round_trip(cases[i].name, cases[i].mode, cases[i].length);
+    failed |=
+      check_round_trip(cases[i].name, cases[i].mode, SERIALIZED_HEADER_BYTES);
   }
+  ScannerState source = {.mode = LEXICAL_MODE_ERE_BODY};
+  char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+  const unsigned length = serialize_state(&source, buffer);
   const char invalid_modes[] = {
     (char)(LEXICAL_MODE_CONTINUED_NEWLINE + 1),
-    (char)0xff
+    (char)UINT8_MAX
   };
   for (size_t i = 0; i < ARRAY_LENGTH(invalid_modes); i++) {
     ScannerState destination = {.mode = LEXICAL_MODE_STRING};
+    buffer[0] = invalid_modes[i];
     tree_sitter_posix_awk_external_scanner_deserialize(
       &destination,
-      &invalid_modes[i],
-      1
+      buffer,
+      length
     );
     failed |= expect_mode(
       "invalid encoded mode resets state",
@@ -2028,8 +2079,8 @@ static int test_serialization(void) {
       destination.mode
     );
   }
-  const char buffer[] = {LEXICAL_MODE_ERE_BODY, 0};
-  const unsigned invalid_lengths[] = {0, 2};
+  buffer[0] = LEXICAL_MODE_ERE_BODY;
+  const unsigned invalid_lengths[] = {0, 1, 2, SERIALIZED_HEADER_BYTES - 1};
   for (size_t i = 0; i < ARRAY_LENGTH(invalid_lengths); i++) {
     ScannerState destination = {.mode = LEXICAL_MODE_STRING};
     tree_sitter_posix_awk_external_scanner_deserialize(
@@ -2046,85 +2097,299 @@ static int test_serialization(void) {
   return failed;
 }
 
-static void test_getline_decision_serialization(void) {
-  const unsigned char decisions[] = {
-    DECISION_GETLINE | 3,
-    DECISION_FIELD,
-    DECISION_GETLINE,
-    DECISION_FIELD | 1,
-  };
+static void test_expression_boundary_serialization(void) {
   ScannerState original = {
     .mode = LEXICAL_MODE_STRING,
-    .updates = UINT64_C(0x102030405060708),
-    .remaining_decisions = 4003,
-    .decision_count = sizeof(decisions),
+    .boundary = {
+      .active = UINT64_C(0x123456789),
+      .pending = {UINT64_C(0x223456789), UINT64_C(0x323456789)},
+      .next = UINT64_C(0x423456789),
+      .carry = UINT64_C(0x523456789),
+      .phase = BOUNDARY_SAVING,
+      .selected = SELECT_TARGET_GET,
+      .unary = true,
+      .print = true,
+      .decision_hash = UINT64_C(0xe123456789abcdef),
+      .cache_count = 1,
+      .cache_repeats = 3,
+      .cache_delta = 4,
+      .cache = {
+        {.descriptor = UINT64_C(0x67200000040),
+          .children = {UINT64_C(0x6720000003c), UINT64_C(0xc200000003)},
+          .repeat = 1}
+      }
+    }
   };
-  memcpy(original.decisions, decisions, sizeof(decisions));
   char buffer[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
-  const unsigned length =
-    tree_sitter_posix_awk_external_scanner_serialize(&original, buffer);
-  assert(length == SERIALIZED_SCANNER_STATE_SIZE + sizeof(decisions));
+  unsigned length = serialize_state(&original, buffer);
+  assert(length == SERIALIZED_HEADER_BYTES + SERIALIZED_OUTLINE_BYTES);
   ScannerState restored = {0};
   tree_sitter_posix_awk_external_scanner_deserialize(&restored, buffer, length);
-  assert(restored.mode == original.mode);
-  assert(restored.updates == original.updates);
-  for (size_t i = 0; i < 4003; i++) {
-    const int expected = decisions[i % sizeof(decisions)];
-    assert(
-      take_decision(&restored, (expected & 12) == DECISION_FIELD) ==
-      (expected & 3)
-    );
-  }
-  assert(take_decision(&restored, false) == -1);
-  assert(restored.remaining_decisions == 0);
-
-  buffer[9]++;
+  assert_state_equal(&restored, &original);
+  char again[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+  assert(serialize_state(&restored, again) == length);
+  assert(memcmp(buffer, again, length) == 0);
+  original.boundary.cache_count = BOUNDARY_CACHE_CAPACITY;
+  for (unsigned i = 1; i < BOUNDARY_CACHE_CAPACITY; i++)
+    original.boundary.cache[i] = original.boundary.cache[0];
+  length = serialize_state(&original, buffer);
+  assert(
+    length ==
+    SERIALIZED_HEADER_BYTES + BOUNDARY_CACHE_CAPACITY * SERIALIZED_OUTLINE_BYTES
+  );
   tree_sitter_posix_awk_external_scanner_deserialize(&restored, buffer, length);
-  assert(restored.mode == LEXICAL_MODE_OUTSIDE);
-  assert(restored.updates == 0);
-  assert(restored.decision_count == 0);
-  assert(restored.remaining_decisions == 0);
+  assert_state_equal(&restored, &original);
+  assert(serialize_state(&restored, again) == length);
+  assert(memcmp(buffer, again, length) == 0);
+  buffer[SERIALIZED_CACHE_COUNT_OFFSET] = BOUNDARY_CACHE_CAPACITY + 1;
+  tree_sitter_posix_awk_external_scanner_deserialize(&restored, buffer, length);
+  assert(
+    restored.mode == LEXICAL_MODE_OUTSIDE &&
+    !restored.boundary.active &&
+    !restored.boundary.decision_hash &&
+    !restored.boundary.cache_count
+  );
 }
 
-static void test_getline_group_isolation(void) {
-  ScannerState state = {
-    .updates = 2,
-    .remaining_decisions = 1,
-    .decision_count = 1,
-    .decisions = {DECISION_GETLINE | 1},
+static void test_expression_decisions_survive_child_boundaries(void) {
+  ScannerState states[] = {
+    {.boundary = {.selected = SELECT_GET, .pending = {1, 0}}},
+    {.boundary = {.selected = SELECT_TARGET_GET, .pending = {1, 0}}},
   };
-  const bool opening[TOKEN_TYPE_COUNT] = {
-    [BEGIN_ISOLATION] = true,
-    [SUSPEND_UPDATE] = true,
+  const bool stages[][TOKEN_TYPE_COUNT] = {
+    {[SELECT_GET] = true, [SELECT_TARGET_GET] = true},
+    {[BEGIN_CHILD] = true},
+    {[END_CHILD] = true},
+    {[RESUME] = true},
   };
-  MockLexer mock = make_mock_lexer("getline x++");
-  for (size_t i = 0; i < 2; i++) {
+  for (size_t step = 0; step < ARRAY_LENGTH(stages); step++) {
+    for (size_t i = 0; i < ARRAY_LENGTH(states); i++) {
+      MockLexer mock = make_mock_lexer("x");
+      assert(tree_sitter_posix_awk_external_scanner_scan(
+        &states[i],
+        &mock.lexer,
+        stages[step]
+      ));
+    }
+    assert(
+      states[0].boundary.decision_hash != states[1].boundary.decision_hash
+    );
+  }
+  const bool roots[][TOKEN_TYPE_COUNT] = {
+    {[ROOT] = true},
+    {[ROOT] = true, [LOCAL_ROOT] = true},
+  };
+  for (size_t i = 0; i < ARRAY_LENGTH(states); i++) {
+    const uint64_t decisions = states[i].boundary.decision_hash;
+    const bool disabled[TOKEN_TYPE_COUNT] = {false};
+    MockLexer mock = make_mock_lexer("x");
+    assert(!tree_sitter_posix_awk_external_scanner_scan(
+      &states[i],
+      &mock.lexer,
+      disabled
+    ));
+    assert(states[i].boundary.decision_hash == decisions);
+    mock = make_mock_lexer("x");
+    assert(tree_sitter_posix_awk_external_scanner_scan(
+      &states[i],
+      &mock.lexer,
+      roots[i]
+    ));
+    assert(!states[i].boundary.decision_hash);
+  }
+}
+
+static int test_local_expression_selection(void) {
+  static const struct {
+    const char *name, *source;
+    bool print;
+    enum TokenType expected;
+  } cases[] = {
+    {"ordinary updates stay in grammar", "$x++ + --y", false, LOCAL_ROOT},
+    {"nested target without a source stays in grammar",
+      "$(getline $(x))",
+      false,
+      LOCAL_ROOT},
+    {"source ownership needs selection", "getline $getline < x", false, ROOT},
+    {"grouped target updates stay in grammar",
+      "getline $(x++)",
+      false,
+      LOCAL_ROOT},
+    {"a grouped getline does not own an outer comparison",
+      "(getline x) < y",
+      false,
+      LOCAL_ROOT},
+    {"a preceding comparison does not enter a grouped getline",
+      "x < (getline y)",
+      false,
+      LOCAL_ROOT},
+    {"an outer update does not enter a grouped getline",
+      "(getline x) + y++",
+      false,
+      LOCAL_ROOT},
+    {"a preceding update does not enter a grouped getline",
+      "y++ + (getline x)",
+      false,
+      LOCAL_ROOT},
+    {"arguments select ownership independently",
+      "f(getline x, ++y)",
+      false,
+      LOCAL_ROOT},
+    {"a later argument does not inherit updates",
+      "f(++y, getline x)",
+      false,
+      LOCAL_ROOT},
+    {"subscripts select ownership independently",
+      "a[getline x, i++]",
+      false,
+      LOCAL_ROOT},
+    {"an update within a target subscript stays in grammar",
+      "getline a[i++]",
+      false,
+      LOCAL_ROOT},
+    {"a comparison token is not a file source operator",
+      "getline x <= 0",
+      false,
+      LOCAL_ROOT},
+    {"comparison tokens do not hide ambiguous updates",
+      "getline x <= y++",
+      false,
+      ROOT},
+    {"an ambiguous argument still needs selection",
+      "f(1, getline x++)",
+      false,
+      ROOT},
+    {"a grouped source still needs selection",
+      "(getline x < file) + y++",
+      false,
+      ROOT},
+    {"closing a subscript restores outer ownership candidates",
+      "getline a[i++, j]++",
+      false,
+      ROOT},
+    {"closing a group restores a preceding ownership operator",
+      "x++ + (y) + getline z",
+      false,
+      ROOT},
+    {"a pipe needs selection", "x | getline y", false, ROOT},
+    {"reserved word prefixes are names", "getline_value++", false, LOCAL_ROOT},
+    {"literal contents do not require selection",
+      "\"getline < x++\" ~ /getline[<+]/",
+      false,
+      LOCAL_ROOT},
+    {"comments do not require selection",
+      "x && # getline < x++\n y",
+      false,
+      LOCAL_ROOT},
+    {"continued input still selects getline ownership",
+      "x + \\\n getline y++",
+      false,
+      ROOT},
+    {"print redirection ends the local region",
+      "x > getline y++",
+      true,
+      LOCAL_PRINT_ROOT},
+    {"logical or does not end the print region",
+      "x || $getline y++",
+      true,
+      PRINT_ROOT},
+    {"parentheses isolate print redirection",
+      "(x > getline y++)",
+      true,
+      PRINT_ROOT},
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    bool valid[TOKEN_TYPE_COUNT] = {false};
+    valid[cases[i].print ? PRINT_ROOT : ROOT] = true;
+    valid[cases[i].print ? LOCAL_PRINT_ROOT : LOCAL_ROOT] = true;
+    failed |= expect_scan_result(
+      cases[i].name,
+      cases[i].source,
+      valid,
+      true,
+      cases[i].expected,
+      0
+    );
+  }
+  return failed;
+}
+
+static void test_linear_local_expression_lookahead(void) {
+  const size_t nesting_depth = 8192;
+  const char prefix[] = "getline $(";
+  const char inner[] = "x++";
+  char *source = malloc(
+    nesting_depth * (sizeof(prefix) - 1) + sizeof(inner) + nesting_depth
+  );
+  assert(source);
+  size_t offset = 0;
+  for (size_t i = 0; i < nesting_depth; i++) {
+    memcpy(source + offset, prefix, sizeof(prefix) - 1);
+    offset += sizeof(prefix) - 1;
+  }
+  memcpy(source + offset, inner, sizeof(inner) - 1);
+  offset += sizeof(inner) - 1;
+  memset(source + offset, ')', nesting_depth);
+  offset += nesting_depth;
+  source[offset] = '\0';
+  MockLexer mock = make_mock_lexer(source);
+  ScannerState state = {0};
+  const bool valid[TOKEN_TYPE_COUNT] = {[ROOT] = true, [LOCAL_ROOT] = true};
+  assert(
+    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, valid)
+  );
+  assert(mock.lexer.result_symbol == LOCAL_ROOT && mock.token_end == 0);
+  assert(mock.advance_count == offset);
+  assert(
+    !state.boundary.active &&
+    !state.boundary.pending[0] &&
+    !state.boundary.cache_count
+  );
+  free(source);
+}
+
+static void test_expression_boundary_restoration(void) {
+  const uint64_t child = UINT64_C(0x1c200000001),
+                 sibling = UINT64_C(0x123456789abcdef);
+  ScannerState state = {.boundary = {.pending = {child, sibling}}};
+  bool opening[TOKEN_TYPE_COUNT] = {[BEGIN_CHILD] = true};
+  for (unsigned i = 0; i < BOUNDARY_RADIX; i++) opening[SAVE_FIRST + i] = true;
+  unsigned digits[BOUNDARY_DIGIT_COUNT], count = 0;
+  for (;;) {
+    MockLexer mock = make_mock_lexer("getline");
     assert(
       tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, opening)
     );
-    assert(mock.lexer.result_symbol == SUSPEND_UPDATE);
     assert(mock.token_end == 0);
-    assert(state.updates == 1 - i);
+    if (mock.lexer.result_symbol == BEGIN_CHILD) break;
+    assert(count < ARRAY_LENGTH(digits));
+    digits[count++] = mock.lexer.result_symbol - SAVE_FIRST;
+    char bytes[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+    unsigned length = serialize_state(&state, bytes);
+    tree_sitter_posix_awk_external_scanner_deserialize(&state, bytes, length);
   }
-  assert(
-    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, opening)
-  );
-  assert(mock.lexer.result_symbol == BEGIN_ISOLATION);
-  assert(state.decision_count == 0);
-  const bool closing[TOKEN_TYPE_COUNT] = {[RESTORE_UPDATE] = true};
-  mock = make_mock_lexer(")");
-  for (size_t i = 0; i < 2; i++) {
+  assert(state.boundary.active == child);
+  const bool end[TOKEN_TYPE_COUNT] = {[END_CHILD] = true};
+  MockLexer mock = make_mock_lexer(" + next");
+  assert(tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, end));
+  assert(mock.token_end == 0 && mock.advance_count == 0);
+  while (count) {
+    bool restore[TOKEN_TYPE_COUNT] = {false};
+    restore[RESTORE_FIRST + digits[--count]] = true;
     assert(
-      tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, closing)
+      tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, restore)
     );
-    assert(mock.lexer.result_symbol == RESTORE_UPDATE);
     assert(mock.token_end == 0);
-    assert(state.updates == i + 1);
   }
+  const bool resume[TOKEN_TYPE_COUNT] = {[RESUME] = true};
   assert(
-    !tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, opening)
+    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, resume)
   );
-  assert(state.updates == 2);
+  assert(
+    state.boundary.pending[0] == sibling &&
+    state.boundary.phase == BOUNDARY_READY
+  );
 }
 
 #ifdef TREE_SITTER_REUSE_ALLOCATOR
@@ -2136,6 +2401,20 @@ static void test_reuse_allocator_contract(void) {
   reuse_fail_next_calloc = true;
   assert(tree_sitter_posix_awk_external_scanner_create() == NULL);
   assert(!reuse_fail_next_calloc);
+  assert(reuse_live_allocations == 0);
+
+  const bool for_in[TOKEN_TYPE_COUNT] = {
+    [FOR_IN] = true,
+    [ROOT] = true,
+    [LOCAL_ROOT] = true,
+  };
+  MockLexer mock = make_mock_lexer("x in a) y");
+  ScannerState state = {0};
+  reuse_fail_next_realloc = true;
+  assert(
+    !tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, for_in)
+  );
+  assert(!reuse_fail_next_realloc);
   assert(reuse_live_allocations == 0);
 }
 #endif
@@ -2343,11 +2622,15 @@ static int test_compound_terminators_do_not_become_content(void) {
 int main(void) {
   int failed = 0;
   test_lifecycle();
+  test_failed_probe_reads_as_end_of_input();
   test_nul_and_eof_are_distinct();
   test_disabled_tokens_preserve_state();
   failed |= test_serialization();
-  test_getline_decision_serialization();
-  test_getline_group_isolation();
+  test_expression_boundary_serialization();
+  test_expression_decisions_survive_child_boundaries();
+  failed |= test_local_expression_selection();
+  test_linear_local_expression_lookahead();
+  test_expression_boundary_restoration();
   failed |= test_source_token_ranges();
   failed |= test_update_operator_boundaries();
   failed |= test_prefix_operator_boundaries();
@@ -2365,7 +2648,7 @@ int main(void) {
   failed |= test_update_operator_lookahead();
   failed |= test_deep_getline_source_lookahead();
   failed |= test_linear_word_boundary_lookahead();
-  failed |= test_long_token_spans();
+  test_long_function_name();
   failed |= test_ere_state_transitions();
   failed |= test_collating_payload_classification();
   failed |= test_compound_terminators_do_not_become_content();

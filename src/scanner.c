@@ -169,6 +169,7 @@ typedef struct {
 
 #define SAVE_FIRST SAVE_0
 #define RESTORE_FIRST RESTORE_0
+enum { SAVED_DIGITS = RESTORE_FIRST - SAVE_FIRST };
 // BEGIN generated reserved words from grammar.js.
 enum {
   MAX_RESERVED_WORD_LENGTH = 8,
@@ -736,7 +737,7 @@ static bool skip_group(TSLexer *lexer, bool *tuple) {
       depth--;
       after_operand = true;
     } else if (character_in(character, "+-") && lexer->lookahead == character) {
-      // A slash after an update divides: prefix updates require an lvalue.
+      // Updates require lvalues, so a following slash divides.
       lexer->advance(lexer, false);
       after_operand = true;
     } else if (character_in(character, "&|") && lexer->lookahead == character) {
@@ -744,6 +745,8 @@ static bool skip_group(TSLexer *lexer, bool *tuple) {
       after_operand = false;
       separated = true;
     } else {
+      if (character == '{' || character == '}' || character == ';')
+        return false;
       after_operand = is_word_continue(character) || character == '.';
       separated = character == ',';
     }
@@ -762,7 +765,7 @@ static WordAtom word_atom(TSLexer *lexer, WordKind word) {
   return ATOM_PLAIN;
 }
 
-// Preserve the source lexer's furthest lookahead when restoring this cursor.
+// Restoring the probe must preserve furthest lookahead.
 typedef struct {
   TSLexer lexer;
   TSLexer *source;
@@ -1010,13 +1013,6 @@ static int probe_precedence(int token) {
 }
 
 typedef struct {
-  size_t end;
-  int ceiling, kind;
-  bool lvalue, postfix, unary;
-  uint64_t children[2];
-} RecognizedExpression;
-
-typedef struct {
   int *tokens;
   size_t length, capacity;
   bool failed;
@@ -1081,7 +1077,6 @@ static int descriptor_kind(uint64_t descriptor) {
   return signature_kind(descriptor_signature(descriptor));
 }
 
-// Store the short signature in low bits to reduce base-4 stack digits.
 enum { SAVED_SIGNATURE_BITS = 17 };
 static const uint64_t SAVED_SIGNATURE_MASK =
   (UINT64_C(1) << SAVED_SIGNATURE_BITS) - 1;
@@ -1099,19 +1094,6 @@ static uint64_t restored_descriptor(uint64_t saved) {
       (uint32_t)(saved & SAVED_SIGNATURE_MASK),
       (uint32_t)(saved >> SAVED_SIGNATURE_BITS)
     );
-}
-
-static RecognizedExpression outline_expression(BoundaryOutline outline) {
-  const uint32_t signature = descriptor_signature(outline.descriptor);
-  return (RecognizedExpression){
-    .end = descriptor_length(outline.descriptor),
-    .kind = descriptor_kind(outline.descriptor),
-    .ceiling = signature_ceiling(signature),
-    .lvalue = signature & SIGNATURE_LVALUE,
-    .postfix = signature & SIGNATURE_POSTFIX,
-    .unary = signature & SIGNATURE_UNARY,
-    .children = {outline.children[0], outline.children[1]},
-  };
 }
 
 static void recognizer_destroy(RecognizerInput *parser) {
@@ -1669,10 +1651,6 @@ static void recognizer_step(Recognizer *parser) {
       frame->stage = RECOGNIZER_BINARY;
       break;
     case RECOGNIZER_BINARY: {
-      if (frame->precedence == EXPR_CONCATENATION && parser->value.unary) {
-        parser->valid = false;
-        break;
-      }
       const bool unary = frame->left.unary;
       frame->left = recognizer_node(
         parser,
@@ -2144,11 +2122,6 @@ shared_compute(SharedRecognition *parser, uint32_t start, int minimum) {
     for (size_t i = 0; i < rights->length && !parser->failed; i++) {
       const uint32_t right = rights->items[i];
       const SharedNode child = parser->nodes[right - 1];
-      if (
-        next.precedence == EXPR_CONCATENATION &&
-        (shared_shape(child) & SIGNATURE_UNARY)
-      )
-        continue;
       shared_add(
         parser,
         &work,
@@ -2359,7 +2332,7 @@ static bool recognizer_parse(RecognizerInput *input) {
     size_t position = input->length;
     while (position && !parser.alternatives[position - 1]) position--;
     if (!position) break;
-    // Only positions past the backtrack point have exhausted all choices.
+    // Only positions beyond the backtrack point are exhausted.
     for (size_t i = 0; i < parser.history_count; i++) {
       if (parser.history[i].position > position - 1)
         recognizer_failed(&parser, parser.history[i], true);
@@ -2399,7 +2372,11 @@ boundary_emit(TSLexer *lexer, BoundaryState *state, unsigned token) {
   return true;
 }
 
-// Periodic caches store shift flags in the repeat field.
+static void cache_clear(BoundaryState *state) {
+  state->cache_count = state->cache_index = state->cache_repeats =
+    state->cache_delta = 0;
+}
+
 enum {
   SHIFT_DESCRIPTOR = 1,
   SHIFT_LEFT = 2,
@@ -2535,8 +2512,7 @@ static bool cache_period(
 
 static void
 cache_boundary(BoundaryState *state, const RecognizerInput *parser) {
-  state->cache_count = state->cache_index = state->cache_repeats =
-    state->cache_delta = 0;
+  cache_clear(state);
   if (!BOUNDARY_CACHE_CAPACITY || !parser->tree_root) return;
   if (parser->tree_count > SIZE_MAX / 2 / sizeof(size_t) - 1) return;
   size_t *order = ts_calloc(parser->tree_count * 2 + 2, sizeof(*order));
@@ -2576,17 +2552,13 @@ cache_boundary(BoundaryState *state, const RecognizerInput *parser) {
   ts_free(order);
 }
 
-static bool take_boundary(
-  BoundaryState *state,
-  uint64_t requested,
-  RecognizedExpression *node
-) {
+static bool
+take_boundary(BoundaryState *state, uint64_t requested, BoundaryOutline *node) {
   if (
     !state->cache_count ||
     state->cache[state->cache_index].descriptor != requested
   ) {
-    state->cache_count = state->cache_index = state->cache_repeats =
-      state->cache_delta = 0;
+    cache_clear(state);
     return false;
   }
   BoundaryOutline outline = state->cache[state->cache_index];
@@ -2603,7 +2575,7 @@ static bool take_boundary(
           if (cached->repeat & SHIFT_RIGHT)
             cached->children[1] -= state->cache_delta;
         }
-      } else state->cache_count = state->cache_delta = 0;
+      } else cache_clear(state);
     }
   } else if (--state->cache[0].repeat) {
     uint32_t delta = descriptor_length(outline.descriptor) -
@@ -2618,7 +2590,7 @@ static bool take_boundary(
       state->cache_count * sizeof(*state->cache)
     );
   }
-  *node = outline_expression(outline);
+  *node = outline;
   return true;
 }
 
@@ -2635,7 +2607,7 @@ static void collect_expression(
     const int token = probe_token(input, expect_operand);
     if (
       !token ||
-      character_in(token, "\n;,) ]}{#") ||
+      character_in(token, "\n;,)]}{#") ||
       (token == ':' && !questions && !branches) ||
       (print && !count && !questions && (token == '>' || token == '|'))
     )
@@ -2672,11 +2644,12 @@ atom_token(InputProbe *input, BoundaryState *state, bool lvalue) {
 }
 
 static unsigned selection_token(
-  RecognizedExpression selected,
+  BoundaryOutline selected,
   InputProbe *input,
   BoundaryState *state
 ) {
-  switch (selected.kind) {
+  const uint32_t signature = descriptor_signature(selected.descriptor);
+  switch (signature_kind(signature)) {
     case RECOGNIZED_GET:
       return selected.children[0] ? SELECT_TARGET_GET : SELECT_GET;
     case RECOGNIZED_FILE:
@@ -2691,7 +2664,7 @@ static unsigned selection_token(
       return SELECT_CONCAT;
     case RECOGNIZED_TUPLE:
     case 0:
-      return atom_token(input, state, selected.lvalue);
+      return atom_token(input, state, signature & SIGNATURE_LVALUE);
     case RECOGNIZED_BRANCHES:
       return SELECT_BRANCHES;
     case '?':
@@ -2718,7 +2691,7 @@ static bool select_boundary(TSLexer *lexer, BoundaryState *state) {
   RecognizerInput parser = {
     .expected = requested == UNCONSTRAINED ? 0 : descriptor_signature(requested)
   };
-  RecognizedExpression selected = {0};
+  BoundaryOutline selected = {0};
   if (!take_boundary(state, requested, &selected)) {
     collect_expression(&input, &parser, count, state->print);
     if (
@@ -2728,15 +2701,14 @@ static bool select_boundary(TSLexer *lexer, BoundaryState *state) {
       !parser.failed &&
       recognizer_parse(&parser)
     ) {
-      const BoundaryOutline root = parser.tree[parser.tree_root - 1].outline;
-      selected = outline_expression(root);
+      selected = parser.tree[parser.tree_root - 1].outline;
       cache_boundary(state, &parser);
-      take_boundary(state, root.descriptor, &selected);
+      take_boundary(state, selected.descriptor, &selected);
     }
   }
   unsigned token = ERROR_SENTINEL;
-  if (selected.end) {
-    state->unary = selected.unary;
+  if (descriptor_length(selected.descriptor)) {
+    state->unary = descriptor_signature(selected.descriptor) & SIGNATURE_UNARY;
     state->pending[0] = selected.children[0];
     state->pending[1] = selected.children[1];
     token = selection_token(selected, &input, state);
@@ -2748,11 +2720,20 @@ static bool select_boundary(TSLexer *lexer, BoundaryState *state) {
   return token != ERROR_SENTINEL;
 }
 
-// Close children before trailing blanks to preserve enclosing node ranges.
 static bool restoring_requested(const bool *valid) {
   bool restoring = valid[END_CHILD] || valid[RESUME];
-  for (unsigned i = 0; i < 4; i++) restoring |= valid[RESTORE_FIRST + i];
+  for (unsigned digit = 0; digit < SAVED_DIGITS; digit++)
+    restoring |= valid[RESTORE_FIRST + digit];
   return restoring;
+}
+
+static bool root_requested(const bool *valid) {
+  return valid[ROOT] ||
+    valid[PRINT_ROOT] ||
+    valid[FOR_IN] ||
+    valid[PRINT_ARGUMENTS] ||
+    valid[LOCAL_ROOT] ||
+    valid[LOCAL_PRINT_ROOT];
 }
 
 static bool boundary_requested(const bool *valid) {
@@ -2874,7 +2855,7 @@ static unsigned root_token(InputProbe *probe, const bool *valid) {
     (!valid[ROOT] && !valid[LOCAL_ROOT] && !print) ||
     (print && (first == '>' || first == '|')) ||
     !first ||
-    character_in(first, "\n;,) ]}{:#")
+    character_in(first, "\n;,)]}{:#")
   )
     return ERROR_SENTINEL;
   if (local) return print ? LOCAL_PRINT_ROOT : LOCAL_ROOT;
@@ -2898,18 +2879,9 @@ static bool scan_root(TSLexer *lexer, BoundaryState *state, const bool *valid) {
 static bool
 scan_boundary(TSLexer *lexer, BoundaryState *state, const bool *valid) {
   lexer->mark_end(lexer);
-  if (valid[NEXT_ARGUMENT] || valid[BEGIN_CHILD]) {
-    if (lexer->lookahead == '\n') return false;
-  }
-  if (
-    valid[ROOT] ||
-    valid[PRINT_ROOT] ||
-    valid[FOR_IN] ||
-    valid[PRINT_ARGUMENTS] ||
-    valid[LOCAL_ROOT] ||
-    valid[LOCAL_PRINT_ROOT]
-  )
-    return scan_root(lexer, state, valid);
+  if ((valid[NEXT_ARGUMENT] || valid[BEGIN_CHILD]) && lexer->lookahead == '\n')
+    return false;
+  if (root_requested(valid)) return scan_root(lexer, state, valid);
   if (valid[NEXT_ARGUMENT]) {
     state->pending[0] = UNCONSTRAINED;
     return boundary_emit(lexer, state, NEXT_ARGUMENT);
@@ -2925,9 +2897,9 @@ scan_boundary(TSLexer *lexer, BoundaryState *state, const bool *valid) {
     boundary_reset(state, 0, BOUNDARY_RESTORING);
     return boundary_emit(lexer, state, END_CHILD);
   }
-  for (unsigned digit = 0; digit < 4; digit++)
+  for (unsigned digit = 0; digit < SAVED_DIGITS; digit++)
     if (valid[RESTORE_FIRST + digit]) {
-      state->carry = state->carry * 4 + digit;
+      state->carry = state->carry * SAVED_DIGITS + digit;
       return boundary_emit(lexer, state, RESTORE_FIRST + digit);
     }
   if (valid[BEGIN_CHILD]) {
@@ -2938,15 +2910,13 @@ scan_boundary(TSLexer *lexer, BoundaryState *state, const bool *valid) {
       state->phase = BOUNDARY_SAVING;
     }
     if (state->carry) {
-      unsigned digit = state->carry & 3;
-      state->carry >>= 2;
+      const unsigned digit = state->carry % SAVED_DIGITS;
+      state->carry /= SAVED_DIGITS;
       return boundary_emit(lexer, state, SAVE_FIRST + digit);
     }
     uint64_t active = state->next;
     boundary_reset(state, active, BOUNDARY_READY);
-    if (active == UNCONSTRAINED)
-      state->cache_count = state->cache_index = state->cache_repeats =
-        state->cache_delta = 0;
+    if (active == UNCONSTRAINED) cache_clear(state);
     return boundary_emit(lexer, state, BEGIN_CHILD);
   }
   if (state->active && !select_boundary(lexer, state)) return false;

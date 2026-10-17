@@ -75,6 +75,18 @@ const continuationMarker = () => token.immediate("\\");
 const signOperator = ($, character) =>
   alias(character === "+" ? $._plus_operator : $._minus_operator, character);
 
+const prefixOperator = ($, unary) =>
+  field(
+    "operator",
+    unary
+      ? choice(signOperator($, "+"), signOperator($, "-"))
+      : alias($._not_operator, "!"),
+  );
+
+const updateOperator = ($) => field("operator", choice($.incr, $.decr));
+
+const fieldOperator = ($) => field("operator", alias($._field_operator, "$"));
+
 const assignmentOperator = ($) =>
   choice(
     "=",
@@ -339,12 +351,7 @@ for (const print of [false, true]) {
         choice(
           seq(
             $._select_prefix,
-            field(
-              "operator",
-              unary
-                ? choice(signOperator($, "+"), signOperator($, "-"))
-                : alias($._not_operator, "!"),
-            ),
+            prefixOperator($, unary),
             field("operand", expr($)),
           ),
           seq(
@@ -411,11 +418,11 @@ for (const print of [false, true]) {
                 seq(
                   $._select_postfix,
                   field("operand", $._child_lvalue),
-                  field("operator", choice($.incr, $.decr)),
+                  updateOperator($),
                 ),
                 seq(
                   $._select_prefix,
-                  field("operator", choice($.incr, $.decr)),
+                  updateOperator($),
                   field("operand", $._child_lvalue),
                 ),
                 seq(
@@ -450,11 +457,7 @@ Object.assign(boundaryRules, {
         alias($._boundary_arguments, $.expr_list),
         "]",
       ),
-      seq(
-        $._select_field,
-        field("operator", alias($._field_operator, "$")),
-        field("operand", $._child_expr),
-      ),
+      seq($._select_field, fieldOperator($), field("operand", $._child_expr)),
     ),
   _boundary_arguments: ($) =>
     choice(
@@ -503,6 +506,10 @@ Object.assign(boundaryRules, {
 
 const localRules = {};
 const localNode = ($, name) => alias($[`local_${name}`], $[name]);
+const localSubscriptable = ($) =>
+  seq($.name, optional(seq("[", localNode($, "expr_list"), "]")));
+const localPrefixUpdate = ($) =>
+  seq(updateOperator($), field("operand", localNode($, "lvalue")));
 const localAtoms = ($, print, lvalue = localNode($, "lvalue")) =>
   choice(
     $._local_atom,
@@ -596,12 +603,7 @@ for (const print of [false, true]) {
       const operand = any(name);
       return ($) => [
         seq(
-          field(
-            "operator",
-            classification === "unary"
-              ? choice(signOperator($, "+"), signOperator($, "-"))
-              : alias($._not_operator, "!"),
-          ),
+          prefixOperator($, classification === "unary"),
           field("operand", operand($)),
         ),
       ];
@@ -610,12 +612,9 @@ for (const print of [false, true]) {
       return ($) => [
         seq(
           field("operand", alias($.local_postfix_lvalue, $.lvalue)),
-          field("operator", choice($.incr, $.decr)),
+          updateOperator($),
         ),
-        seq(
-          field("operator", choice($.incr, $.decr)),
-          field("operand", localNode($, "lvalue")),
-        ),
+        localPrefixUpdate($),
       ];
     }
     const left = member(
@@ -693,9 +692,9 @@ Object.assign(localRules, {
     ),
   local_lvalue: ($) =>
     choice(
-      seq($.name, optional(seq("[", localNode($, "expr_list"), "]"))),
+      localSubscriptable($),
       seq(
-        field("operator", alias($._field_operator, "$")),
+        fieldOperator($),
         field("operand", alias($.local_field_expr, $.expr)),
       ),
     ),
@@ -703,9 +702,9 @@ Object.assign(localRules, {
     prec(
       1,
       choice(
-        seq($.name, optional(seq("[", localNode($, "expr_list"), "]"))),
+        localSubscriptable($),
         seq(
-          field("operator", alias($._field_operator, "$")),
+          fieldOperator($),
           field("operand", alias($.local_postfix_field_expr, $.expr)),
         ),
       ),
@@ -723,13 +722,10 @@ Object.assign(localRules, {
     choice(
       $._local_non_unary_atom,
       seq(
-        field("operator", alias($._not_operator, "!")),
+        prefixOperator($, false),
         field("operand", alias($.local_unary, $.expr)),
       ),
-      seq(
-        field("operator", choice($.incr, $.decr)),
-        field("operand", localNode($, "lvalue")),
-      ),
+      localPrefixUpdate($),
     ),
   local_expr_list: ($) =>
     choice(localNode($, "expr"), localNode($, "multiple_expr_list")),

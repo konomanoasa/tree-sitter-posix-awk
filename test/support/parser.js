@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { createTreeSitter, grammars, root } from "../../scripts/tree-sitter.js";
-import { clean, parseCst, sourceEndPoint } from "./cst.js";
+import {
+  clean as assertClean,
+  assertContinuationRanges,
+  hasRecovery,
+  parseCst,
+  sourceEndPoint,
+} from "./cst.js";
 
 const commandTimeoutMs = 60_000;
 const cstOutputLimitBytes = 16 * 1024 * 1024;
@@ -12,31 +18,26 @@ const grammar = grammars[0];
 
 let runtime;
 let nativeLibrary;
-
-let sourceSequence = 0;
+let sequence = 0;
 
 before(() => {
   runtime = createTreeSitter();
-  nativeLibrary = path.join(
+  nativeLibrary = join(
     runtime.directory,
     process.platform === "win32" ? "parser.dll" : "parser",
   );
   const result = runtime.run(
-    ["build", "--output", nativeLibrary, path.join(root, grammar.path)],
+    ["build", join(root, grammar.path), "--output", nativeLibrary],
     {
-      stdio: "inherit",
       timeout: commandTimeoutMs,
     },
   );
   assert.ifError(result.error);
-  assert.equal(result.status, 0);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+after(() => runtime?.close());
 
-after(() => {
-  runtime?.close();
-});
-
-function applyEdits(source, edits) {
+export function applyEdits(source, edits) {
   let bytes = Buffer.from(source);
   for (const edit of edits) {
     const { byte, deleteBytes, insert } = edit;
@@ -63,24 +64,15 @@ function applyEdits(source, edits) {
   return bytes;
 }
 
-function formatEdit({ byte, deleteBytes, insert }) {
-  return `${byte} ${deleteBytes} ${insert}`;
+function writeSource(source) {
+  const path = join(runtime.directory, `${sequence++}.awk`);
+  writeFileSync(path, source);
+  return path;
 }
 
-function lines(...sourceLines) {
-  return `${sourceLines.join("\n")}\n`;
-}
-
-function writeSource(label, source) {
-  sourceSequence += 1;
-  const filename = `${sourceSequence}-${label}.awk`;
-  const sourcePath = path.join(runtime.directory, filename);
-  fs.writeFileSync(sourcePath, source);
-  return sourcePath;
-}
-
-function captureParse(sourcePath, edits = []) {
-  const args = [
+export function parse(source, edits = []) {
+  const path = writeSource(source);
+  const arguments_ = [
     "parse",
     "--lib-path",
     nativeLibrary,
@@ -88,27 +80,99 @@ function captureParse(sourcePath, edits = []) {
     grammar.name,
     "--cst",
   ];
-  if (edits.length > 0) {
-    args.push("--edits", ...edits.map(formatEdit), "--", sourcePath);
-  } else {
-    args.push(sourcePath);
-  }
-
-  const result = runtime.run(args, {
-    maxBuffer: cstOutputLimitBytes,
+  if (edits.length)
+    arguments_.push(
+      "--edits",
+      ...edits.map(
+        ({ byte, deleteBytes, insert }) => `${byte} ${deleteBytes} ${insert}`,
+      ),
+      "--",
+    );
+  arguments_.push(path);
+  const result = runtime.run(arguments_, {
     timeout: commandTimeoutMs,
+    maxBuffer: cstOutputLimitBytes,
   });
-  if (result.error !== undefined) {
-    throw result.error;
+  assert.ifError(result.error);
+  assert.equal(result.signal, null);
+  const tree = parseCst(
+    result.stdout,
+    applyEdits(source, edits),
+    result.status,
+  );
+  if (result.status === 0 && !hasRecovery(tree))
+    assertContinuationRanges(tree, applyEdits(source, edits));
+  return { ...result, tree, output: result.stdout + result.stderr };
+}
+
+function clean(source) {
+  const result = parse(source);
+  assert.equal(result.status, 0, result.output);
+  assertClean(result.tree);
+  return result.tree;
+}
+
+export function parseSummary(
+  source,
+  edits = [],
+  { timeoutMicros = summaryTimeoutMicros, completionOnly = false } = {},
+) {
+  const path = writeSource(source);
+  const arguments_ = [
+    "parse",
+    "--lib-path",
+    nativeLibrary,
+    "--lang-name",
+    grammar.name,
+    "--quiet",
+    "--time",
+    "--json-summary",
+    ...(completionOnly ? [] : ["--timeout", String(timeoutMicros)]),
+  ];
+  if (edits.length) {
+    arguments_.push(
+      "--edits",
+      ...edits.map(
+        ({ byte, deleteBytes, insert }) => `${byte} ${deleteBytes} ${insert}`,
+      ),
+      "--",
+    );
   }
-  const source = applyEdits(fs.readFileSync(sourcePath), edits);
-  const tree = parseCst(result.stdout, sourcePath, source, result.status);
-  return {
-    status: result.status,
-    stderr: result.stderr,
-    stdout: result.stdout,
-    tree,
-  };
+  arguments_.push(path);
+  const result = runtime.run(arguments_, { timeout: commandTimeoutMs });
+  assert.ifError(result.error);
+  assert.ok(
+    result.status === 0 || result.status === 1,
+    result.stdout + result.stderr,
+  );
+  const start = result.stdout.indexOf("{\n");
+  assert.notEqual(start, -1, result.stdout + result.stderr);
+  const { parse_summaries: summaries } = JSON.parse(result.stdout.slice(start));
+  assert.equal(summaries?.length, 1, "parser produced no complete root");
+  const summary = summaries[0];
+  const final = applyEdits(source, edits);
+  assert.equal(
+    `${summary.end.row}:${summary.end.column}`,
+    sourceEndPoint(final),
+    "root must reach the edited source end",
+  );
+  assert.equal(summary.bytes, final.length, "parser omitted source bytes");
+  assert.equal(summary.successful, result.status === 0);
+  const freshMs = summary.duration.secs * 1000 + summary.duration.nanos / 1e6;
+  let incrementalMs;
+  if (edits.length) {
+    const match = /Edit: +([0-9.]+) ms/.exec(result.stdout);
+    assert.ok(match, "parser produced no edit timing");
+    incrementalMs = Number(match[1]);
+  }
+  assert.ok(Number.isFinite(freshMs) && freshMs >= 0);
+  if (edits.length)
+    assert.ok(Number.isFinite(incrementalMs) && incrementalMs >= 0);
+  return { ...summary, freshMs, incrementalMs };
+}
+
+function lines(...sourceLines) {
+  return `${sourceLines.join("\n")}\n`;
 }
 
 function parseDescription(label, result) {
@@ -119,31 +183,21 @@ function assertStatus(label, result, expectedStatus) {
   assert.equal(result.status, expectedStatus, parseDescription(label, result));
 }
 
-function assertFresh(testName, source, expectedStatus = 0) {
-  const sourcePath = writeSource("fresh", source);
-  const native = captureParse(sourcePath);
-  assertStatus(`${testName} native fresh parse`, native, expectedStatus);
-  if (expectedStatus === 0) clean(native.tree);
-  return native.tree;
-}
-
 function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
-  const initialPath = writeSource("initial", initialSource);
-  const finalPath = writeSource("final", finalSource);
   assert.deepEqual(
     applyEdits(initialSource, edits),
     Buffer.from(finalSource),
     `${testName}: edits do not produce the final source`,
   );
 
-  const incremental = captureParse(initialPath, edits);
-  const fresh = captureParse(finalPath);
+  const incremental = parse(initialSource, edits);
+  const fresh = parse(finalSource);
   for (const [label, result] of Object.entries({
     "native incremental parse": incremental,
     "native fresh parse": fresh,
   })) {
     assertStatus(`${testName} ${label}`, result, 0);
-    clean(result.tree);
+    assertClean(result.tree);
   }
   assert.equal(
     incremental.tree,
@@ -154,7 +208,7 @@ function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
 }
 
 function freshTest(name, source, assertions) {
-  test(`posix_awk: ${name}`, () => assertions(assertFresh(name, source)));
+  test(`posix_awk: ${name}`, () => assertions(clean(source)));
 }
 
 function determinismTest(name, initial, final, edits, assertions) {
@@ -180,60 +234,15 @@ function editHistoryTest(name, source, edits) {
   determinismTest(name, source, source, [...edits, ...reverts]);
 }
 
-function parseSummary(
-  source,
-  { timeoutMicros = summaryTimeoutMicros, completionOnly = false } = {},
-) {
-  const sourcePath = writeSource("summary", source);
-  const result = runtime.run(
-    [
-      "parse",
-      "--lib-path",
-      nativeLibrary,
-      "--lang-name",
-      grammar.name,
-      "--quiet",
-      "--json-summary",
-      ...(completionOnly ? [] : ["--timeout", String(timeoutMicros)]),
-      sourcePath,
-    ],
-    { timeout: commandTimeoutMs },
-  );
-  assert.ifError(result.error);
-  assert.ok(
-    result.status === 0 || result.status === 1,
-    result.stdout + result.stderr,
-  );
-  const start = result.stdout.indexOf("{\n");
-  assert.notEqual(start, -1, "parser produced no summary");
-  const { parse_summaries: summaries } = JSON.parse(result.stdout.slice(start));
-  assert.equal(summaries?.length, 1, "parser produced no complete root");
-  const summary = summaries[0];
-  assert.equal(
-    `${summary.end.row}:${summary.end.column}`,
-    sourceEndPoint(source),
-    "root must reach the source end",
-  );
-  assert.equal(
-    summary.bytes,
-    Buffer.byteLength(source),
-    "parser omitted source bytes",
-  );
-  return summary;
-}
-
 export {
-  applyEdits,
   assertDeterministicEdit,
   assertStatus,
-  captureParse,
   determinismTest,
   editHistoryTest,
   freshTest,
   lines,
   nativeLibrary,
   parseDescription,
-  parseSummary,
   runtime,
   writeSource,
 };

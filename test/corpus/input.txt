@@ -2630,6 +2630,78 @@ numeric boundaries in getline lookahead: { getline $1.L++ }
 0:17 - 0:18         "}"
 
 ==================
+numeric boundaries before a glued getline: { x = 1e3getline < "f" }
+:cst
+==================
+{ x = 1e3getline < "f" }
+------------------
+
+0:0  - 0:24   program
+0:0  - 0:24     item
+0:0  - 0:24       action: action
+0:0  - 0:1          "{"
+0:2  - 0:22         body: unterminated_statement_list
+0:2  - 0:22           unterminated_statement
+0:2  - 0:22             statement: terminatable_statement
+0:2  - 0:22               simple_statement
+0:2  - 0:22                 expr
+0:2  - 0:22                   non_unary_expr
+0:2  - 0:3                      left: lvalue
+0:2  - 0:3                        name `x`
+0:4  - 0:5                      "="
+0:6  - 0:22                     right: expr
+0:6  - 0:22                       non_unary_expr
+0:6  - 0:9                          left: non_unary_expr
+0:6  - 0:9                            number `1e3`
+0:9  - 0:22                         right: non_unary_expr
+0:9  - 0:22                           non_unary_input_function
+0:9  - 0:16                             get: simple_get
+0:9  - 0:16                               getline_keyword `getline`
+0:17 - 0:18                             "<"
+0:19 - 0:22                             source: expr
+0:19 - 0:22                               non_unary_expr
+0:19 - 0:22                                 string
+0:19 - 0:20                                   "\""
+0:20 - 0:21                                   string_content `f`
+0:21 - 0:22                                   "\""
+0:23 - 0:24         "}"
+
+==================
+numeric boundaries before a glued getline: { y = 1.5fgetline x++ }
+:cst
+==================
+{ y = 1.5fgetline x++ }
+------------------
+
+0:0  - 0:23   program
+0:0  - 0:23     item
+0:0  - 0:23       action: action
+0:0  - 0:1          "{"
+0:2  - 0:21         body: unterminated_statement_list
+0:2  - 0:21           unterminated_statement
+0:2  - 0:21             statement: terminatable_statement
+0:2  - 0:21               simple_statement
+0:2  - 0:21                 expr
+0:2  - 0:21                   non_unary_expr
+0:2  - 0:3                      left: lvalue
+0:2  - 0:3                        name `y`
+0:4  - 0:5                      "="
+0:6  - 0:21                     right: expr
+0:6  - 0:21                       non_unary_expr
+0:6  - 0:17                         left: non_unary_expr
+0:6  - 0:10                           left: non_unary_expr
+0:6  - 0:10                             number `1.5f`
+0:10 - 0:17                           right: non_unary_expr
+0:10 - 0:17                             non_unary_input_function
+0:10 - 0:17                               get: simple_get
+0:10 - 0:17                                 getline_keyword `getline`
+0:18 - 0:21                         right: non_unary_expr
+0:18 - 0:19                           operand: lvalue
+0:18 - 0:19                             name `x`
+0:19 - 0:21                           operator: incr `++`
+0:22 - 0:23         "}"
+
+==================
 nested getline retains its outer source across 1
 :cst
 ==================

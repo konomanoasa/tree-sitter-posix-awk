@@ -14,13 +14,12 @@ import {
   applyEdits,
   assertDeterministicEdit,
   assertStatus,
-  captureParse,
   determinismTest,
   editHistoryTest,
   freshTest,
   lines,
+  parse,
   parseSummary,
-  writeSource,
 } from "./support/parser.js";
 import { normalWorkloads, scalingWorkloads } from "./support/workloads.js";
 
@@ -69,7 +68,7 @@ for (const { source, spelling, kind, start } of [
   { source: "{ print x >> y }", spelling: ">>", kind: "append", start: 10 },
 ]) {
   test(`posix_awk: ${kind} is contiguous and cannot span a continuation`, () => {
-    const result = captureParse(writeSource("joined", source));
+    const result = parse(source);
     assertStatus(kind, result, 0);
     clean(result.tree);
     const leaves = [
@@ -81,7 +80,7 @@ for (const { source, spelling, kind, start } of [
       .map((match) => [Number(match[1]), Number(match[2]), match[4]]);
     assert.deepEqual(leaves, [[start, start + 2, spelling]]);
     const split = `${source.slice(0, start + 1)}\\\n${source.slice(start + 1)}`;
-    const separated = captureParse(writeSource("separated", split));
+    const separated = parse(split);
     assert.ok(separated.status === 0 || separated.status === 1);
     dirty(separated.tree);
     assert.equal(separated.tree.includes(`${kind} \`${spelling}\``), false);
@@ -153,7 +152,7 @@ test("posix_awk: blanks before a raw newline end an unterminated literal", () =>
         `BEGIN { x = ${literal}${blanks}`,
         'BEGIN { print "s" ~ /b/ }',
       );
-      const result = captureParse(writeSource("invalid", source));
+      const result = parse(source);
       dirty(result.tree);
       assert.match(result.tree, /^1:15 +- +1:16 +string_content `s`$/m, source);
       assert.match(
@@ -1663,7 +1662,6 @@ determinismTest(
 
 function continuationHistoryTest(name, initialSource, steps) {
   test(`posix_awk: ${name}`, () => {
-    const initial = writeSource("initial", initialSource);
     const edits = [];
     for (const [index, step] of steps.entries()) {
       edits.push(...step.edits);
@@ -1673,8 +1671,8 @@ function continuationHistoryTest(name, initialSource, steps) {
         Buffer.from(step.source),
         label,
       );
-      const fresh = captureParse(writeSource("expected", step.source));
-      const incremental = captureParse(initial, edits);
+      const fresh = parse(step.source);
+      const incremental = parse(initialSource, edits);
       for (const result of [fresh, incremental]) {
         if (step.valid === false) {
           assert.ok(result.status === 0 || result.status === 1, label);
@@ -2180,7 +2178,7 @@ const validExpressions = [
 for (const expression of validExpressions) {
   test(`posix_awk: each single-byte repair restores ${expression}`, () => {
     const source = `{ ${expression} }\n`;
-    const fresh = captureParse(writeSource("fresh", source));
+    const fresh = parse(source);
     assertStatus(expression, fresh, 0);
     clean(fresh.tree);
     for (let byte = 0; byte < source.length; byte += 1) {
@@ -2312,7 +2310,7 @@ test("posix_awk: stress: deep blocks and long getline expressions parse through 
     ],
   ]) {
     assert.equal(
-      parseSummary(source, { completionOnly: true }).successful,
+      parseSummary(source, [], { completionOnly: true }).successful,
       true,
       name,
     );
@@ -2338,7 +2336,8 @@ test("posix_awk: stress: 16000 operators or nested expressions parse through EOF
     ["field of getline", `${"$(getline ".repeat(count)}x${")".repeat(count)}`],
   ]) {
     assert.equal(
-      parseSummary(`{ ${expression} }\n`, { completionOnly: true }).successful,
+      parseSummary(`{ ${expression} }\n`, [], { completionOnly: true })
+        .successful,
       true,
       label,
     );
@@ -2351,7 +2350,7 @@ test("posix_awk: stress: 1600 nested getline sequences finish without truncation
     "$getline $-getline < 1 ",
   ]) {
     assert.equal(
-      parseSummary(`{ ${expression.repeat(stressGetlineCount)}}\n`, {
+      parseSummary(`{ ${expression.repeat(stressGetlineCount)}}\n`, [], {
         completionOnly: true,
       }).successful,
       true,
@@ -2371,7 +2370,7 @@ test("posix_awk: stress: repeated incomplete expressions recover through EOF", (
     `${"x = , ".repeat(stressIncompleteOperatorCount)}\n`,
   ]) {
     assert.equal(
-      parseSummary(source, { completionOnly: true }).successful,
+      parseSummary(source, [], { completionOnly: true }).successful,
       false,
     );
   }

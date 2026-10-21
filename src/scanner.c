@@ -833,6 +833,12 @@ static InputProbe probe_open(TSLexer *source) {
   };
 }
 
+static bool probe_number(InputProbe *probe) {
+  if (!skip_number(&probe->lexer)) return false;
+  probe_restore(probe, probe->marked_end);
+  return true;
+}
+
 enum ProbeToken {
   PROBE_END = 0,
   PROBE_VALUE = 256,
@@ -855,11 +861,7 @@ static int probe_token(InputProbe *probe, bool expect_operand) {
   }
   const int32_t character = lexer->lookahead;
   if (is_ascii_digit(character) || character == '.') {
-    if (!skip_number(lexer)) {
-      return PROBE_END;
-    }
-    probe_restore(probe, probe->marked_end);
-    return PROBE_VALUE;
+    return probe_number(probe) ? PROBE_VALUE : PROBE_END;
   }
   if (character == '"' || (expect_operand && character == '/')) {
     return skip_literal(lexer) ? PROBE_VALUE : PROBE_END;
@@ -2746,8 +2748,9 @@ static bool boundary_requested(const bool *valid) {
 #define LOCAL_EXPRESSIONS 1
 #endif
 
-static bool local_expression(TSLexer *lexer, bool print) {
+static bool local_expression(InputProbe *probe, bool print) {
   enum { GETLINE_SEEN = 1, AMBIGUOUS_SEEN = 2 };
+  TSLexer *lexer = &probe->lexer;
   size_t depth = 0, questions = 0, capacity = 0;
   bool after_operand = false, separated = false, result = false;
   unsigned char flags = 0;
@@ -2775,6 +2778,9 @@ static bool local_expression(TSLexer *lexer, bool print) {
       if (word == WORD_KEYWORD) break;
       if (word == WORD_GETLINE) flags |= GETLINE_SEEN;
       after_operand = word != WORD_MEMBERSHIP;
+    } else if (is_ascii_digit(character) || character == '.') {
+      probe_number(probe);
+      after_operand = true;
     } else {
       lexer->advance(lexer, false);
       if (
@@ -2814,7 +2820,7 @@ static bool local_expression(TSLexer *lexer, bool print) {
         if (character == '|' || (character == '<' && lexer->lookahead != '='))
           flags |= AMBIGUOUS_SEEN;
         if (character == ',') flags = 0;
-        after_operand = is_word_continue(character) || character == '.';
+        after_operand = false;
         separated = character == ',';
         if (!depth && character == '?') questions++;
         if (!depth && character == ':' && questions) questions--;
@@ -2840,16 +2846,15 @@ static unsigned root_token(InputProbe *probe, const bool *valid) {
   probe_restore(probe, 0);
   if (valid[PRINT_ARGUMENTS] && probe_print_arguments(probe))
     return PRINT_ARGUMENTS;
-  probe_restore(probe, 0);
   const int32_t first = probe->lexer.lookahead;
   if (is_word_start(first)) {
     const WordKind word = scan_word_spelling(&probe->lexer);
     if (word == WORD_KEYWORD || word == WORD_MEMBERSHIP) return ERROR_SENTINEL;
+    probe_restore(probe, 0);
   }
   const bool print = valid[PRINT_ROOT] || valid[LOCAL_PRINT_ROOT];
-  probe_restore(probe, 0);
   const bool local = (valid[LOCAL_ROOT] || valid[LOCAL_PRINT_ROOT]) &&
-    local_expression(&probe->lexer, print) &&
+    local_expression(probe, print) &&
     !probe->failed;
   if (
     (!valid[ROOT] && !valid[LOCAL_ROOT] && !print) ||

@@ -17,7 +17,9 @@ import { grammars, packageName, root } from "./tree-sitter.js";
 const enumerators = { "\\": "CONTINUATION_BACKSLASH" };
 const tokenCount = "TOKEN_TYPE_COUNT";
 
-const scannerDiagnosticArguments = ["-Wno-unused-function"];
+const commandTimeoutMs = 60_000;
+const diagnosticTimeoutMs = 180_000;
+const commandOutputLimitBytes = 64 * 1024 * 1024;
 
 const warningArguments = ["-Wall", "-Wextra", "-Werror", "-pedantic"];
 const scannerContract = join(root, "test", "scanner.test.c");
@@ -45,9 +47,9 @@ function run(command, arguments_, options = {}) {
   const result = spawnSync(command, arguments_, {
     cwd: root,
     encoding: "utf8",
-    timeout: 60_000,
+    timeout: commandTimeoutMs,
     killSignal: "SIGKILL",
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: commandOutputLimitBytes,
     stdio: "inherit",
     ...options,
   });
@@ -185,7 +187,7 @@ function checkDiagnostics(clang, clangd, directory) {
         ...warningArguments,
         // Included helpers may lack callers.
         ...(source === variant.source
-          ? scannerDiagnosticArguments
+          ? []
           : ["-Wno-unused-function", ...variant.contractArguments]),
         "-fsyntax-only",
         source,
@@ -208,7 +210,7 @@ function checkDiagnostics(clang, clangd, directory) {
           `--compile-commands-dir=${databaseDirectory}`,
           `--check=${source}`,
         ],
-        { timeout: 180_000 },
+        { timeout: diagnosticTimeoutMs },
       );
     }
   }

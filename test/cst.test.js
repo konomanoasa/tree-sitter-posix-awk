@@ -14,8 +14,8 @@ import {
 import {
   applyEdits,
   assertStatus,
-  captureParse,
   nativeLibrary,
+  parse,
   parseSummary,
   runtime,
   writeSource,
@@ -53,46 +53,35 @@ const cstOutput = [
 test("posix_awk: CST helpers preserve byte ranges and exclude CLI diagnostics", () => {
   const sourcePath = "/source.awk";
   const output = `${cstOutput}Edit: 0 0 \n${sourcePath}  Parse: 1 ms\n`;
-  const tree = parseCst(output, sourcePath, cstSource);
-  assert.equal(tree, cstOutput);
+  const tree = parseCst(output, cstSource, 0);
+  assert.equal(tree, cstOutput.trimEnd());
   assert.deepEqual(continuationRanges(tree), [[0, 6, 0, 7]]);
   assert.equal(hasRecovery(tree), false);
   const comment = "0:0 - 0:13     comment `#Edit: source`";
   assert.equal(
-    parseCst(`0:0 - 0:13   program\n${comment}`, sourcePath, "#Edit: source"),
+    parseCst(`0:0 - 0:13   program\n${comment}`, "#Edit: source", 0),
     `0:0 - 0:13   program\n${comment}`,
   );
 });
 
 test("posix_awk: CST helpers reject missing, truncated and misplaced roots", () => {
+  assert.throws(() => parseCst("", "", 0), /parser produced no CST root/);
   assert.throws(
-    () => parseCst("", "source.awk", ""),
-    /parser produced no CST root/,
-  );
-  assert.throws(
-    () => parseCst(cstOutput, "source.awk", `${cstSource}x`),
+    () => parseCst(cstOutput, `${cstSource}x`, 0),
     /root must reach the edited source end/,
   );
   assert.throws(
-    () =>
-      parseCst(
-        "0:0 - 0:1   wrong_root\n0:0 - 0:1     program",
-        "source.awk",
-        "x",
-      ),
+    () => parseCst("0:0 - 0:1   wrong_root\n0:0 - 0:1     program", "x", 0),
     assert.AssertionError,
   );
   for (const tree of [
     "0:0 - 0:1   •program",
     "0:0 - 0:1   program\n0:1 - 0:1     •name",
   ]) {
-    assert.equal(parseCst(tree, "source.awk", "x"), tree);
+    assert.equal(parseCst(tree, "x", 0), tree);
     assert.equal(hasRecovery(tree), true);
   }
-  assert.equal(
-    parseCst("0:0 - 0:1   ERROR", "source.awk", "x", 1),
-    "0:0 - 0:1   ERROR",
-  );
+  assert.equal(parseCst("0:0 - 0:1   ERROR", "x", 1), "0:0 - 0:1   ERROR");
 });
 
 test("posix_awk: continuation range checks reject newlines and unrelated bytes", () => {
@@ -159,7 +148,7 @@ const fieldContractQuery = String.raw`(action
 
 test("posix_awk: anonymous-token field contract", () => {
   const queryPath = path.join(runtime.directory, "fields.scm");
-  const sourcePath = writeSource("source", fieldContractSource);
+  const sourcePath = writeSource(fieldContractSource);
   fs.writeFileSync(queryPath, fieldContractQuery);
   const result = runtime.run(
     [
@@ -305,7 +294,7 @@ test("posix_awk: range patterns expose one optional separator and two optional o
 
 test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
   assert.throws(() =>
-    parseSummary(`BEGIN { ${"x++;".repeat(timeoutStatementCount)} }\n`, {
+    parseSummary(`BEGIN { ${"x++;".repeat(timeoutStatementCount)} }\n`, [], {
       timeoutMicros: immediateParserTimeoutMicros,
     }),
   );
@@ -320,7 +309,6 @@ test("posix_awk: every byte inside a Unicode payload can be deleted and repaired
   const changed = prefix + replacement + suffix;
   const payloadByte = Buffer.byteLength(prefix);
   const payloadLength = Buffer.byteLength(payload);
-  const initial = writeSource("initial", source);
   const brokenPayloads = [
     [0xa9, 0xf0, 0x9f, 0x98, 0x80],
     [0xc3, 0xf0, 0x9f, 0x98, 0x80],
@@ -354,9 +342,8 @@ test("posix_awk: every byte inside a Unicode payload can be deleted and repaired
       const history = edits.slice(0, step + 1);
       const label = `UTF-8 byte ${removedByte}, edit ${step + 1}`;
       assert.deepEqual(applyEdits(source, history), expectedSource, label);
-      const final = writeSource("expected", expectedSource);
-      const fresh = captureParse(final);
-      const incremental = captureParse(initial, history);
+      const fresh = parse(expectedSource);
+      const incremental = parse(source, history);
       for (const result of [fresh, incremental]) {
         assert.ok(result.status === 0 || result.status === 1, label);
         if (step === 0) continue;
@@ -385,9 +372,8 @@ for (const file of fs.readdirSync(corpusDirectory).sort()) {
   const source = fs.readFileSync(new URL(file, corpusDirectory), "utf8");
   for (const { name, source: input } of parseCorpus(source)) {
     test(`posix_awk: ${file}: ${name}: fresh CST is complete and repeatable`, () => {
-      const sourcePath = writeSource("corpus", input);
-      const first = captureParse(sourcePath);
-      const repeated = captureParse(sourcePath);
+      const first = parse(input);
+      const repeated = parse(input);
       assert.equal(repeated.status, first.status, name);
       assert.equal(repeated.tree, first.tree, name);
     });

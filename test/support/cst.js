@@ -5,23 +5,8 @@ const continuationMarker = JSON.stringify("\\");
 function sourceEndPoint(source) {
   const bytes = Buffer.from(source);
   let row = 0;
-  for (const byte of bytes) if (byte === 0x0a) row += 1;
+  for (const byte of bytes) if (byte === 0x0a) row++;
   return `${row}:${bytes.length - bytes.lastIndexOf(0x0a) - 1}`;
-}
-
-function normalizeParseTree(stdout, sourcePath) {
-  return stdout
-    .split("\n")
-    .filter((line) => {
-      if (line.startsWith(sourcePath)) {
-        const suffix = line.slice(sourcePath.length);
-        if (/^[ \t]+Parse:[ \t]/.test(suffix)) {
-          return false;
-        }
-      }
-      return !/^[ \t]*Edit:[ \t]/.test(line);
-    })
-    .join("\n");
 }
 
 function contains(tree, expected) {
@@ -99,12 +84,15 @@ function hasRecovery(cst) {
   return recoveryMarker.test(cst);
 }
 
-function parseCst(stdout, sourcePath, source, status = 0) {
+function parseCst(stdout, source, status) {
   assert.ok(
     status === 0 || status === 1,
     `parser exited with status ${status}\n${stdout}`,
   );
-  const tree = normalizeParseTree(stdout, sourcePath);
+  const tree = stdout
+    .split("\n")
+    .filter((line) => /^[0-9]+:[0-9]+ +- +/.test(line))
+    .join("\n");
   const root = /^[0-9]+:[0-9]+ +- +([0-9]+:[0-9]+) +•?([^ \n]+)/.exec(tree);
   assert.ok(root, "parser produced no CST root");
   assert.equal(
@@ -113,8 +101,6 @@ function parseCst(stdout, sourcePath, source, status = 0) {
     "root must reach the edited source end",
   );
   if (status === 0) assert.equal(root[2], "program", tree);
-  if (status === 0 && !hasRecovery(tree))
-    assertContinuationRanges(tree, source);
   return tree;
 }
 

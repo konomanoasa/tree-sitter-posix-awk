@@ -8,11 +8,10 @@ import {
 } from "./support/cst.js";
 import {
   applyEdits,
-  captureParse,
   determinismTest,
   editHistoryTest,
   lines,
-  writeSource,
+  parse,
 } from "./support/parser.js";
 
 const fuzzSeed = 1n;
@@ -237,11 +236,9 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
     fuzzInsertions,
     (parts) => lines(...parts),
   )) {
-    const initial = writeSource("initial", history.initial);
-    const final = writeSource("final", history.source);
-    const fresh = captureParse(final);
-    const repeated = captureParse(final);
-    const incremental = captureParse(initial, history.edits);
+    const fresh = parse(history.source);
+    const repeated = parse(history.source);
+    const incremental = parse(history.initial, history.edits);
     for (const result of [fresh, incremental]) {
       assert.ok(result.status === 0 || result.status === 1, history.context);
     }

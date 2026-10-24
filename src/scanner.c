@@ -140,7 +140,7 @@ typedef struct {
   size_t children[2];
 } BoundaryTree;
 
-enum BoundaryPhase { BOUNDARY_READY, BOUNDARY_SAVING, BOUNDARY_RESTORING };
+enum BoundaryPhase { BOUNDARY_READY, BOUNDARY_SAVING };
 typedef struct {
   uint64_t active, pending[2], next, carry;
   enum BoundaryPhase phase;
@@ -152,14 +152,9 @@ typedef struct {
   BoundaryOutline cache[BOUNDARY_CACHE_CAPACITY + 1];
 } BoundaryState;
 
-static void boundary_reset(
-  BoundaryState *state,
-  uint64_t active,
-  enum BoundaryPhase phase
-) {
+static void boundary_reset(BoundaryState *state, uint64_t active) {
   memset(state, 0, offsetof(BoundaryState, decision_hash));
   state->active = active;
-  state->phase = phase;
 }
 
 typedef struct {
@@ -703,7 +698,6 @@ static bool skip_scope_layout(TSLexer *lexer, bool separated) {
 }
 
 static bool skip_group(TSLexer *lexer, bool *tuple) {
-  if (tuple) *tuple = false;
   bool after_operand = false;
   bool separated = false;
   unsigned depth = 0;
@@ -765,7 +759,7 @@ static WordAtom word_atom(TSLexer *lexer, WordKind word) {
   return ATOM_PLAIN;
 }
 
-// Restoring the probe must preserve furthest lookahead.
+// Preserve furthest lookahead when restoring the probe.
 typedef struct {
   TSLexer lexer;
   TSLexer *source;
@@ -1166,7 +1160,7 @@ typedef struct {
   bool *alternatives;
   size_t depth, context_depth;
   RecognizedValue value;
-  bool valid, exhausted;
+  bool valid, exhausted, checked, feasible;
   size_t remaining;
   RecognizerContext *contexts;
   size_t context_count, context_capacity, *context_slots, context_slot_capacity;
@@ -1683,7 +1677,7 @@ typedef struct {
 typedef struct {
   RecognizerInput *input;
   SharedNode *nodes;
-  size_t length, capacity;
+  size_t length, capacity, generated;
   SharedSet *memo;
   bool *needed;
   uint32_t *ranks[2], *stack;
@@ -1712,6 +1706,7 @@ static SharedNode shared_node(
   bool postfix,
   bool unary
 ) {
+  if (parser->generated != SIZE_MAX) parser->generated++;
   SharedNode node = {
     .descriptor = make_descriptor(
       boundary_signature(kind, ceiling, lvalue, postfix, unary),
@@ -2174,7 +2169,9 @@ static bool shared_tree(SharedRecognition *parser, uint32_t root) {
   return true;
 }
 
-static bool shared_recognize(RecognizerInput *input, bool select) {
+static bool
+shared_recognize(RecognizerInput *input, bool select, size_t *generated) {
+  if (generated) *generated = 0;
   if (
     input->length > UINT32_MAX - 2 ||
     input->length > SIZE_MAX / RECOGNIZER_LEVELS / sizeof(SharedSet) - 1
@@ -2242,6 +2239,7 @@ static bool shared_recognize(RecognizerInput *input, bool select) {
   if (best && !parser.failed) accepted = !select || shared_tree(&parser, best);
   shared_set_destroy(&local);
 done:
+  if (generated) *generated = parser.generated;
   if (parser.memo)
     for (size_t i = 0; i < count; i++) shared_set_destroy(&parser.memo[i]);
   ts_free(parser.memo);
@@ -2253,13 +2251,25 @@ done:
   return accepted;
 }
 
-static bool shared_parse(RecognizerInput *input) {
-  return shared_recognize(input, false) && shared_recognize(input, true);
-}
-
 #ifndef RECOGNIZER_WORK_FACTOR
 #define RECOGNIZER_WORK_FACTOR 8
 #endif
+
+enum { RECOGNIZER_RESUME_FACTOR = 32 };
+
+static bool recognizer_extend(Recognizer *parser) {
+  if (parser->checked) return false;
+  parser->checked = true;
+  size_t generated = 0;
+  parser->feasible = shared_recognize(parser->input, false, &generated);
+  if (!parser->feasible) return false;
+  // Stored nodes omit the alternatives that dominate selection work.
+  parser->remaining = generated > SIZE_MAX / RECOGNIZER_RESUME_FACTOR
+    ? SIZE_MAX
+    : generated * RECOGNIZER_RESUME_FACTOR;
+  parser->exhausted = false;
+  return true;
+}
 
 static bool recognizer_parse(RecognizerInput *input) {
   if (input->length > (SIZE_MAX / sizeof(RecognizerFrame)) - 2) return false;
@@ -2281,8 +2291,11 @@ static bool recognizer_parse(RecognizerInput *input) {
   )
     goto done;
   for (;;) {
-    if (input->length > parser.remaining) {
-      shared = true;
+    if (
+      input->length > parser.remaining &&
+      (!recognizer_extend(&parser) || input->length > parser.remaining)
+    ) {
+      shared = parser.feasible;
       goto done;
     }
     parser.remaining -= input->length;
@@ -2304,8 +2317,8 @@ static bool recognizer_parse(RecognizerInput *input) {
       recognizer_push(&parser, 0, EXPR_ASSIGNMENT);
     }
     while (parser.valid && parser.depth) {
-      if (!parser.remaining) {
-        shared = true;
+      if (!parser.remaining && !recognizer_extend(&parser)) {
+        shared = parser.feasible;
         goto done;
       }
       parser.remaining--;
@@ -2314,7 +2327,8 @@ static bool recognizer_parse(RecognizerInput *input) {
         break;
       }
       if (parser.exhausted) {
-        shared = true;
+        if (recognizer_extend(&parser)) continue;
+        shared = parser.feasible;
         goto done;
       }
       if (parser.context_depth >= parser.depth)
@@ -2334,7 +2348,6 @@ static bool recognizer_parse(RecognizerInput *input) {
     size_t position = input->length;
     while (position && !parser.alternatives[position - 1]) position--;
     if (!position) break;
-    // Only positions beyond the backtrack point are exhausted.
     for (size_t i = 0; i < parser.history_count; i++) {
       if (parser.history[i].position > position - 1)
         recognizer_failed(&parser, parser.history[i], true);
@@ -2355,7 +2368,7 @@ done:
   ts_free(parser.choices);
   ts_free(parser.sources);
   ts_free(parser.alternatives);
-  return shared ? shared_parse(input) : result;
+  return shared ? shared_recognize(input, true, NULL) : result;
 }
 
 static const uint64_t UNCONSTRAINED = UINT64_MAX;
@@ -2515,7 +2528,7 @@ static bool cache_period(
 static void
 cache_boundary(BoundaryState *state, const RecognizerInput *parser) {
   cache_clear(state);
-  if (!BOUNDARY_CACHE_CAPACITY || !parser->tree_root) return;
+  if (!BOUNDARY_CACHE_CAPACITY) return;
   if (parser->tree_count > SIZE_MAX / 2 / sizeof(size_t) - 1) return;
   size_t *order = ts_calloc(parser->tree_count * 2 + 2, sizeof(*order));
   if (!order) return;
@@ -2899,7 +2912,7 @@ scan_boundary(TSLexer *lexer, BoundaryState *state, const bool *valid) {
     return boundary_emit(lexer, state, RESUME);
   }
   if (valid[END_CHILD]) {
-    boundary_reset(state, 0, BOUNDARY_RESTORING);
+    boundary_reset(state, 0);
     return boundary_emit(lexer, state, END_CHILD);
   }
   for (unsigned digit = 0; digit < SAVED_DIGITS; digit++)
@@ -2920,7 +2933,7 @@ scan_boundary(TSLexer *lexer, BoundaryState *state, const bool *valid) {
       return boundary_emit(lexer, state, SAVE_FIRST + digit);
     }
     uint64_t active = state->next;
-    boundary_reset(state, active, BOUNDARY_READY);
+    boundary_reset(state, active);
     if (active == UNCONSTRAINED) cache_clear(state);
     return boundary_emit(lexer, state, BEGIN_CHILD);
   }
@@ -2965,7 +2978,6 @@ static bool scan_outside(
   if (!recovering && restoring_requested(valid_symbols))
     return scan_boundary(lexer, &state->boundary, valid_symbols);
   while (is_ascii_blank(lexer->lookahead)) lexer->advance(lexer, true);
-  lexer->mark_end(lexer);
   if (lexer->lookahead == '\\') return scan_backslash(state, lexer);
   if (lexer->lookahead == '#' && valid_symbols[COMMENT])
     return scan_comment(lexer);
@@ -2985,7 +2997,6 @@ static bool scan_outside(
   return scan_sign(lexer, valid_symbols);
 }
 
-// Tree-sitter passes NULL to every entry point after allocation failure.
 void *tree_sitter_posix_awk_external_scanner_create(void) {
   return ts_calloc(1, sizeof(ScannerState));
 }
@@ -3051,7 +3062,7 @@ void tree_sitter_posix_awk_external_scanner_deserialize(
   if (
     length < STATE_HEADER_BYTES ||
     (unsigned char)buffer[0] > LEXICAL_MODE_CONTINUED_NEWLINE ||
-    (unsigned char)buffer[1] > BOUNDARY_RESTORING
+    (unsigned char)buffer[1] > BOUNDARY_SAVING
   )
     return;
   const unsigned count = (unsigned char)buffer[STATE_CACHE_COUNT_OFFSET];

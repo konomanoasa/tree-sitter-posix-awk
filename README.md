@@ -7,7 +7,7 @@
 [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar for
 POSIX.1-2024 AWK.
 
-For GNU awk, see [tree-sitter-gawk](https://github.com/konomanoasa/tree-sitter-gawk).
+For GNU awk, see [tree-sitter-awk](https://github.com/konomanoasa/tree-sitter-awk).
 
 ## Installation
 

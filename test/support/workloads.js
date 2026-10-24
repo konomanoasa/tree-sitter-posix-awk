@@ -1,4 +1,18 @@
+export const getlineSelectionWorkloads = [
+  {
+    name: "getline source chain ending in a comparison/64",
+    source: `{ ${"getline $getline $getline < ".repeat(64)}y < x++++ }\n`,
+    successful: true,
+  },
+  {
+    name: "getline source chain ending in two comparisons/24",
+    source: `{ ${"getline $getline < ".repeat(24)}y < z < x++++ }\n`,
+    successful: true,
+  },
+];
+
 export function* normalWorkloads() {
+  yield* getlineSelectionWorkloads;
   const depths = [16, 32, 64];
   for (const expression of [
     "$getline $-getline < 1 ++ ",

@@ -21,7 +21,11 @@ import {
   parse,
   parseSummary,
 } from "./support/parser.js";
-import { normalWorkloads, scalingWorkloads } from "./support/workloads.js";
+import {
+  getlineSelectionWorkloads,
+  normalWorkloads,
+  scalingWorkloads,
+} from "./support/workloads.js";
 
 const longContinuationCount = 16_384;
 const longNumberDigits = 65_536;
@@ -29,6 +33,16 @@ const nestedGetlineRepairCount = 16;
 const precedingGetlineCount = 510;
 const getlineSourceFieldCount = 1_000;
 const getlineSourceGrowthFields = 20;
+
+for (const { name, source } of getlineSelectionWorkloads) {
+  const byte = source.lastIndexOf("x");
+  determinismTest(
+    `${name} preserves selection after editing its final operand`,
+    source,
+    `${source.slice(0, byte)}value${source.slice(byte + 1)}`,
+    [{ byte, deleteBytes: 1, insert: "value" }],
+  );
+}
 
 freshTest(
   "a long continuation gap preserves a for-in header",

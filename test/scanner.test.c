@@ -971,7 +971,7 @@ recognize_getline(const char *source, size_t *advances, bool compare_shared) {
     size_t length = 0;
     uint64_t *expected =
       recognized ? recognition_outlines(&input, &length) : NULL;
-    assert(shared_parse(&input) == recognized);
+    assert(shared_recognize(&input, true, NULL) == recognized);
     if (recognized) {
       size_t actual_length = 0;
       uint64_t *actual = recognition_outlines(&input, &actual_length);
@@ -996,6 +996,40 @@ recognize_getline(const char *source, size_t *advances, bool compare_shared) {
   ts_free(probe.characters);
   recognizer_destroy(&input);
   return result;
+}
+
+static void test_getline_resume_budget(void) {
+  const struct {
+    int tokens[5];
+    size_t length;
+    bool feasible;
+  } cases[] = {
+    {{PROBE_GETLINE, '$', PROBE_GETLINE, '<', PROBE_NAME}, 5, true},
+    {{PROBE_GETLINE, '<'}, 2, false},
+  };
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
+    RecognizerInput input = {0};
+    for (size_t j = 0; j < cases[i].length; j++)
+      recognizer_add_token(&input, cases[i].tokens[j]);
+    input.tree = ts_calloc(1, sizeof(*input.tree));
+    assert(input.tree);
+    input.tree_count = input.tree_capacity = input.tree_root = 1;
+    input.tree[0].outline.descriptor = 123;
+    BoundaryTree *partial = input.tree;
+    Recognizer parser = {.input = &input, .exhausted = true};
+    assert(recognizer_extend(&parser) == cases[i].feasible);
+    assert(parser.checked && parser.feasible == cases[i].feasible);
+    assert((parser.remaining != 0) == cases[i].feasible);
+    assert(parser.exhausted != cases[i].feasible);
+    assert(
+      input.tree == partial && input.tree_count == 1 && input.tree_root == 1
+    );
+    assert(input.tree[0].outline.descriptor == 123);
+    parser.remaining = 0;
+    assert(!recognizer_extend(&parser));
+    assert(parser.remaining == 0);
+    recognizer_destroy(&input);
+  }
 }
 
 static int test_getline_operand_lookahead(void) {
@@ -2652,6 +2686,7 @@ int main(void) {
   failed |= test_getline_operand_lookahead();
   failed |= test_update_operator_lookahead();
   failed |= test_deep_getline_source_lookahead();
+  test_getline_resume_budget();
   failed |= test_linear_word_boundary_lookahead();
   test_long_function_name();
   failed |= test_ere_state_transitions();

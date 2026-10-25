@@ -101,6 +101,31 @@ test(`${language}: generated checks reject stale and missing files without rewri
       assert.ok(stale.stderr.includes(path), stale.stderr);
       assert.equal(existsSync(join(directory, path)), false);
     }
+
+    for (const path of [
+      ...changedFiles.map(([path]) => path),
+      ...missingFiles,
+    ]) {
+      writeFileSync(join(directory, path), readFileSync(join(root, path)));
+    }
+    for (const { path } of grammars) {
+      const scanner = join(path, "src", "scanner.c");
+      const original = readFileSync(join(directory, scanner), "utf8");
+      const staleScanner = original.replace(
+        '{"BEGIN", WORD_KEYWORD}',
+        '{"BEGIN", WORD_NONE}',
+      );
+      assert.notEqual(staleScanner, original);
+      writeFileSync(join(directory, scanner), staleScanner);
+      const staleWords = check();
+      assert.equal(staleWords.status, 1, staleWords.stdout + staleWords.stderr);
+      assert.ok(staleWords.stderr.includes(scanner), staleWords.stderr);
+      assert.equal(
+        readFileSync(join(directory, scanner), "utf8"),
+        staleScanner,
+      );
+      writeFileSync(join(directory, scanner), original);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

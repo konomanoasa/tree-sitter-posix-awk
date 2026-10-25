@@ -14,6 +14,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { copyFiles, packageName, root } from "../../scripts/tree-sitter.js";
 
+const rebuildTimeoutMs = 60_000;
+const distributionTimeoutMs = 120_000;
+const commandOutputLimitBytes = 64 * 1024 * 1024;
+
 const configuration = JSON.parse(
   readFileSync(join(root, "tree-sitter.json"), "utf8"),
 );
@@ -57,7 +61,7 @@ test(`${language}: Rust rebuilds grammars after source or header changes`, () =>
           "--target-dir",
           join(directory, "target"),
         ],
-        { encoding: "utf8", timeout: 60_000, killSignal: "SIGKILL" },
+        { encoding: "utf8", timeout: rebuildTimeoutMs, killSignal: "SIGKILL" },
       );
       assert.ifError(result.error);
       return { status: result.status, output: result.stdout + result.stderr };
@@ -108,8 +112,8 @@ function run(command, arguments_, cwd = root) {
   const result = spawnSync(command, arguments_, {
     cwd,
     encoding: "utf8",
-    timeout: 120000,
-    maxBuffer: 64 * 1024 * 1024,
+    timeout: distributionTimeoutMs,
+    maxBuffer: commandOutputLimitBytes,
     killSignal: "SIGKILL",
   });
   assert.ifError(result.error);

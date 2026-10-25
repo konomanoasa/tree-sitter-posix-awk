@@ -1,12 +1,15 @@
+const comparisonChainDepth = 64;
+const doubleComparisonChainDepth = 24;
+
 export const getlineSelectionWorkloads = [
   {
-    name: "getline source chain ending in a comparison/64",
-    source: `{ ${"getline $getline $getline < ".repeat(64)}y < x++++ }\n`,
+    name: `getline source chain ending in a comparison/${comparisonChainDepth}`,
+    source: `{ ${"getline $getline $getline < ".repeat(comparisonChainDepth)}y < x++++ }\n`,
     successful: true,
   },
   {
-    name: "getline source chain ending in two comparisons/24",
-    source: `{ ${"getline $getline < ".repeat(24)}y < z < x++++ }\n`,
+    name: `getline source chain ending in two comparisons/${doubleComparisonChainDepth}`,
+    source: `{ ${"getline $getline < ".repeat(doubleComparisonChainDepth)}y < z < x++++ }\n`,
     successful: true,
   },
 ];

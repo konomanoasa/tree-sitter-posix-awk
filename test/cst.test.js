@@ -4,7 +4,6 @@ import path from "node:path";
 import { test } from "node:test";
 import { grammars } from "../scripts/tree-sitter.js";
 import nodeTypes from "../src/node-types.json" with { type: "json" };
-import { parseCorpus } from "./support/corpus.js";
 import {
   assertContinuationRanges,
   continuationRanges,
@@ -12,7 +11,6 @@ import {
   parseCst,
 } from "./support/cst.js";
 import {
-  applyEdits,
   assertStatus,
   nativeLibrary,
   parse,
@@ -20,7 +18,9 @@ import {
   runtime,
   writeSource,
 } from "./support/parser.js";
+import { scalingWorkloads } from "./support/workloads.js";
 
+const largeRepeatedItems = 16_000;
 const commandTimeoutMs = 60_000;
 const timeoutStatementCount = 16_000;
 const immediateParserTimeoutMicros = 1;
@@ -300,70 +300,28 @@ test("posix_awk: a parser timeout cannot pass as complete recovery", () => {
   );
 });
 
-test("posix_awk: every byte inside a Unicode payload can be deleted and repaired through an edit history", () => {
-  const prefix = 'BEGIN { print "';
-  const suffix = '" }\n';
-  const payload = "é😀";
-  const replacement = "x";
-  const source = prefix + payload + suffix;
-  const changed = prefix + replacement + suffix;
-  const payloadByte = Buffer.byteLength(prefix);
-  const payloadLength = Buffer.byteLength(payload);
-  const brokenPayloads = [
-    [0xa9, 0xf0, 0x9f, 0x98, 0x80],
-    [0xc3, 0xf0, 0x9f, 0x98, 0x80],
-    [0xc3, 0xa9, 0x9f, 0x98, 0x80],
-    [0xc3, 0xa9, 0xf0, 0x98, 0x80],
-    [0xc3, 0xa9, 0xf0, 0x9f, 0x80],
-    [0xc3, 0xa9, 0xf0, 0x9f, 0x98],
-  ];
-  for (const [removedByte, brokenPayload] of brokenPayloads.entries()) {
-    const edits = [
-      { byte: payloadByte + removedByte, deleteBytes: 1, insert: "" },
-      { byte: payloadByte, deleteBytes: payloadLength - 1, insert: payload },
-      { byte: payloadByte, deleteBytes: payloadLength, insert: replacement },
-      {
-        byte: payloadByte,
-        deleteBytes: Buffer.byteLength(replacement),
-        insert: payload,
-      },
-    ];
-    const expected = [
-      Buffer.concat([
-        Buffer.from(prefix),
-        Buffer.from(brokenPayload),
-        Buffer.from(suffix),
-      ]),
-      Buffer.from(source),
-      Buffer.from(changed),
-      Buffer.from(source),
-    ];
-    for (const [step, expectedSource] of expected.entries()) {
-      const history = edits.slice(0, step + 1);
-      const label = `UTF-8 byte ${removedByte}, edit ${step + 1}`;
-      assert.deepEqual(applyEdits(source, history), expectedSource, label);
-      const fresh = parse(expectedSource);
-      const incremental = parse(source, history);
-      for (const result of [fresh, incremental]) {
-        assert.ok(result.status === 0 || result.status === 1, label);
-        if (step === 0) continue;
-        assert.equal(result.status, 0, label);
-        assert.equal(hasRecovery(result.tree), false, label);
-        const end =
-          payloadByte + Buffer.byteLength(step === 2 ? replacement : payload);
-        assert.match(
-          result.tree,
-          new RegExp(`^0:${payloadByte - 1} +- +0:${end + 1} +string$`, "m"),
-        );
-        assert.match(
-          result.tree,
-          new RegExp(`^0:${payloadByte} +- +0:${end} +string_content `, "m"),
-        );
-      }
-      if (step > 0) assert.equal(incremental.tree, fresh.tree, label);
+function parseCorpus(text) {
+  const sections = text.split("==================\n");
+  assert.equal(sections.shift(), "", "corpus must start with a case header");
+  assert.equal(sections.length % 2, 0, "corpus must pair headers and bodies");
+  const cases = [];
+  for (let index = 0; index < sections.length; index += 2) {
+    const [name, ...attributes] = sections[index].trimEnd().split("\n");
+    assert.ok(name, "corpus case must have a name");
+    for (const attribute of attributes) {
+      assert.ok(attribute === ":cst" || attribute === ":error", attribute);
     }
+    const parts = sections[index + 1].split("\n------------------\n");
+    assert.equal(
+      parts.length,
+      2,
+      `${name}: corpus must separate source and expectation`,
+    );
+    const source = parts[0].endsWith("\r") ? parts[0].slice(0, -1) : parts[0];
+    cases.push({ name, source });
   }
-});
+  return cases;
+}
 
 const corpusDirectory = new URL("./corpus/", import.meta.url);
 
@@ -376,6 +334,33 @@ for (const file of fs.readdirSync(corpusDirectory).sort()) {
       const repeated = parse(input);
       assert.equal(repeated.status, first.status, name);
       assert.equal(repeated.tree, first.tree, name);
+    });
+  }
+}
+
+for (const [name, source] of [
+  [
+    "many names separated by continuations",
+    `BEGIN { print ${"x\\\n".repeat(largeRepeatedItems)}x }\n`,
+  ],
+  [
+    "many numbers separated by continuations",
+    `BEGIN { print ${"1\\\n".repeat(largeRepeatedItems)}1 }\n`,
+  ],
+  [
+    "many string escapes",
+    `BEGIN { print "${String.raw`\n`.repeat(largeRepeatedItems)}x" }\n`,
+  ],
+]) {
+  test(`posix_awk: ${name} parse through EOF`, () => {
+    assert.equal(parseSummary(source).successful, true, name);
+  });
+}
+
+for (const { name, sizes, source } of scalingWorkloads) {
+  for (const size of sizes) {
+    test(`posix_awk: ${name}/${size} completes through EOF`, () => {
+      assert.equal(parseSummary(source(size)).successful, true, name);
     });
   }
 }

@@ -25,7 +25,7 @@
     "check:queries": "npm run tree-sitter -- check-queries",
     "format": "biome format --write .",
     "generate": "npm run tree-sitter -- generate-all",
-    "test": "npm run tree-sitter -- test-corpus --rebuild && node --test --test-concurrency=1 --test-skip-pattern=\"posix_awk: stress:\" test/build.test.js test/cst.test.js test/highlight.test.js test/incremental.test.js test/parser.test.js",
+    "test": "npm run tree-sitter -- test-corpus --rebuild && node --test --test-concurrency=1 test/build.test.js test/cst.test.js test/highlight.test.js test/incremental.test.js test/parser.test.js",
     "test:fuzz": "node --test --test-name-pattern=\"fixed-seed generated histories\" test/incremental.test.js",
     "test:fuzz:corpus": "npm run tree-sitter -- fuzz-all --iterations 100 --edits 5",
     "test:highlights": "node --test test/highlight.test.js",
@@ -33,7 +33,6 @@
     "test:performance": "node --test test/performance.test.js",
     "test:sanitize": "node scripts/check-c.js --sanitize",
     "test:scanner": "node scripts/check-c.js",
-    "test:stress": "node --test --test-name-pattern=\"posix_awk: stress:\" test/parser.test.js",
     "tree-sitter": "node scripts/tree-sitter.js"
   },
   "devDependencies": {

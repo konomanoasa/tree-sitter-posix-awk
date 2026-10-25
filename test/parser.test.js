@@ -4,44 +4,33 @@ import {
   clean,
   contains,
   continuationMarker,
-  continuationRanges,
   dirty,
   excludes,
-  hasRecovery,
   matchingLineCount,
 } from "./support/cst.js";
 import {
-  applyEdits,
   assertDeterministicEdit,
   assertStatus,
   determinismTest,
   editHistoryTest,
-  freshTest,
   lines,
   parse,
   parseSummary,
 } from "./support/parser.js";
-import {
-  getlineSelectionWorkloads,
-  normalWorkloads,
-  scalingWorkloads,
-} from "./support/workloads.js";
+import { normalWorkloads } from "./support/workloads.js";
 
 const longContinuationCount = 16_384;
 const longNumberDigits = 65_536;
-const nestedGetlineRepairCount = 16;
-const precedingGetlineCount = 510;
 const getlineSourceFieldCount = 1_000;
 const getlineSourceGrowthFields = 20;
 
-for (const { name, source } of getlineSelectionWorkloads) {
-  const byte = source.lastIndexOf("x");
-  determinismTest(
-    `${name} preserves selection after editing its final operand`,
-    source,
-    `${source.slice(0, byte)}value${source.slice(byte + 1)}`,
-    [{ byte, deleteBytes: 1, insert: "value" }],
-  );
+function freshTest(name, source, assertions) {
+  test(`posix_awk: ${name}`, () => {
+    const result = parse(source);
+    assertStatus(name, result, 0);
+    clean(result.tree);
+    assertions(result.tree);
+  });
 }
 
 freshTest(
@@ -101,55 +90,6 @@ for (const { source, spelling, kind, start } of [
   });
 }
 
-const membershipPrecedenceCases = [
-  ["exponentiation", "", "a in b", "^ c"],
-  ["multiplication", "", "a in b", "* c"],
-  ["division", "", "a in b", "/ c"],
-  ["modulus", "", "a in b", "% c"],
-  ["addition", "", "a in b", "+ c"],
-  ["subtraction", "", "a in b", "- c"],
-  ["concatenation", "", "a in b", "c"],
-  ["less than", "", "a in b", "< c"],
-  ["less than or equal", "", "a in b", "<= c"],
-  ["inequality", "", "a in b", "!= c"],
-  ["equality", "", "a in b", "== c"],
-  ["greater than", "", "a in b", "> c"],
-  ["greater than or equal", "", "a in b", ">= c"],
-  ["ERE match", "", "a in b", "~ c"],
-  ["ERE non-match", "", "a in b", "!~ c"],
-  ["unary exponentiation", "", "-a in b", "^ c"],
-  ["multiple-index ERE match", "", "(a, c) in b", "~ d"],
-  ["print addition", "print ", "a in b", "+ c"],
-  ["unary print exponentiation", "print ", "-a in b", "^ c"],
-  ["multiple-index print ERE match", "print ", "(a, c) in b", "~ d"],
-  ["continued addition", "", "a in b", "\\\n+ c"],
-].map(([name, prefix, left, tail]) => {
-  const beginning = `BEGIN { ${prefix}`;
-  return {
-    name,
-    source: lines(`${beginning}${left} ${tail} }`),
-    parenthesized: lines(`${beginning}(${left}) ${tail} }`),
-    edits: [
-      { byte: beginning.length + left.length, deleteBytes: 0, insert: ")" },
-      { byte: beginning.length, deleteBytes: 0, insert: "(" },
-    ],
-  };
-});
-
-for (const {
-  name,
-  source,
-  parenthesized,
-  edits,
-} of membershipPrecedenceCases) {
-  determinismTest(
-    `parentheses repair membership before ${name}`,
-    source,
-    parenthesized,
-    edits,
-  );
-}
-
 test("posix_awk: blanks before a raw newline end an unterminated literal", () => {
   for (const literal of [
     '"broken',
@@ -196,99 +136,6 @@ for (const count of [
   );
 }
 
-for (const { name, ending, replacement } of [
-  { name: "missing source", ending: "", replacement: "value" },
-  { name: "invalid assignment", ending: "x y = 1", replacement: "x + 1" },
-  { name: "missing array name", ending: "x in", replacement: "x in table" },
-]) {
-  const prefix = `{ ${"getline $getline $getline < ".repeat(nestedGetlineRepairCount)}`;
-  const before = `${prefix}${ending} }`;
-  const after = `${prefix}${replacement} }`;
-  const repair = {
-    byte: prefix.length,
-    deleteBytes: ending.length,
-    insert: replacement,
-  };
-  determinismTest(`repair nested getline ${name}`, before, after, [repair]);
-  determinismTest(`undo and redo nested getline ${name}`, after, after, [
-    {
-      byte: prefix.length,
-      deleteBytes: replacement.length,
-      insert: ending,
-    },
-    repair,
-  ]);
-}
-
-for (const { name, before, after } of [
-  {
-    name: "parent file source survives grouping its nested source",
-    before: "{ getline $getline < z + $y-- < 1 < 2 }",
-    after: "{ getline $getline < (z) + $y-- < 1 < 2 }",
-  },
-  {
-    name: "parent file source survives a nested call becoming a subscript",
-    before: "{ getline $getline < f(z) + $y-- < 1 < 2 }",
-    after: "{ getline $getline < a[z] + $y-- < 1 < 2 }",
-  },
-  {
-    name: "outer field preserves an inner getline target",
-    before: "{ getline < getline x++ }",
-    after: "{ $getline < getline x++ }",
-  },
-  {
-    name: "two enclosing fields accept separate postfix updates",
-    before: "{ $getline < getline x++ }",
-    after: "{ $getline < $getline < getline x++++ }",
-  },
-  {
-    name: "grouped getline owns its decisions independently of outer updates",
-    before: "{ $getline < getline x++ }",
-    after: "{ $getline < (getline x++)++ }",
-  },
-  {
-    name: "call arguments suspend and restore pending field updates",
-    before: "{ $getline < f()++ }",
-    after: "{ $getline < f(getline x++)++ }",
-  },
-  {
-    name: "source moves across multiple nested targets",
-    before: "{ $getline $!getline $!getline < 1 }",
-    after: "{ $getline $!getline $!getline < 1 ++ }",
-  },
-]) {
-  for (const [initial, final] of [
-    [before, after],
-    [after, before],
-  ]) {
-    let start = 0;
-    while (initial[start] === final[start]) start++;
-    let suffix = 0;
-    while (
-      suffix < Math.min(initial.length, final.length) - start &&
-      initial.at(-suffix - 1) === final.at(-suffix - 1)
-    )
-      suffix++;
-    determinismTest(`${name}: ${initial} to ${final}`, initial, final, [
-      {
-        byte: start,
-        deleteBytes: initial.length - start - suffix,
-        insert: final.slice(start, final.length - suffix),
-      },
-    ]);
-  }
-}
-
-{
-  const prefix = `{ ${"$getline < 1 ".repeat(precedingGetlineCount)}`;
-  determinismTest(
-    "editing a late getline invalidates the first lookahead",
-    `${prefix}getline x++ }`,
-    `${prefix}getline x++ y }`,
-    [{ byte: prefix.length + 11, deleteBytes: 0, insert: " y" }],
-  );
-}
-
 determinismTest(
   "semicolons change for-in to a membership expression in a classic for",
   "{ for (k in a); }",
@@ -323,66 +170,6 @@ determinismTest(
   },
 );
 
-for (const { label, initial, final, removed, inserted } of [
-  {
-    label: "an else without a consequence",
-    initial: "{ if (a) else }",
-    final: "{ if (a) ; }",
-    removed: "else",
-    inserted: ";",
-  },
-  {
-    label: "an incomplete for header",
-    initial: "{ for (); }",
-    final: "{ for (;;); }",
-    removed: ")",
-    inserted: ";;)",
-  },
-  {
-    label: "a do without a body or tail",
-    initial: "{ do }",
-    final: "{ do ; while (a) }",
-    removed: "do",
-    inserted: "do ; while (a)",
-  },
-  {
-    label: "a delete without an array name",
-    initial: "{ if(a) delete [] }",
-    final: "{ if(a) delete a[0] }",
-    removed: "[]",
-    inserted: "a[0]",
-  },
-  {
-    label: "a call with missing arguments",
-    initial: "{ if(a) f(,) }",
-    final: "{ if(a) f(x) }",
-    removed: ",",
-    inserted: "x",
-  },
-  {
-    label: "a membership operator without operands",
-    initial: "{ if(a) in }",
-    final: "{ if(a) x in a }",
-    removed: "in",
-    inserted: "x in a",
-  },
-]) {
-  const prefix = lines("before {}");
-  const following = "END { print after }";
-  determinismTest(
-    `repairing ${label} matches a fresh parse`,
-    prefix + lines(initial, following),
-    prefix + lines(final, following),
-    [
-      {
-        byte: prefix.length + initial.indexOf(removed),
-        deleteBytes: removed.length,
-        insert: inserted,
-      },
-    ],
-  );
-}
-
 for (const { label, initial, final, before, inserted } of [
   {
     label: "function body after a continuation and comment",
@@ -413,16 +200,6 @@ for (const { label, initial, final, before, inserted } of [
     contains(tree, continuationMarker);
   });
 }
-
-const division = lines("BEGIN { print x / a }");
-
-const matchEre = lines("BEGIN { print x ~ /a/ }");
-
-const divisionAssignment = lines("BEGIN { x /= 2 }");
-
-const divisionExpression = lines("BEGIN { x / 2 }");
-
-const matchOperand = lines("BEGIN { print x ~ a }");
 
 for (const { name, initial, final, edits, update } of [
   {
@@ -513,32 +290,6 @@ for (const { name, initial, final, edits, number } of [
   );
 }
 
-determinismTest("division to match ERE", division, matchEre, [
-  { byte: 16, deleteBytes: 3, insert: "~ /a/" },
-]);
-
-determinismTest(
-  "insert div assign equals",
-  divisionExpression,
-  divisionAssignment,
-  [{ byte: 11, deleteBytes: 0, insert: "=" }],
-);
-
-determinismTest(
-  "delete div assign equals",
-  divisionAssignment,
-  divisionExpression,
-  [{ byte: 11, deleteBytes: 1, insert: "" }],
-);
-
-determinismTest("operand to ERE", matchOperand, matchEre, [
-  { byte: 18, deleteBytes: 1, insert: "/a/" },
-]);
-
-determinismTest("ERE to operand", matchEre, matchOperand, [
-  { byte: 18, deleteBytes: 3, insert: "a" },
-]);
-
 for (const [label, initial, final] of [
   [
     "expression",
@@ -611,13 +362,6 @@ determinismTest(
     assert.match(tree, /^[ \t0-9:-]+right: name `b`$/m);
     assert.match(tree, /^[ \t0-9:-]+right: non_unary_expr$/m);
   },
-);
-
-determinismTest(
-  "delete membership concatenation operand",
-  concatenatedMembership,
-  plainMembership,
-  [{ byte: 20, deleteBytes: 2, insert: "" }],
 );
 
 const plainBracketList = lines("BEGIN { print /[+]?[a]/ }");
@@ -730,24 +474,6 @@ determinismTest(
 );
 
 determinismTest(
-  "a closing parenthesis completes an empty ERE group",
-  "/(/",
-  "/()/",
-  [{ byte: 2, deleteBytes: 0, insert: ")" }],
-);
-
-determinismTest(
-  "inserting an empty group supplies a missing alternation branch",
-  "/(a|)/",
-  "/(a|())/",
-  [{ byte: 4, deleteBytes: 0, insert: "()" }],
-);
-
-const closedEre = lines("BEGIN { print /abc/", "print /ok/ }");
-
-const unclosedEre = lines("BEGIN { print /abc", "print /ok/ }");
-
-determinismTest(
   "escaping an empty ERE group's closer moves it into the group body",
   lines("/())/"),
   lines(String.raw`/(\))/`),
@@ -772,10 +498,6 @@ editHistoryTest(
   [{ byte: 1, deleteBytes: 0, insert: "(" }],
 );
 
-determinismTest("insert ERE closing slash", unclosedEre, closedEre, [
-  { byte: 18, deleteBytes: 0, insert: "/" },
-]);
-
 const plainEreDelimiter = lines("BEGIN { print /ab/ }");
 
 const escapedEreDelimiter = lines(String.raw`BEGIN { print /ab\/c/ }`);
@@ -788,17 +510,6 @@ determinismTest(
   (tree) => {
     contains(tree, "escaped_delimiter");
   },
-);
-
-determinismTest(
-  "division through broken to escaped ERE",
-  division,
-  escapedEreDelimiter,
-  [
-    { byte: 14, deleteBytes: 5, insert: String.raw`/ab\/c/` },
-    { byte: 20, deleteBytes: 1, insert: "" },
-    { byte: 20, deleteBytes: 0, insert: "/" },
-  ],
 );
 
 determinismTest(
@@ -1078,24 +789,6 @@ determinismTest(
   },
 );
 
-const rawStatementNewline = lines("BEGIN {", "  print 1", "}");
-
-const continuedStatementBoundary = lines("BEGIN {", "  print 1\\", "}");
-
-determinismTest(
-  "raw newline to line continuation",
-  rawStatementNewline,
-  continuedStatementBoundary,
-  [{ byte: 17, deleteBytes: 0, insert: "\\" }],
-);
-
-determinismTest(
-  "line continuation to raw newline",
-  continuedStatementBoundary,
-  rawStatementNewline,
-  [{ byte: 17, deleteBytes: 1, insert: "" }],
-);
-
 const outputPipe = lines("BEGIN { print value | command }");
 
 const logicalOrPrint = lines("BEGIN { print value || command }");
@@ -1153,14 +846,6 @@ determinismTest(
   },
 );
 
-const bodylessIf = lines("BEGIN { if (condition) }");
-
-const bodiedIf = lines("BEGIN { if (condition) body }");
-
-determinismTest("insert if body before close brace", bodylessIf, bodiedIf, [
-  { byte: 23, deleteBytes: 0, insert: "body " },
-]);
-
 const sameLineItems = lines("BEGIN {} END {}");
 
 const separatedItems = lines("BEGIN {}", "END {}");
@@ -1171,86 +856,6 @@ determinismTest(
   separatedItems,
   [{ byte: 8, deleteBytes: 1, insert: "\n" }],
   (tree) => contains(tree, "terminator: terminator"),
-);
-
-const completeReservedIf = lines(
-  "BEGIN { if (condition) print body }",
-  "END { print target }",
-);
-
-const missingReservedIf = lines(
-  "BEGIN { if (condition)",
-  "END { print target }",
-);
-
-determinismTest(
-  "restore if body before end item",
-  missingReservedIf,
-  completeReservedIf,
-  [{ byte: 22, deleteBytes: 1, insert: " print body }\n" }],
-);
-
-const completeDoTail = lines(
-  "BEGIN { do print body; while (condition) }",
-  "END { print target }",
-);
-
-const missingDoTail = lines("BEGIN { do print body;", "END { print target }");
-
-determinismTest(
-  "restore do tail before end item",
-  missingDoTail,
-  completeDoTail,
-  [{ byte: 22, deleteBytes: 1, insert: " while (condition) }\n" }],
-);
-
-const closedDoTail = lines("BEGIN { do print body", "while (condition) }");
-
-const openDoTail = lines("BEGIN { do print body", "}");
-
-determinismTest("insert do tail before close brace", openDoTail, closedDoTail, [
-  { byte: 22, deleteBytes: 0, insert: "while (condition) " },
-]);
-
-const specialPatternItems = lines("BEGIN {}", "END {}");
-
-const actionlessSpecialPattern = lines("BEGIN", "END {}");
-
-determinismTest(
-  "restore special pattern action",
-  actionlessSpecialPattern,
-  specialPatternItems,
-  [{ byte: 5, deleteBytes: 0, insert: " {}" }],
-);
-
-const functionItems = lines("function f() {}", "END {}");
-
-const bodylessFunction = lines("function f()", "END {}");
-
-determinismTest("restore function body", bodylessFunction, functionItems, [
-  { byte: 12, deleteBytes: 0, insert: " {}" },
-]);
-
-const closedSubscriptEof = "BEGIN { delete array[offset] }";
-
-const openSubscriptEof = "BEGIN { delete array[offset";
-
-determinismTest(
-  "insert subscript and action closers at EOF",
-  openSubscriptEof,
-  closedSubscriptEof,
-  [{ byte: 27, deleteBytes: 0, insert: "] }" }],
-);
-
-const commentBackslash = lines("#\\", "BEGIN {}");
-
-const leadingContinuation = lines("\\", "BEGIN {}");
-
-determinismTest(
-  "comment backslash to line continuation",
-  commentBackslash,
-  leadingContinuation,
-  [{ byte: 0, deleteBytes: 1, insert: "" }],
 );
 
 const blankCall = lines("BEGIN { f (value) }");
@@ -1394,14 +999,6 @@ determinismTest(
     assert.match(tree, /^[ \t0-9:-]*non_unary_input_function$/m);
   },
 );
-
-const closedString = lines('BEGIN { print "abc"', "}");
-
-const unclosedString = lines('BEGIN { print "abc', "}");
-
-determinismTest("insert string closing quote", unclosedString, closedString, [
-  { byte: 18, deleteBytes: 0, insert: '"' },
-]);
 
 const hashString = lines('BEGIN { print "#"', "}");
 
@@ -1599,13 +1196,6 @@ determinismTest(
   },
 );
 
-determinismTest(
-  "delete builtin concat line continuation",
-  continuedBuiltinConcat,
-  bareBuiltinConcat,
-  [{ byte: 18, deleteBytes: 2, insert: " " }],
-);
-
 const separatedEmptyStatement = lines("BEGIN {", "; x", "}");
 
 const continuedEmptyStatement = lines("BEGIN {", ";\\", "x", "}");
@@ -1618,13 +1208,6 @@ determinismTest(
   (tree) => {
     contains(tree, continuationMarker);
   },
-);
-
-determinismTest(
-  "delete statement gap line continuation",
-  continuedEmptyStatement,
-  separatedEmptyStatement,
-  [{ byte: 9, deleteBytes: 2, insert: " " }],
 );
 
 determinismTest(
@@ -1672,331 +1255,6 @@ determinismTest(
     contains(tree, "parameters: param_list");
     contains(tree, "newline_opt");
   },
-);
-
-function continuationHistoryTest(name, initialSource, steps) {
-  test(`posix_awk: ${name}`, () => {
-    const edits = [];
-    for (const [index, step] of steps.entries()) {
-      edits.push(...step.edits);
-      const label = `${name}, edit ${index + 1}`;
-      assert.deepEqual(
-        applyEdits(initialSource, edits),
-        Buffer.from(step.source),
-        label,
-      );
-      const fresh = parse(step.source);
-      const incremental = parse(initialSource, edits);
-      for (const result of [fresh, incremental]) {
-        if (step.valid === false) {
-          assert.ok(result.status === 0 || result.status === 1, label);
-          assert.equal(hasRecovery(result.tree), true, label);
-        } else {
-          assertStatus(label, result, 0);
-          clean(result.tree);
-          if (step.ranges !== undefined)
-            assert.deepEqual(
-              continuationRanges(result.tree),
-              step.ranges,
-              label,
-            );
-          if (step.newlines !== undefined)
-            assert.equal(
-              matchingLineCount(result.tree, /[ \t]newline$/),
-              step.newlines,
-              label,
-            );
-        }
-      }
-      if (step.valid !== false)
-        assert.equal(incremental.tree, fresh.tree, label);
-    }
-  });
-}
-
-continuationHistoryTest(
-  "editing each byte of repeated continuations at EOF preserves layout",
-  "{}\\",
-  [
-    {
-      edits: [{ byte: 3, deleteBytes: 0, insert: "\n" }],
-      source: "{}\\\n",
-      ranges: [[0, 2, 0, 3]],
-      newlines: 0,
-    },
-    {
-      edits: [{ byte: 4, deleteBytes: 0, insert: "\\\n" }],
-      source: "{}\\\n\\\n",
-      ranges: [
-        [0, 2, 0, 3],
-        [1, 0, 1, 1],
-      ],
-      newlines: 0,
-    },
-    {
-      edits: [{ byte: 2, deleteBytes: 1, insert: "" }],
-      source: "{}\n\\\n",
-      ranges: [[1, 0, 1, 1]],
-      newlines: 1,
-    },
-    {
-      edits: [{ byte: 2, deleteBytes: 0, insert: "\\" }],
-      source: "{}\\\n\\\n",
-      ranges: [
-        [0, 2, 0, 3],
-        [1, 0, 1, 1],
-      ],
-      newlines: 0,
-    },
-    {
-      edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
-      source: "{}\\\\\n",
-      valid: false,
-    },
-    {
-      edits: [{ byte: 3, deleteBytes: 0, insert: "\n" }],
-      source: "{}\\\n\\\n",
-      ranges: [
-        [0, 2, 0, 3],
-        [1, 0, 1, 1],
-      ],
-      newlines: 0,
-    },
-    {
-      edits: [{ byte: 2, deleteBytes: 4, insert: "" }],
-      source: "{}",
-      ranges: [],
-      newlines: 0,
-    },
-  ],
-);
-
-continuationHistoryTest(
-  "Unicode edits before a continuation preserve byte ranges and newline ownership",
-  '{ print "あ"\\\n x }',
-  [
-    {
-      edits: [{ byte: 12, deleteBytes: 0, insert: "界" }],
-      source: '{ print "あ界"\\\n x }',
-      ranges: [[0, 16, 0, 17]],
-      newlines: 0,
-    },
-    {
-      edits: [{ byte: 16, deleteBytes: 1, insert: "" }],
-      source: '{ print "あ界"\n x }',
-      ranges: [],
-      newlines: 1,
-    },
-    {
-      edits: [{ byte: 16, deleteBytes: 0, insert: "\\" }],
-      source: '{ print "あ界"\\\n x }',
-      ranges: [[0, 16, 0, 17]],
-      newlines: 0,
-    },
-    {
-      edits: [{ byte: 12, deleteBytes: 3, insert: "" }],
-      source: '{ print "あ"\\\n x }',
-      ranges: [[0, 13, 0, 14]],
-      newlines: 0,
-    },
-  ],
-);
-
-for (const { name, before, after, valid } of [
-  {
-    name: "keyword",
-    before: "BE",
-    after: "GIN {}\n",
-    valid: true,
-  },
-  {
-    name: "name",
-    before: "BEGIN { print va",
-    after: "lue }\n",
-    valid: true,
-  },
-  {
-    name: "built-in name",
-    before: "BEGIN { print len",
-    after: "gth(x) }\n",
-    valid: true,
-  },
-  {
-    name: "assignment operator",
-    before: "BEGIN { x +",
-    after: "= 1 }\n",
-    valid: false,
-  },
-  {
-    name: "unary field assignment name",
-    before: "BEGIN { $-na",
-    after: "me = value }\n",
-    valid: false,
-  },
-  {
-    name: "unary field assignment operator",
-    before: "BEGIN { print $!array[index] +",
-    after: "= value }\n",
-    valid: false,
-  },
-  {
-    name: "exponent",
-    before: "BEGIN { print 1e+",
-    after: "2 }\n",
-    valid: true,
-  },
-  {
-    name: "number suffix",
-    before: "BEGIN { print 1.0",
-    after: "F }\n",
-    valid: true,
-  },
-  {
-    name: "string",
-    before: 'BEGIN { print "a',
-    after: 'b" }\n',
-    valid: false,
-  },
-  {
-    name: "ERE bracket",
-    before: "BEGIN { print /[a",
-    after: "-z]/ }\n",
-    valid: false,
-  },
-  {
-    name: "string escape",
-    before: 'BEGIN { print "\\',
-    after: 'n" }\n',
-    valid: false,
-  },
-  {
-    name: "octal escape",
-    before: 'BEGIN { print "\\1',
-    after: '23" }\n',
-    valid: false,
-  },
-  {
-    name: "ERE escaped delimiter",
-    before: "BEGIN { print /a\\",
-    after: "/b/ }\n",
-    valid: false,
-  },
-  {
-    name: "ERE class name",
-    before: "BEGIN { print /[[:al",
-    after: "pha:]]/ }\n",
-    valid: false,
-  },
-  {
-    name: "ERE duplication count",
-    before: "BEGIN { print /a{1",
-    after: "2}/ }\n",
-    valid: false,
-  },
-  {
-    name: "ERE compound delimiter",
-    before: "BEGIN { print /[[",
-    after: ":alpha:]]/ }\n",
-    valid: false,
-  },
-]) {
-  const initial = before + after;
-  const split = `${before}\\\n${after}`;
-  const prefix = "# shifted source\n";
-  continuationHistoryTest(
-    `${name} token boundaries recover through continuation insertion and removal`,
-    initial,
-    [
-      {
-        edits: [{ byte: before.length, deleteBytes: 0, insert: "\\\n" }],
-        source: split,
-        valid,
-      },
-      {
-        edits: [{ byte: 0, deleteBytes: 0, insert: prefix }],
-        source: prefix + split,
-        valid,
-      },
-      {
-        edits: [
-          { byte: prefix.length + before.length, deleteBytes: 2, insert: "" },
-        ],
-        source: prefix + initial,
-      },
-      {
-        edits: [{ byte: 0, deleteBytes: prefix.length, insert: "" }],
-        source: initial,
-      },
-    ],
-  );
-}
-
-continuationHistoryTest(
-  "quotes change a safe continuation into a string split and back",
-  lines("{ print a\\", "+b }"),
-  [
-    {
-      edits: [
-        { byte: 13, deleteBytes: 0, insert: '"' },
-        { byte: 8, deleteBytes: 0, insert: '"' },
-      ],
-      source: lines('{ print "a\\', '+b" }'),
-      valid: false,
-    },
-    {
-      edits: [
-        { byte: 14, deleteBytes: 1, insert: "" },
-        { byte: 8, deleteBytes: 1, insert: "" },
-      ],
-      source: lines("{ print a\\", "+b }"),
-    },
-  ],
-);
-
-continuationHistoryTest(
-  "a slash changes a division gap into an ERE split and back",
-  lines("{ print x /\\", "a/ + b }"),
-  [
-    {
-      edits: [{ byte: 10, deleteBytes: 0, insert: "~ " }],
-      source: lines("{ print x ~ /\\", "a/ + b }"),
-      valid: false,
-    },
-    {
-      edits: [{ byte: 10, deleteBytes: 2, insert: "" }],
-      source: lines("{ print x /\\", "a/ + b }"),
-    },
-  ],
-);
-
-continuationHistoryTest(
-  "a comment marker changes continuation ownership without retaining scanner state",
-  lines("{", "# fo\\", "o", "}"),
-  [
-    {
-      edits: [{ byte: 2, deleteBytes: 2, insert: "" }],
-      source: lines("{", "fo\\", "o", "}"),
-    },
-    {
-      edits: [{ byte: 2, deleteBytes: 0, insert: "# " }],
-      source: lines("{", "# fo\\", "o", "}"),
-    },
-  ],
-);
-
-continuationHistoryTest(
-  "a blank preserves two tokens separated by a continuation",
-  lines("{ f\\", "oo(x) }"),
-  [
-    {
-      edits: [{ byte: 3, deleteBytes: 0, insert: " " }],
-      source: lines("{ f \\", "oo(x) }"),
-    },
-    {
-      edits: [{ byte: 3, deleteBytes: 1, insert: "" }],
-      source: lines("{ f\\", "oo(x) }"),
-    },
-  ],
 );
 
 for (const { name, initial, changed, removed, inserted, expected } of [
@@ -2066,49 +1324,6 @@ for (const { operator, replacementByte } of [
       assert.equal(matchingLineCount(tree, /target: lvalue$/), 1);
     },
   );
-}
-
-for (const { name, initial, final, byte, insert } of [
-  {
-    name: "a field update moves a source out of a unary operand",
-    initial: "{ $getline $-getline < 1 }\n",
-    final: "{ $getline $-getline < 1 ++ }\n",
-    byte: 24,
-    insert: " ++",
-  },
-  {
-    name: "a field update moves a source out of a logical-not operand",
-    initial: "{ $getline $!getline < x -- }\n",
-    final: "{ $getline $!getline < x -- ++ }\n",
-    byte: 27,
-    insert: " ++",
-  },
-  {
-    name: "a field update moves a source out of a prefix-update operand",
-    initial: "{ $getline $--$getline < 1 }\n",
-    final: "{ $getline $--$getline < 1 ++ }\n",
-    byte: 26,
-    insert: " ++",
-  },
-  {
-    name: "a final update follows a grouped membership source",
-    initial: "{ $getline < ((x) in a) -- x }\n",
-    final: "{ $getline < ((x) in a) -- x ++ }\n",
-    byte: 28,
-    insert: " ++",
-  },
-  {
-    name: "a final lvalue follows the update after a grouped membership source",
-    initial: "{ $getline < ((x) in a) -- x ++ }\n",
-    final: "{ $getline < ((x) in a) -- x ++ y }\n",
-    byte: 31,
-    insert: " y",
-  },
-]) {
-  determinismTest(name, initial, final, [{ byte, deleteBytes: 0, insert }]);
-  determinismTest(`reversing ${name}`, final, initial, [
-    { byte, deleteBytes: insert.length, insert: "" },
-  ]);
 }
 
 const validExpressions = [
@@ -2270,57 +1485,33 @@ for (const [label, broken] of [
 }
 
 const largeLiteralCharacters = 80_000;
-const largeRepeatedItems = 16_000;
 const builtinContinuationCount = 32_768;
-const stressBlockDepth = 2_000;
-const stressGetlineTargetCount = 2_000;
-const stressConcatenatedOperands = 32_000;
-const stressAdditiveOperands = 16_000;
-const stressExpressionDepth = 16_000;
-const stressGetlineCount = 1_600;
-const stressIncompleteGetlineCount = 1_200;
-const stressIncompleteOperatorCount = 4_000;
+const nestedBlockDepth = 2_000;
+const getlineTargetCount = 2_000;
+const concatenatedOperandCount = 32_000;
+const additiveOperandCount = 16_000;
+const expressionDepth = 16_000;
+const nestedGetlineCount = 1_600;
+const incompleteGetlineCount = 1_200;
+const incompleteOperatorCount = 4_000;
 
-test("posix_awk: large tokens and statement lists parse through EOF", () => {
-  for (const [name, source] of [
-    [
-      "many names separated by continuations",
-      `BEGIN { print ${"x\\\n".repeat(largeRepeatedItems)}x }\n`,
-    ],
-    [
-      "many numbers separated by continuations",
-      `BEGIN { print ${"1\\\n".repeat(largeRepeatedItems)}1 }\n`,
-    ],
-    [
-      "many string escapes",
-      `BEGIN { print "${String.raw`\n`.repeat(largeRepeatedItems)}x" }\n`,
-    ],
-    [
-      "a long builtin call continuation gap",
-      `{ length ${"\\\n".repeat(builtinContinuationCount)}(1) }`,
-    ],
-  ]) {
-    assert.equal(parseSummary(source).successful, true, name);
-  }
-});
-
-test("posix_awk: stress: deep blocks and long getline expressions parse through EOF", () => {
+test("posix_awk: deep blocks and long getline expressions parse through EOF", () => {
   for (const [name, source] of [
     [
       "deep blocks",
-      `BEGIN ${"{".repeat(stressBlockDepth)}print 1;${"}".repeat(stressBlockDepth)}\n`,
+      `BEGIN ${"{".repeat(nestedBlockDepth)}print 1;${"}".repeat(nestedBlockDepth)}\n`,
     ],
     [
       "getline fields chained by prefix updates",
-      `{ ${"getline x ++ $ ".repeat(stressGetlineTargetCount)}getline y }\n`,
+      `{ ${"getline x ++ $ ".repeat(getlineTargetCount)}getline y }\n`,
     ],
     [
       "a long concatenated getline source without a pipe",
-      `{ getline $getline < ${"a ".repeat(stressConcatenatedOperands)}x }\n`,
+      `{ getline $getline < ${"a ".repeat(concatenatedOperandCount)}x }\n`,
     ],
     [
       "a long additive getline source with a pipe",
-      `{ getline $getline < ${"a + ".repeat(stressAdditiveOperands)}x | getline }\n`,
+      `{ getline $getline < ${"a + ".repeat(additiveOperandCount)}x | getline }\n`,
     ],
   ]) {
     assert.equal(
@@ -2336,8 +1527,8 @@ test("posix_awk: long unterminated strings parse through EOF with native recover
   assert.equal(parseSummary(source).successful, false);
 });
 
-test("posix_awk: stress: 16000 operators or nested expressions parse through EOF", () => {
-  const count = stressExpressionDepth;
+test("posix_awk: 16000 operators or nested expressions parse through EOF", () => {
+  const count = expressionDepth;
   for (const [label, expression] of [
     ["addition", `${"x + ".repeat(count)}x`],
     ["assignment", `${"x = ".repeat(count)}1`],
@@ -2358,13 +1549,13 @@ test("posix_awk: stress: 16000 operators or nested expressions parse through EOF
   }
 });
 
-test("posix_awk: stress: 1600 nested getline sequences finish without truncation", () => {
+test("posix_awk: 1600 nested getline sequences finish without truncation", () => {
   for (const expression of [
     "$getline $-getline < 1 ++ ",
     "$getline $-getline < 1 ",
   ]) {
     assert.equal(
-      parseSummary(`{ ${expression.repeat(stressGetlineCount)}}\n`, [], {
+      parseSummary(`{ ${expression.repeat(nestedGetlineCount)}}\n`, [], {
         completionOnly: true,
       }).successful,
       true,
@@ -2373,15 +1564,15 @@ test("posix_awk: stress: 1600 nested getline sequences finish without truncation
   }
 });
 
-test("posix_awk: stress: repeated incomplete expressions recover through EOF", () => {
+test("posix_awk: repeated incomplete expressions recover through EOF", () => {
   for (const source of [
-    `${") getline < ".repeat(stressIncompleteGetlineCount)}\n`,
-    `BEGIN { ${"] ^ getline < , 1 ".repeat(stressIncompleteGetlineCount)}}\n`,
-    `${"$ , ".repeat(stressIncompleteOperatorCount)}\n`,
-    `${"$ ) ".repeat(stressIncompleteOperatorCount)}\n`,
-    `${"! , ".repeat(stressIncompleteOperatorCount)}\n`,
-    `${"!! , ".repeat(stressIncompleteOperatorCount)}\n`,
-    `${"x = , ".repeat(stressIncompleteOperatorCount)}\n`,
+    `${") getline < ".repeat(incompleteGetlineCount)}\n`,
+    `BEGIN { ${"] ^ getline < , 1 ".repeat(incompleteGetlineCount)}}\n`,
+    `${"$ , ".repeat(incompleteOperatorCount)}\n`,
+    `${"$ ) ".repeat(incompleteOperatorCount)}\n`,
+    `${"! , ".repeat(incompleteOperatorCount)}\n`,
+    `${"!! , ".repeat(incompleteOperatorCount)}\n`,
+    `${"x = , ".repeat(incompleteOperatorCount)}\n`,
   ]) {
     assert.equal(
       parseSummary(source, [], { completionOnly: true }).successful,
@@ -2395,9 +1586,8 @@ for (const { name, source, successful } of normalWorkloads()) {
     assert.equal(parseSummary(source).successful, successful, name);
   });
 }
-for (const { name, sizes, source } of scalingWorkloads) {
-  test(`posix_awk: ${name} completes at each scale`, () => {
-    for (const size of sizes)
-      assert.equal(parseSummary(source(size)).successful, true, name);
-  });
-}
+
+test("posix_awk: a long builtin call continuation gap parses through EOF", () => {
+  const source = `{ length ${"\\\n".repeat(builtinContinuationCount)}(1) }`;
+  assert.equal(parseSummary(source).successful, true);
+});

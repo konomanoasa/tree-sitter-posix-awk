@@ -731,7 +731,6 @@ static bool skip_group(TSLexer *lexer, bool *tuple) {
       depth--;
       after_operand = true;
     } else if (character_in(character, "+-") && lexer->lookahead == character) {
-      // Updates require lvalues, so a following slash divides.
       lexer->advance(lexer, false);
       after_operand = true;
     } else if (character_in(character, "&|") && lexer->lookahead == character) {
@@ -759,7 +758,6 @@ static WordAtom word_atom(TSLexer *lexer, WordKind word) {
   return ATOM_PLAIN;
 }
 
-// Preserve furthest lookahead when restoring the probe.
 typedef struct {
   TSLexer lexer;
   TSLexer *source;
@@ -1718,7 +1716,7 @@ static SharedNode shared_node(
   };
   if (kind == RECOGNIZED_GET) {
     node.decision = start;
-    node.rank = left || right ? 1 : 2;
+    node.rank = right ? 1 : 2;
   } else if (kind == RECOGNIZED_FILE || kind == '<') {
     node.decision = shared_end(parser->nodes[left - 1]);
     node.rank = kind == '<' ? (uint32_t)parser->input->length + 2
@@ -2171,7 +2169,6 @@ static bool shared_tree(SharedRecognition *parser, uint32_t root) {
 
 static bool
 shared_recognize(RecognizerInput *input, bool select, size_t *generated) {
-  if (generated) *generated = 0;
   if (
     input->length > UINT32_MAX - 2 ||
     input->length > SIZE_MAX / RECOGNIZER_LEVELS / sizeof(SharedSet) - 1
@@ -2278,7 +2275,7 @@ static bool recognizer_parse(RecognizerInput *input) {
   parser.choices = ts_calloc(input->length, sizeof(*parser.choices));
   parser.sources = ts_calloc(input->length, sizeof(*parser.sources));
   parser.alternatives = ts_calloc(input->length, sizeof(*parser.alternatives));
-  bool result = false, shared = false;
+  bool result = false;
   size_t limit = input->length > SIZE_MAX / (input->length ? input->length : 1)
     ? SIZE_MAX
     : input->length * input->length;
@@ -2294,10 +2291,8 @@ static bool recognizer_parse(RecognizerInput *input) {
     if (
       input->length > parser.remaining &&
       (!recognizer_extend(&parser) || input->length > parser.remaining)
-    ) {
-      shared = parser.feasible;
+    )
       goto done;
-    }
     parser.remaining -= input->length;
     memset(parser.sources, 0, input->length * sizeof(*parser.sources));
     memset(
@@ -2317,10 +2312,7 @@ static bool recognizer_parse(RecognizerInput *input) {
       recognizer_push(&parser, 0, EXPR_ASSIGNMENT);
     }
     while (parser.valid && parser.depth) {
-      if (!parser.remaining && !recognizer_extend(&parser)) {
-        shared = parser.feasible;
-        goto done;
-      }
+      if (!parser.remaining && !recognizer_extend(&parser)) goto done;
       parser.remaining--;
       if (!recognizer_checkpoint(&parser)) {
         parser.valid = false;
@@ -2328,7 +2320,6 @@ static bool recognizer_parse(RecognizerInput *input) {
       }
       if (parser.exhausted) {
         if (recognizer_extend(&parser)) continue;
-        shared = parser.feasible;
         goto done;
       }
       if (parser.context_depth >= parser.depth)
@@ -2368,7 +2359,8 @@ done:
   ts_free(parser.choices);
   ts_free(parser.sources);
   ts_free(parser.alternatives);
-  return shared ? shared_recognize(input, true, NULL) : result;
+  return !result && parser.feasible ? shared_recognize(input, true, NULL)
+                                    : result;
 }
 
 static const uint64_t UNCONSTRAINED = UINT64_MAX;

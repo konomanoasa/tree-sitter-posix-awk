@@ -105,13 +105,6 @@ export function parse(source, edits = []) {
   return { ...result, tree, output: result.stdout + result.stderr };
 }
 
-function clean(source) {
-  const result = parse(source);
-  assert.equal(result.status, 0, result.output);
-  assertClean(result.tree);
-  return result.tree;
-}
-
 export function parseSummary(
   source,
   edits = [],
@@ -207,10 +200,6 @@ function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
   return fresh.tree;
 }
 
-function freshTest(name, source, assertions) {
-  test(`posix_awk: ${name}`, () => assertions(clean(source)));
-}
-
 function determinismTest(name, initial, final, edits, assertions) {
   test(`posix_awk: ${name}`, () => {
     const tree = assertDeterministicEdit(name, initial, final, edits);
@@ -239,7 +228,6 @@ export {
   assertStatus,
   determinismTest,
   editHistoryTest,
-  freshTest,
   lines,
   nativeLibrary,
   parseDescription,

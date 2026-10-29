@@ -6,6 +6,7 @@ import { createTreeSitter, grammars, root } from "../../scripts/tree-sitter.js";
 import {
   clean as assertClean,
   assertContinuationRanges,
+  dirty as assertDirty,
   hasRecovery,
   parseCst,
   sourceEndPoint,
@@ -176,7 +177,13 @@ function assertStatus(label, result, expectedStatus) {
   assert.equal(result.status, expectedStatus, parseDescription(label, result));
 }
 
-function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
+function assertDeterministicEdit(
+  testName,
+  initialSource,
+  finalSource,
+  edits,
+  expectedStatus = 0,
+) {
   assert.deepEqual(
     applyEdits(initialSource, edits),
     Buffer.from(finalSource),
@@ -189,8 +196,9 @@ function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
     "native incremental parse": incremental,
     "native fresh parse": fresh,
   })) {
-    assertStatus(`${testName} ${label}`, result, 0);
-    assertClean(result.tree);
+    assertStatus(`${testName} ${label}`, result, expectedStatus);
+    if (expectedStatus === 0) assertClean(result.tree);
+    else assertDirty(result.tree);
   }
   assert.equal(
     incremental.tree,
@@ -200,14 +208,27 @@ function assertDeterministicEdit(testName, initialSource, finalSource, edits) {
   return fresh.tree;
 }
 
-function determinismTest(name, initial, final, edits, assertions) {
+function determinismTest(
+  name,
+  initial,
+  final,
+  edits,
+  assertions,
+  expectedStatus = 0,
+) {
   test(`posix_awk: ${name}`, () => {
-    const tree = assertDeterministicEdit(name, initial, final, edits);
+    const tree = assertDeterministicEdit(
+      name,
+      initial,
+      final,
+      edits,
+      expectedStatus,
+    );
     assertions?.(tree);
   });
 }
 
-function editHistoryTest(name, source, edits) {
+function editHistoryTest(name, source, edits, expectedStatus = 0) {
   const reverts = [];
   let current = Buffer.from(source);
   for (const edit of edits) {
@@ -220,7 +241,14 @@ function editHistoryTest(name, source, edits) {
     });
     current = applyEdits(current, [edit]);
   }
-  determinismTest(name, source, source, [...edits, ...reverts]);
+  determinismTest(
+    name,
+    source,
+    source,
+    [...edits, ...reverts],
+    undefined,
+    expectedStatus,
+  );
 }
 
 export {

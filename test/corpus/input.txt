@@ -240,28 +240,11 @@ BEGIN {
       (newline))))
 
 ==================
-getline followed by a postfix update remains a concatenation
+reject update after a committed getline target: { getline value++ }
+:error
 ==================
 { getline value++ }
 ------------------
-
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_input_function
-                      (simple_get
-                        (getline_keyword))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
 
 ==================
 a getline target accepts a continuation before a comparison operator
@@ -561,122 +544,115 @@ nested redirected getline without targets remains an ordinary expression
       (newline))))
 
 ==================
-getline concatenation preserves arithmetic after an array postfix update
+reject update after a committed getline target: { getline array[i]--^2 * factor + offset }
+:error
 ==================
 { getline array[i]--^2 * factor + offset }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_input_function
-                      (simple_get
-                        (getline_keyword))))
-                  (non_unary_expr
-                    (non_unary_expr
-                      (non_unary_expr
-                        (non_unary_expr
-                          (lvalue
-                            (name)
-                            (expr_list
-                              (expr
-                                (non_unary_expr
-                                  (lvalue
-                                    (name))))))
-                          (decr))
-                        (expr
-                          (non_unary_expr
-                            (number))))
-                      (expr
-                        (non_unary_expr
-                          (lvalue
-                            (name)))))
-                    (expr
-                      (non_unary_expr
-                        (lvalue
-                          (name))))))))))))))
-
 ==================
-getline concatenation preserves a non-unary pipe source before a postfix update
+reject update after a committed getline target: { "cmd" | getline target++ + offset }
+:error
 ==================
 { "cmd" | getline target++ + offset }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_input_function
-                      (non_unary_expr
-                        (string
-                          (string_content)))
-                      (simple_get
-                        (getline_keyword))))
-                  (non_unary_expr
-                    (non_unary_expr
-                      (lvalue
-                        (name))
-                      (incr))
-                    (expr
-                      (non_unary_expr
-                        (lvalue
-                          (name))))))))))))))
-
 ==================
-getline concatenation preserves a unary pipe source and postfix arithmetic
+reject update after a committed getline target: { -command | getline target--^2 / factor - offset }
+:error
 ==================
 { -command | getline target--^2 / factor - offset }
 ------------------
 
+==================
+reject a postfix increment after a numbered getline field target
+:error
+==================
+{ getline $1++ }
+------------------
+
+==================
+reject a postfix increment after a named getline field target
+:error
+==================
+{ getline $x++ }
+------------------
+
+==================
+reject a postfix decrement after a named getline field target
+:error
+==================
+{ getline $x-- }
+------------------
+
+==================
+reject moving a field target update onto the enclosing field
+:error
+==================
+{ $getline $x++ }
+------------------
+
+==================
+reject a postfix increment after a piped getline field target
+:error
+==================
+{ "cmd" | getline $1++ }
+------------------
+
+==================
+grouped targetless getline can concatenate a postfix field update
+==================
+{ (getline) $x++ }
+------------------
+
 (program
   (item
-    (action
-      (unterminated_statement_list
+    action: (action
+      body: (unterminated_statement_list
         (unterminated_statement
-          (terminatable_statement
+          statement: (terminatable_statement
             (simple_statement
               (expr
-                (unary_expr
-                  (unary_expr
-                    (unary_input_function
-                      (unary_expr
-                        (expr
-                          (non_unary_expr
-                            (lvalue
-                              (name)))))
-                      (simple_get
-                        (getline_keyword))))
-                  (non_unary_expr
-                    (non_unary_expr
-                      (non_unary_expr
-                        (non_unary_expr
-                          (lvalue
-                            (name))
-                          (decr))
-                        (expr
-                          (non_unary_expr
-                            (number))))
-                      (expr
-                        (non_unary_expr
-                          (lvalue
-                            (name)))))
+                (non_unary_expr
+                  left: (non_unary_expr
                     (expr
                       (non_unary_expr
-                        (lvalue
-                          (name))))))))))))))
+                        (non_unary_input_function
+                          get: (simple_get
+                            (getline_keyword))))))
+                  right: (non_unary_expr
+                    operand: (lvalue
+                      operand: (expr
+                        (non_unary_expr
+                          (lvalue (name)))))
+                    operator: (incr)))))))))))
+
+==================
+getline field target can precede a concatenated prefix increment
+==================
+{ getline $x++ y }
+------------------
+
+(program
+  (item
+    action: (action
+      body: (unterminated_statement_list
+        (unterminated_statement
+          statement: (terminatable_statement
+            (simple_statement
+              (expr
+                (non_unary_expr
+                  left: (non_unary_expr
+                    (non_unary_input_function
+                      get: (simple_get
+                        (getline_keyword)
+                        target: (lvalue
+                          operand: (expr
+                            (non_unary_expr
+                              (lvalue (name))))))))
+                  right: (non_unary_expr
+                    operator: (incr)
+                    operand: (lvalue (name))))))))))))
 
 ==================
 getline prefers a target when a following update can start a concatenated operand
@@ -705,242 +681,60 @@ getline prefers a target when a following update can start a concatenated operan
                       (name))))))))))))
 
 ==================
-targetless getline follows a unary sign before a postfix update
+reject update after a committed getline target: { -getline x++ }
+:error
 ==================
 { -getline x++ }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (unary_expr
-                  (unary_expr
-                    (expr
-                      (non_unary_expr
-                        (non_unary_input_function
-                          (simple_get
-                            (getline_keyword))))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
-
 ==================
-targetless getline is an addition operand before a postfix update
+reject update after a committed getline target: { a + getline x++ }
+:error
 ==================
 { a + getline x++ }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_expr
-                      (lvalue
-                        (name)))
-                    (expr
-                      (non_unary_expr
-                        (non_unary_input_function
-                          (simple_get
-                            (getline_keyword))))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
-
 ==================
-targetless getline follows a concatenation operand before a postfix update
+reject update after a committed getline target: { a getline x++ }
+:error
 ==================
 { a getline x++ }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_expr
-                      (lvalue
-                        (name)))
-                    (non_unary_expr
-                      (non_unary_input_function
-                        (simple_get
-                          (getline_keyword)))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
-
 ==================
-targetless getline occurs in an assigned unary field before a postfix update
+reject update after a committed getline target: { q = $-getline x++ }
+:error
 ==================
 { q = $-getline x++ }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (lvalue
-                    (name))
-                  (expr
-                    (non_unary_expr
-                      (non_unary_expr
-                        (lvalue
-                          (expr
-                            (unary_expr
-                              (expr
-                                (non_unary_expr
-                                  (non_unary_input_function
-                                    (simple_get
-                                      (getline_keyword)))))))))
-                      (non_unary_expr
-                        (lvalue
-                          (name))
-                        (incr)))))))))))))
-
 ==================
-targetless getline is an exponent before a postfix update
+reject update after a committed getline target: { a ^ getline x++ }
+:error
 ==================
 { a ^ getline x++ }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_expr
-                      (lvalue
-                        (name)))
-                    (expr
-                      (non_unary_expr
-                        (non_unary_input_function
-                          (simple_get
-                            (getline_keyword))))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
-
 ==================
-targetless getline occurs in another getline field target before a postfix update
+reject update after a committed getline target: { getline $-getline x++ }
+:error
 ==================
 { getline $-getline x++ }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_input_function
-                      (simple_get
-                        (getline_keyword)
-                        (lvalue
-                          (expr
-                            (unary_expr
-                              (expr
-                                (non_unary_expr
-                                  (non_unary_input_function
-                                    (simple_get
-                                      (getline_keyword)))))))))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
-
 ==================
-targetless getline occurs in a prefix-updated field before a postfix update
+reject update after a committed getline target: { ++$getline x-- }
+:error
 ==================
 { ++$getline x-- }
 ------------------
 
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (incr)
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword)))))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (decr)))))))))))
-
 ==================
-targetless getline occurs in a printed unary field before a postfix update
+reject update after a committed getline target: { print $-getline x++ }
+:error
 ==================
 { print $-getline x++ }
 ------------------
-
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (print_statement
-                (simple_print_statement
-                  (print_keyword)
-                  (print_expr_list
-                    (print_expr
-                      (non_unary_print_expr
-                        (non_unary_print_expr
-                          (lvalue
-                            (expr
-                              (unary_expr
-                                (expr
-                                  (non_unary_expr
-                                    (non_unary_input_function
-                                      (simple_get
-                                        (getline_keyword)))))))))
-                        (non_unary_print_expr
-                          (lvalue
-                            (name))
-                          (incr))))))))))))))
 
 ==================
 a redirected getline field accepts a postfix update after its string source
@@ -1273,39 +1067,11 @@ assignment applies to a field after its additive getline source
           (newline))))))
 
 ==================
-an outer field retains the getline target inside its source before an update
-:cst
+reject update after a committed getline target: { $getline < getline x++ }
+:error
 ==================
 { $getline < getline x++ }
 ------------------
-
-0:0  - 0:26   program
-0:0  - 0:26     item
-0:0  - 0:26       action: action
-0:0  - 0:1          "{"
-0:2  - 0:24         body: unterminated_statement_list
-0:2  - 0:24           unterminated_statement
-0:2  - 0:24             statement: terminatable_statement
-0:2  - 0:24               simple_statement
-0:2  - 0:24                 expr
-0:2  - 0:24                   non_unary_expr
-0:2  - 0:22                     operand: lvalue
-0:2  - 0:3                        "$"
-0:3  - 0:22                       operand: expr
-0:3  - 0:22                         non_unary_expr
-0:3  - 0:22                           non_unary_input_function
-0:3  - 0:10                             get: simple_get
-0:3  - 0:10                               getline_keyword `getline`
-0:11 - 0:12                             "<"
-0:13 - 0:22                             source: expr
-0:13 - 0:22                               non_unary_expr
-0:13 - 0:22                                 non_unary_input_function
-0:13 - 0:22                                   get: simple_get
-0:13 - 0:20                                     getline_keyword `getline`
-0:21 - 0:22                                     target: lvalue
-0:21 - 0:22                                       name `x`
-0:22 - 0:24                     operator: incr `++`
-0:25 - 0:26         "}"
 
 ==================
 an outer getline field takes the update after the source of its target
@@ -1341,39 +1107,11 @@ an outer getline field takes the update after the source of its target
                   (incr))))))))))
 
 ==================
-the first getline keeps its target before a prefix-updated getline field
+reject update after a committed getline target: { getline x++ $getline y++ }
+:error
 ==================
 { getline x++ $getline y++ }
 ------------------
-
-(program
-  (item
-    (action
-      (unterminated_statement_list
-        (unterminated_statement
-          (terminatable_statement
-            (simple_statement
-              (expr
-                (non_unary_expr
-                  (non_unary_expr
-                    (non_unary_expr
-                      (non_unary_input_function
-                        (simple_get
-                          (getline_keyword)
-                          (lvalue
-                            (name)))))
-                    (non_unary_expr
-                      (incr)
-                      (lvalue
-                        (expr
-                          (non_unary_expr
-                            (non_unary_input_function
-                              (simple_get
-                                (getline_keyword))))))))
-                  (non_unary_expr
-                    (lvalue
-                      (name))
-                    (incr)))))))))))
 
 ==================
 getline lookahead keeps the outer target when its source takes the update
@@ -2093,7 +1831,8 @@ source relocation crosses multiple getline targets before a field update
       (newline))))
 
 ==================
-nested file inputs each leave an update for their enclosing field
+reject update after a committed getline target: {   $getline < $getline < getline x++++   $getline < $getline < $getline < getline x++++++ }
+:error
 ==================
 {
   $getline < $getline < getline x++++
@@ -2102,85 +1841,9 @@ nested file inputs each leave an update for their enclosing field
 
 ------------------
 
-(program
-  (item_list
-    (item
-      (action
-        (newline_opt
-          (newline))
-        (terminated_statement_list
-          (terminated_statement
-            (terminatable_statement
-              (simple_statement
-                (expr
-                  (non_unary_expr
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword))
-                            (expr
-                              (non_unary_expr
-                                (lvalue
-                                  (expr
-                                    (non_unary_expr
-                                      (non_unary_input_function
-                                        (simple_get
-                                          (getline_keyword))
-                                        (expr
-                                          (non_unary_expr
-                                            (non_unary_input_function
-                                              (simple_get
-                                                (getline_keyword)
-                                                (lvalue
-                                                  (name))))))))))
-                                (incr)))))))
-                    (incr)))))
-            (newline))
-          (terminated_statement
-            (terminatable_statement
-              (simple_statement
-                (expr
-                  (non_unary_expr
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword))
-                            (expr
-                              (non_unary_expr
-                                (lvalue
-                                  (expr
-                                    (non_unary_expr
-                                      (non_unary_input_function
-                                        (simple_get
-                                          (getline_keyword))
-                                        (expr
-                                          (non_unary_expr
-                                            (lvalue
-                                              (expr
-                                                (non_unary_expr
-                                                  (non_unary_input_function
-                                                    (simple_get
-                                                      (getline_keyword))
-                                                    (expr
-                                                      (non_unary_expr
-                                                        (non_unary_input_function
-                                                          (simple_get
-                                                            (getline_keyword)
-                                                            (lvalue
-                                                              (name))))))))))
-                                            (incr)))))))
-                                (incr)))))))
-                    (incr)))))
-            (newline)))))
-    (terminator
-      (newline))))
-
 ==================
-group call and subscript boundaries isolate getline target selection
+reject update after a committed getline target: {   $getline < (getline x++) ++   $getline < f(getline x++) ++   $getline < a[getline x++] ++   $getline < ($getline < (getline x++) ++) ++ }
+:error
 ==================
 {
   $getline < (getline x++) ++
@@ -2190,132 +1853,6 @@ group call and subscript boundaries isolate getline target selection
 }
 
 ------------------
-
-(program
-  (item_list
-    (item
-      (action
-        (newline_opt
-          (newline))
-        (terminated_statement_list
-          (terminated_statement
-            (terminatable_statement
-              (simple_statement
-                (expr
-                  (non_unary_expr
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword))
-                            (expr
-                              (non_unary_expr
-                                (expr
-                                  (non_unary_expr
-                                    (non_unary_expr
-                                      (non_unary_input_function
-                                        (simple_get
-                                          (getline_keyword))))
-                                    (non_unary_expr
-                                      (lvalue
-                                        (name))
-                                      (incr))))))))))
-                    (incr)))))
-            (newline))
-          (terminated_statement
-            (terminatable_statement
-              (simple_statement
-                (expr
-                  (non_unary_expr
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword))
-                            (expr
-                              (non_unary_expr
-                                (func_name)
-                                (expr_list
-                                  (expr
-                                    (non_unary_expr
-                                      (non_unary_expr
-                                        (non_unary_input_function
-                                          (simple_get
-                                            (getline_keyword))))
-                                      (non_unary_expr
-                                        (lvalue
-                                          (name))
-                                        (incr)))))))))))
-                    (incr)))))
-            (newline))
-          (terminated_statement
-            (terminatable_statement
-              (simple_statement
-                (expr
-                  (non_unary_expr
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword))
-                            (expr
-                              (non_unary_expr
-                                (lvalue
-                                  (name)
-                                  (expr_list
-                                    (expr
-                                      (non_unary_expr
-                                        (non_unary_expr
-                                          (non_unary_input_function
-                                            (simple_get
-                                              (getline_keyword))))
-                                        (non_unary_expr
-                                          (lvalue
-                                            (name))
-                                          (incr))))))
-                                (incr)))))))))))
-            (newline))
-          (terminated_statement
-            (terminatable_statement
-              (simple_statement
-                (expr
-                  (non_unary_expr
-                    (lvalue
-                      (expr
-                        (non_unary_expr
-                          (non_unary_input_function
-                            (simple_get
-                              (getline_keyword))
-                            (expr
-                              (non_unary_expr
-                                (expr
-                                  (non_unary_expr
-                                    (lvalue
-                                      (expr
-                                        (non_unary_expr
-                                          (non_unary_input_function
-                                            (simple_get
-                                              (getline_keyword))
-                                            (expr
-                                              (non_unary_expr
-                                                (expr
-                                                  (non_unary_expr
-                                                    (non_unary_expr
-                                                      (non_unary_input_function
-                                                        (simple_get
-                                                          (getline_keyword))))
-                                                    (non_unary_expr
-                                                      (lvalue
-                                                        (name))
-                                                      (incr))))))))))
-                                    (incr)))))))))
-                    (incr)))))
-            (newline)))))
-    (terminator
-      (newline))))
 
 ==================
 nested sources retain the earlier targets before the final outer source
@@ -2444,34 +1981,11 @@ two file sources precede a comparison outside nested getline
       (newline))))
 
 ==================
-numeric boundaries in getline lookahead: { getline $1.5f++ }
-:cst
+reject update after a committed numeric field target: { getline $1.5f++ }
+:error
 ==================
 { getline $1.5f++ }
 ------------------
-
-0:0  - 0:19   program
-0:0  - 0:19     item
-0:0  - 0:19       action: action
-0:0  - 0:1          "{"
-0:2  - 0:17         body: unterminated_statement_list
-0:2  - 0:17           unterminated_statement
-0:2  - 0:17             statement: terminatable_statement
-0:2  - 0:17               simple_statement
-0:2  - 0:17                 expr
-0:2  - 0:17                   non_unary_expr
-0:2  - 0:9                      left: non_unary_expr
-0:2  - 0:9                        non_unary_input_function
-0:2  - 0:9                          get: simple_get
-0:2  - 0:9                            getline_keyword `getline`
-0:10 - 0:17                     right: non_unary_expr
-0:10 - 0:15                       operand: lvalue
-0:10 - 0:11                         "$"
-0:11 - 0:15                         operand: expr
-0:11 - 0:15                           non_unary_expr
-0:11 - 0:15                             number `1.5f`
-0:15 - 0:17                       operator: incr `++`
-0:18 - 0:19         "}"
 
 ==================
 numeric boundaries in getline lookahead: { getline $1f++ }
@@ -2506,34 +2020,11 @@ numeric boundaries in getline lookahead: { getline $1f++ }
 0:16 - 0:17         "}"
 
 ==================
-numeric boundaries in getline lookahead: { getline $1.5e+2F++ }
-:cst
+reject update after a committed numeric field target: { getline $1.5e+2F++ }
+:error
 ==================
 { getline $1.5e+2F++ }
 ------------------
-
-0:0  - 0:22   program
-0:0  - 0:22     item
-0:0  - 0:22       action: action
-0:0  - 0:1          "{"
-0:2  - 0:20         body: unterminated_statement_list
-0:2  - 0:20           unterminated_statement
-0:2  - 0:20             statement: terminatable_statement
-0:2  - 0:20               simple_statement
-0:2  - 0:20                 expr
-0:2  - 0:20                   non_unary_expr
-0:2  - 0:9                      left: non_unary_expr
-0:2  - 0:9                        non_unary_input_function
-0:2  - 0:9                          get: simple_get
-0:2  - 0:9                            getline_keyword `getline`
-0:10 - 0:20                     right: non_unary_expr
-0:10 - 0:18                       operand: lvalue
-0:10 - 0:11                         "$"
-0:11 - 0:18                         operand: expr
-0:11 - 0:18                           non_unary_expr
-0:11 - 0:18                             number `1.5e+2F`
-0:18 - 0:20                       operator: incr `++`
-0:21 - 0:22         "}"
 
 ==================
 numeric boundaries in getline lookahead: { getline $1e++ }
@@ -2600,34 +2091,11 @@ numeric boundaries in getline lookahead: { getline $1.0ff++ }
 0:19 - 0:20         "}"
 
 ==================
-numeric boundaries in getline lookahead: { getline $1.L++ }
-:cst
+reject update after a committed numeric field target: { getline $1.L++ }
+:error
 ==================
 { getline $1.L++ }
 ------------------
-
-0:0  - 0:18   program
-0:0  - 0:18     item
-0:0  - 0:18       action: action
-0:0  - 0:1          "{"
-0:2  - 0:16         body: unterminated_statement_list
-0:2  - 0:16           unterminated_statement
-0:2  - 0:16             statement: terminatable_statement
-0:2  - 0:16               simple_statement
-0:2  - 0:16                 expr
-0:2  - 0:16                   non_unary_expr
-0:2  - 0:9                      left: non_unary_expr
-0:2  - 0:9                        non_unary_input_function
-0:2  - 0:9                          get: simple_get
-0:2  - 0:9                            getline_keyword `getline`
-0:10 - 0:16                     right: non_unary_expr
-0:10 - 0:14                       operand: lvalue
-0:10 - 0:11                         "$"
-0:11 - 0:14                         operand: expr
-0:11 - 0:14                           non_unary_expr
-0:11 - 0:14                             number `1.L`
-0:14 - 0:16                       operator: incr `++`
-0:17 - 0:18         "}"
 
 ==================
 numeric boundaries before a glued getline: { x = 1e3getline < "f" }
@@ -2667,39 +2135,11 @@ numeric boundaries before a glued getline: { x = 1e3getline < "f" }
 0:23 - 0:24         "}"
 
 ==================
-numeric boundaries before a glued getline: { y = 1.5fgetline x++ }
-:cst
+reject update after a committed getline target: { y = 1.5fgetline x++ }
+:error
 ==================
 { y = 1.5fgetline x++ }
 ------------------
-
-0:0  - 0:23   program
-0:0  - 0:23     item
-0:0  - 0:23       action: action
-0:0  - 0:1          "{"
-0:2  - 0:21         body: unterminated_statement_list
-0:2  - 0:21           unterminated_statement
-0:2  - 0:21             statement: terminatable_statement
-0:2  - 0:21               simple_statement
-0:2  - 0:21                 expr
-0:2  - 0:21                   non_unary_expr
-0:2  - 0:3                      left: lvalue
-0:2  - 0:3                        name `y`
-0:4  - 0:5                      "="
-0:6  - 0:21                     right: expr
-0:6  - 0:21                       non_unary_expr
-0:6  - 0:17                         left: non_unary_expr
-0:6  - 0:10                           left: non_unary_expr
-0:6  - 0:10                             number `1.5f`
-0:10 - 0:17                           right: non_unary_expr
-0:10 - 0:17                             non_unary_input_function
-0:10 - 0:17                               get: simple_get
-0:10 - 0:17                                 getline_keyword `getline`
-0:18 - 0:21                         right: non_unary_expr
-0:18 - 0:19                           operand: lvalue
-0:18 - 0:19                             name `x`
-0:19 - 0:21                           operator: incr `++`
-0:22 - 0:23         "}"
 
 ==================
 nested getline retains its outer source across 1
@@ -2971,319 +2411,6 @@ BEGIN { getline target\
 1:10 - 2:0        terminator: terminator
 1:10 - 2:0          newline
 1:10 - 1:11           `\n`
-
-==================
-getline concatenation keeps both operands in { -getline x++ }
-:cst
-==================
-{ -getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:16       item: item
-0:0  - 0:16         action: action
-0:0  - 0:1            "{"
-0:2  - 0:14           body: unterminated_statement_list
-0:2  - 0:14             unterminated_statement
-0:2  - 0:14               statement: terminatable_statement
-0:2  - 0:14                 simple_statement
-0:2  - 0:14                   expr
-0:2  - 0:14                     unary_expr
-0:2  - 0:10                       left: unary_expr
-0:2  - 0:3                          "-"
-0:3  - 0:10                         operand: expr
-0:3  - 0:10                           non_unary_expr
-0:3  - 0:10                             non_unary_input_function
-0:3  - 0:10                               get: simple_get
-0:3  - 0:10                                 getline_keyword `getline`
-0:11 - 0:14                       right: non_unary_expr
-0:11 - 0:12                         operand: lvalue
-0:11 - 0:12                           name `x`
-0:12 - 0:14                         operator: incr `++`
-0:15 - 0:16           "}"
-0:16 - 1:0        terminator: terminator
-0:16 - 1:0          newline
-0:16 - 0:17           `\n`
-
-==================
-getline concatenation keeps both operands in { a + getline x++ }
-:cst
-==================
-{ a + getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:19       item: item
-0:0  - 0:19         action: action
-0:0  - 0:1            "{"
-0:2  - 0:17           body: unterminated_statement_list
-0:2  - 0:17             unterminated_statement
-0:2  - 0:17               statement: terminatable_statement
-0:2  - 0:17                 simple_statement
-0:2  - 0:17                   expr
-0:2  - 0:17                     non_unary_expr
-0:2  - 0:13                       left: non_unary_expr
-0:2  - 0:3                          left: non_unary_expr
-0:2  - 0:3                            lvalue
-0:2  - 0:3                              name `a`
-0:4  - 0:5                          "+"
-0:6  - 0:13                         right: expr
-0:6  - 0:13                           non_unary_expr
-0:6  - 0:13                             non_unary_input_function
-0:6  - 0:13                               get: simple_get
-0:6  - 0:13                                 getline_keyword `getline`
-0:14 - 0:17                       right: non_unary_expr
-0:14 - 0:15                         operand: lvalue
-0:14 - 0:15                           name `x`
-0:15 - 0:17                         operator: incr `++`
-0:18 - 0:19           "}"
-0:19 - 1:0        terminator: terminator
-0:19 - 1:0          newline
-0:19 - 0:20           `\n`
-
-==================
-getline concatenation keeps both operands in { a getline x++ }
-:cst
-==================
-{ a getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:17       item: item
-0:0  - 0:17         action: action
-0:0  - 0:1            "{"
-0:2  - 0:15           body: unterminated_statement_list
-0:2  - 0:15             unterminated_statement
-0:2  - 0:15               statement: terminatable_statement
-0:2  - 0:15                 simple_statement
-0:2  - 0:15                   expr
-0:2  - 0:15                     non_unary_expr
-0:2  - 0:11                       left: non_unary_expr
-0:2  - 0:3                          left: non_unary_expr
-0:2  - 0:3                            lvalue
-0:2  - 0:3                              name `a`
-0:4  - 0:11                         right: non_unary_expr
-0:4  - 0:11                           non_unary_input_function
-0:4  - 0:11                             get: simple_get
-0:4  - 0:11                               getline_keyword `getline`
-0:12 - 0:15                       right: non_unary_expr
-0:12 - 0:13                         operand: lvalue
-0:12 - 0:13                           name `x`
-0:13 - 0:15                         operator: incr `++`
-0:16 - 0:17           "}"
-0:17 - 1:0        terminator: terminator
-0:17 - 1:0          newline
-0:17 - 0:18           `\n`
-
-==================
-getline concatenation keeps both operands in { q = $-getline x++ }
-:cst
-==================
-{ q = $-getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:21       item: item
-0:0  - 0:21         action: action
-0:0  - 0:1            "{"
-0:2  - 0:19           body: unterminated_statement_list
-0:2  - 0:19             unterminated_statement
-0:2  - 0:19               statement: terminatable_statement
-0:2  - 0:19                 simple_statement
-0:2  - 0:19                   expr
-0:2  - 0:19                     non_unary_expr
-0:2  - 0:3                        left: lvalue
-0:2  - 0:3                          name `q`
-0:4  - 0:5                        "="
-0:6  - 0:19                       right: expr
-0:6  - 0:19                         non_unary_expr
-0:6  - 0:15                           left: non_unary_expr
-0:6  - 0:15                             lvalue
-0:6  - 0:7                                "$"
-0:7  - 0:15                               operand: expr
-0:7  - 0:15                                 unary_expr
-0:7  - 0:8                                    "-"
-0:8  - 0:15                                   operand: expr
-0:8  - 0:15                                     non_unary_expr
-0:8  - 0:15                                       non_unary_input_function
-0:8  - 0:15                                         get: simple_get
-0:8  - 0:15                                           getline_keyword `getline`
-0:16 - 0:19                           right: non_unary_expr
-0:16 - 0:17                             operand: lvalue
-0:16 - 0:17                               name `x`
-0:17 - 0:19                             operator: incr `++`
-0:20 - 0:21           "}"
-0:21 - 1:0        terminator: terminator
-0:21 - 1:0          newline
-0:21 - 0:22           `\n`
-
-==================
-getline concatenation keeps both operands in { a ^ getline x++ }
-:cst
-==================
-{ a ^ getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:19       item: item
-0:0  - 0:19         action: action
-0:0  - 0:1            "{"
-0:2  - 0:17           body: unterminated_statement_list
-0:2  - 0:17             unterminated_statement
-0:2  - 0:17               statement: terminatable_statement
-0:2  - 0:17                 simple_statement
-0:2  - 0:17                   expr
-0:2  - 0:17                     non_unary_expr
-0:2  - 0:13                       left: non_unary_expr
-0:2  - 0:3                          left: non_unary_expr
-0:2  - 0:3                            lvalue
-0:2  - 0:3                              name `a`
-0:4  - 0:5                          "^"
-0:6  - 0:13                         right: expr
-0:6  - 0:13                           non_unary_expr
-0:6  - 0:13                             non_unary_input_function
-0:6  - 0:13                               get: simple_get
-0:6  - 0:13                                 getline_keyword `getline`
-0:14 - 0:17                       right: non_unary_expr
-0:14 - 0:15                         operand: lvalue
-0:14 - 0:15                           name `x`
-0:15 - 0:17                         operator: incr `++`
-0:18 - 0:19           "}"
-0:19 - 1:0        terminator: terminator
-0:19 - 1:0          newline
-0:19 - 0:20           `\n`
-
-==================
-getline concatenation keeps both operands in { getline $-getline x++ }
-:cst
-==================
-{ getline $-getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:25       item: item
-0:0  - 0:25         action: action
-0:0  - 0:1            "{"
-0:2  - 0:23           body: unterminated_statement_list
-0:2  - 0:23             unterminated_statement
-0:2  - 0:23               statement: terminatable_statement
-0:2  - 0:23                 simple_statement
-0:2  - 0:23                   expr
-0:2  - 0:23                     non_unary_expr
-0:2  - 0:19                       left: non_unary_expr
-0:2  - 0:19                         non_unary_input_function
-0:2  - 0:19                           get: simple_get
-0:2  - 0:9                              getline_keyword `getline`
-0:10 - 0:19                             target: lvalue
-0:10 - 0:11                               "$"
-0:11 - 0:19                               operand: expr
-0:11 - 0:19                                 unary_expr
-0:11 - 0:12                                   "-"
-0:12 - 0:19                                   operand: expr
-0:12 - 0:19                                     non_unary_expr
-0:12 - 0:19                                       non_unary_input_function
-0:12 - 0:19                                         get: simple_get
-0:12 - 0:19                                           getline_keyword `getline`
-0:20 - 0:23                       right: non_unary_expr
-0:20 - 0:21                         operand: lvalue
-0:20 - 0:21                           name `x`
-0:21 - 0:23                         operator: incr `++`
-0:24 - 0:25           "}"
-0:25 - 1:0        terminator: terminator
-0:25 - 1:0          newline
-0:25 - 0:26           `\n`
-
-==================
-getline concatenation keeps both operands in { ++$getline x-- }
-:cst
-==================
-{ ++$getline x-- }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:18       item: item
-0:0  - 0:18         action: action
-0:0  - 0:1            "{"
-0:2  - 0:16           body: unterminated_statement_list
-0:2  - 0:16             unterminated_statement
-0:2  - 0:16               statement: terminatable_statement
-0:2  - 0:16                 simple_statement
-0:2  - 0:16                   expr
-0:2  - 0:16                     non_unary_expr
-0:2  - 0:12                       left: non_unary_expr
-0:2  - 0:4                          operator: incr `++`
-0:4  - 0:12                         operand: lvalue
-0:4  - 0:5                            "$"
-0:5  - 0:12                           operand: expr
-0:5  - 0:12                             non_unary_expr
-0:5  - 0:12                               non_unary_input_function
-0:5  - 0:12                                 get: simple_get
-0:5  - 0:12                                   getline_keyword `getline`
-0:13 - 0:16                       right: non_unary_expr
-0:13 - 0:14                         operand: lvalue
-0:13 - 0:14                           name `x`
-0:14 - 0:16                         operator: decr `--`
-0:17 - 0:18           "}"
-0:18 - 1:0        terminator: terminator
-0:18 - 1:0          newline
-0:18 - 0:19           `\n`
-
-==================
-getline concatenation keeps both operands in { print $-getline x++ }
-:cst
-==================
-{ print $-getline x++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:23       item: item
-0:0  - 0:23         action: action
-0:0  - 0:1            "{"
-0:2  - 0:21           body: unterminated_statement_list
-0:2  - 0:21             unterminated_statement
-0:2  - 0:21               statement: terminatable_statement
-0:2  - 0:21                 simple_statement
-0:2  - 0:21                   print_statement
-0:2  - 0:21                     statement: simple_print_statement
-0:2  - 0:7                        print_keyword `print`
-0:8  - 0:21                       arguments: print_expr_list
-0:8  - 0:21                         print_expr
-0:8  - 0:21                           non_unary_print_expr
-0:8  - 0:17                             left: non_unary_print_expr
-0:8  - 0:17                               lvalue
-0:8  - 0:9                                  "$"
-0:9  - 0:17                                 operand: expr
-0:9  - 0:17                                   unary_expr
-0:9  - 0:10                                     "-"
-0:10 - 0:17                                     operand: expr
-0:10 - 0:17                                       non_unary_expr
-0:10 - 0:17                                         non_unary_input_function
-0:10 - 0:17                                           get: simple_get
-0:10 - 0:17                                             getline_keyword `getline`
-0:18 - 0:21                             right: non_unary_print_expr
-0:18 - 0:19                               operand: lvalue
-0:18 - 0:19                                 name `x`
-0:19 - 0:21                               operator: incr `++`
-0:22 - 0:23           "}"
-0:23 - 1:0        terminator: terminator
-0:23 - 1:0          newline
-0:23 - 0:24           `\n`
 
 ==================
 redirected getline field update retains its source in { $getline < "f" ++ }
@@ -3662,60 +2789,12 @@ getline source lookahead selects the first viable target in getline $getline < x
 0:26 - 0:27           `\n`
 
 ==================
-getline source lookahead selects the first viable target in getline $getline < a < getline x++ < y
-:cst
+reject update after a committed getline target: { getline $getline < a < getline x++ < y }
+:error
 ==================
 { getline $getline < a < getline x++ < y }
 
 ------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:42       item: item
-0:0  - 0:42         action: action
-0:0  - 0:1            "{"
-0:2  - 0:40           body: unterminated_statement_list
-0:2  - 0:40             unterminated_statement
-0:2  - 0:40               statement: terminatable_statement
-0:2  - 0:40                 simple_statement
-0:2  - 0:40                   expr
-0:2  - 0:40                     non_unary_expr
-0:2  - 0:36                       left: non_unary_expr
-0:2  - 0:32                         left: non_unary_expr
-0:2  - 0:32                           non_unary_input_function
-0:2  - 0:22                             get: simple_get
-0:2  - 0:9                                getline_keyword `getline`
-0:10 - 0:22                               target: lvalue
-0:10 - 0:11                                 "$"
-0:11 - 0:22                                 operand: expr
-0:11 - 0:22                                   non_unary_expr
-0:11 - 0:22                                     non_unary_input_function
-0:11 - 0:18                                       get: simple_get
-0:11 - 0:18                                         getline_keyword `getline`
-0:19 - 0:20                                       "<"
-0:21 - 0:22                                       source: expr
-0:21 - 0:22                                         non_unary_expr
-0:21 - 0:22                                           lvalue
-0:21 - 0:22                                             name `a`
-0:23 - 0:24                             "<"
-0:25 - 0:32                             source: expr
-0:25 - 0:32                               non_unary_expr
-0:25 - 0:32                                 non_unary_input_function
-0:25 - 0:32                                   get: simple_get
-0:25 - 0:32                                     getline_keyword `getline`
-0:33 - 0:36                         right: non_unary_expr
-0:33 - 0:34                           operand: lvalue
-0:33 - 0:34                             name `x`
-0:34 - 0:36                           operator: incr `++`
-0:37 - 0:38                       "<"
-0:39 - 0:40                       right: expr
-0:39 - 0:40                         non_unary_expr
-0:39 - 0:40                           lvalue
-0:39 - 0:40                             name `y`
-0:41 - 0:42           "}"
-0:42 - 1:0        terminator: terminator
-0:42 - 1:0          newline
-0:42 - 0:43           `\n`
 
 ==================
 getline source lookahead selects the first viable target in getline $getline < x++++
@@ -4209,204 +3288,12 @@ getline source lookahead selects the first viable target in getline $getline < (
 0:53 - 0:54           `\n`
 
 ==================
-getline source lookahead selects the first viable target in getline $getline < (x < (y < z | getline)) ++
-:cst
-==================
-{ getline $getline < (x < (y < z | getline)) ++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:49       item: item
-0:0  - 0:49         action: action
-0:0  - 0:1            "{"
-0:2  - 0:47           body: unterminated_statement_list
-0:2  - 0:47             unterminated_statement
-0:2  - 0:47               statement: terminatable_statement
-0:2  - 0:47                 simple_statement
-0:2  - 0:47                   expr
-0:2  - 0:47                     non_unary_expr
-0:2  - 0:9                        left: non_unary_expr
-0:2  - 0:9                          non_unary_input_function
-0:2  - 0:9                            get: simple_get
-0:2  - 0:9                              getline_keyword `getline`
-0:10 - 0:47                       right: non_unary_expr
-0:10 - 0:44                         operand: lvalue
-0:10 - 0:11                           "$"
-0:11 - 0:44                           operand: expr
-0:11 - 0:44                             non_unary_expr
-0:11 - 0:44                               non_unary_input_function
-0:11 - 0:18                                 get: simple_get
-0:11 - 0:18                                   getline_keyword `getline`
-0:19 - 0:20                                 "<"
-0:21 - 0:44                                 source: expr
-0:21 - 0:44                                   non_unary_expr
-0:21 - 0:22                                     "("
-0:22 - 0:43                                     expr
-0:22 - 0:43                                       non_unary_expr
-0:22 - 0:23                                         left: non_unary_expr
-0:22 - 0:23                                           lvalue
-0:22 - 0:23                                             name `x`
-0:24 - 0:25                                         "<"
-0:26 - 0:43                                         right: expr
-0:26 - 0:43                                           non_unary_expr
-0:26 - 0:27                                             "("
-0:27 - 0:42                                             expr
-0:27 - 0:42                                               non_unary_expr
-0:27 - 0:42                                                 non_unary_input_function
-0:27 - 0:32                                                   source: non_unary_expr
-0:27 - 0:28                                                     left: non_unary_expr
-0:27 - 0:28                                                       lvalue
-0:27 - 0:28                                                         name `y`
-0:29 - 0:30                                                     "<"
-0:31 - 0:32                                                     right: expr
-0:31 - 0:32                                                       non_unary_expr
-0:31 - 0:32                                                         lvalue
-0:31 - 0:32                                                           name `z`
-0:33 - 0:34                                                   "|"
-0:35 - 0:42                                                   get: simple_get
-0:35 - 0:42                                                     getline_keyword `getline`
-0:42 - 0:43                                             ")"
-0:43 - 0:44                                     ")"
-0:45 - 0:47                         operator: incr `++`
-0:48 - 0:49           "}"
-0:49 - 1:0        terminator: terminator
-0:49 - 1:0          newline
-0:49 - 0:50           `\n`
-
-==================
-getline source lookahead selects the first viable target in getline $getline < (x ~ (y ~ 1 | getline)) ++
-:cst
-==================
-{ getline $getline < (x ~ (y ~ 1 | getline)) ++ }
-
-------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:49       item: item
-0:0  - 0:49         action: action
-0:0  - 0:1            "{"
-0:2  - 0:47           body: unterminated_statement_list
-0:2  - 0:47             unterminated_statement
-0:2  - 0:47               statement: terminatable_statement
-0:2  - 0:47                 simple_statement
-0:2  - 0:47                   expr
-0:2  - 0:47                     non_unary_expr
-0:2  - 0:9                        left: non_unary_expr
-0:2  - 0:9                          non_unary_input_function
-0:2  - 0:9                            get: simple_get
-0:2  - 0:9                              getline_keyword `getline`
-0:10 - 0:47                       right: non_unary_expr
-0:10 - 0:44                         operand: lvalue
-0:10 - 0:11                           "$"
-0:11 - 0:44                           operand: expr
-0:11 - 0:44                             non_unary_expr
-0:11 - 0:44                               non_unary_input_function
-0:11 - 0:18                                 get: simple_get
-0:11 - 0:18                                   getline_keyword `getline`
-0:19 - 0:20                                 "<"
-0:21 - 0:44                                 source: expr
-0:21 - 0:44                                   non_unary_expr
-0:21 - 0:22                                     "("
-0:22 - 0:43                                     expr
-0:22 - 0:43                                       non_unary_expr
-0:22 - 0:23                                         left: non_unary_expr
-0:22 - 0:23                                           lvalue
-0:22 - 0:23                                             name `x`
-0:24 - 0:25                                         "~"
-0:26 - 0:43                                         right: expr
-0:26 - 0:43                                           non_unary_expr
-0:26 - 0:27                                             "("
-0:27 - 0:42                                             expr
-0:27 - 0:42                                               non_unary_expr
-0:27 - 0:42                                                 non_unary_input_function
-0:27 - 0:32                                                   source: non_unary_expr
-0:27 - 0:28                                                     left: non_unary_expr
-0:27 - 0:28                                                       lvalue
-0:27 - 0:28                                                         name `y`
-0:29 - 0:30                                                     "~"
-0:31 - 0:32                                                     right: expr
-0:31 - 0:32                                                       non_unary_expr
-0:31 - 0:32                                                         number `1`
-0:33 - 0:34                                                   "|"
-0:35 - 0:42                                                   get: simple_get
-0:35 - 0:42                                                     getline_keyword `getline`
-0:42 - 0:43                                             ")"
-0:43 - 0:44                                     ")"
-0:45 - 0:47                         operator: incr `++`
-0:48 - 0:49           "}"
-0:49 - 1:0        terminator: terminator
-0:49 - 1:0          newline
-0:49 - 0:50           `\n`
-
-==================
-getline source lookahead selects the first viable target in getline $getline < (x ~ y | getline z ~ "f") ++
-:cst
+reject update after a committed getline target: { getline $getline < (x ~ y | getline z ~ "f") ++ }
+:error
 ==================
 { getline $getline < (x ~ y | getline z ~ "f") ++ }
 
 ------------------
-
-0:0  - 1:0    program
-0:0  - 1:0      item_list
-0:0  - 0:51       item: item
-0:0  - 0:51         action: action
-0:0  - 0:1            "{"
-0:2  - 0:49           body: unterminated_statement_list
-0:2  - 0:49             unterminated_statement
-0:2  - 0:49               statement: terminatable_statement
-0:2  - 0:49                 simple_statement
-0:2  - 0:49                   expr
-0:2  - 0:49                     non_unary_expr
-0:2  - 0:9                        left: non_unary_expr
-0:2  - 0:9                          non_unary_input_function
-0:2  - 0:9                            get: simple_get
-0:2  - 0:9                              getline_keyword `getline`
-0:10 - 0:49                       right: non_unary_expr
-0:10 - 0:46                         operand: lvalue
-0:10 - 0:11                           "$"
-0:11 - 0:46                           operand: expr
-0:11 - 0:46                             non_unary_expr
-0:11 - 0:46                               non_unary_input_function
-0:11 - 0:18                                 get: simple_get
-0:11 - 0:18                                   getline_keyword `getline`
-0:19 - 0:20                                 "<"
-0:21 - 0:46                                 source: expr
-0:21 - 0:46                                   non_unary_expr
-0:21 - 0:22                                     "("
-0:22 - 0:45                                     expr
-0:22 - 0:45                                       non_unary_expr
-0:22 - 0:39                                         left: non_unary_expr
-0:22 - 0:39                                           non_unary_input_function
-0:22 - 0:27                                             source: non_unary_expr
-0:22 - 0:23                                               left: non_unary_expr
-0:22 - 0:23                                                 lvalue
-0:22 - 0:23                                                   name `x`
-0:24 - 0:25                                               "~"
-0:26 - 0:27                                               right: expr
-0:26 - 0:27                                                 non_unary_expr
-0:26 - 0:27                                                   lvalue
-0:26 - 0:27                                                     name `y`
-0:28 - 0:29                                             "|"
-0:30 - 0:39                                             get: simple_get
-0:30 - 0:37                                               getline_keyword `getline`
-0:38 - 0:39                                               target: lvalue
-0:38 - 0:39                                                 name `z`
-0:40 - 0:41                                         "~"
-0:42 - 0:45                                         right: expr
-0:42 - 0:45                                           non_unary_expr
-0:42 - 0:45                                             string
-0:42 - 0:43                                               "\""
-0:43 - 0:44                                               string_content `f`
-0:44 - 0:45                                               "\""
-0:45 - 0:46                                     ")"
-0:47 - 0:49                         operator: incr `++`
-0:50 - 0:51           "}"
-0:51 - 1:0        terminator: terminator
-0:51 - 1:0          newline
-0:51 - 0:52           `\n`
 
 ==================
 getline source lookahead selects the first viable target in getline $getline $-x < (x | getline) ++
@@ -5311,234 +4198,39 @@ getline targets and updates keep their owners in { $getline < ((x) in a) -- x ++
 0:32 - 0:33         "}"
 
 ==================
-getline targets and updates keep their owners in { $getline < getline x++ < y }
-:cst
+reject update after a committed getline target: { $getline < getline x++ < y }
+:error
 ==================
 { $getline < getline x++ < y }
 ------------------
 
-0:0  - 0:30   program
-0:0  - 0:30     item
-0:0  - 0:30       action: action
-0:0  - 0:1          "{"
-0:2  - 0:28         body: unterminated_statement_list
-0:2  - 0:28           unterminated_statement
-0:2  - 0:28             statement: terminatable_statement
-0:2  - 0:28               simple_statement
-0:2  - 0:28                 expr
-0:2  - 0:28                   non_unary_expr
-0:2  - 0:24                     left: non_unary_expr
-0:2  - 0:22                       operand: lvalue
-0:2  - 0:3                          "$"
-0:3  - 0:22                         operand: expr
-0:3  - 0:22                           non_unary_expr
-0:3  - 0:22                             non_unary_input_function
-0:3  - 0:10                               get: simple_get
-0:3  - 0:10                                 getline_keyword `getline`
-0:11 - 0:12                               "<"
-0:13 - 0:22                               source: expr
-0:13 - 0:22                                 non_unary_expr
-0:13 - 0:22                                   non_unary_input_function
-0:13 - 0:22                                     get: simple_get
-0:13 - 0:20                                       getline_keyword `getline`
-0:21 - 0:22                                       target: lvalue
-0:21 - 0:22                                         name `x`
-0:22 - 0:24                       operator: incr `++`
-0:25 - 0:26                     "<"
-0:27 - 0:28                     right: expr
-0:27 - 0:28                       non_unary_expr
-0:27 - 0:28                         lvalue
-0:27 - 0:28                           name `y`
-0:29 - 0:30         "}"
-
 ==================
-getline targets and updates keep their owners in { $getline < getline x-- < y }
-:cst
+reject update after a committed getline target: { $getline < getline x-- < y }
+:error
 ==================
 { $getline < getline x-- < y }
 ------------------
 
-0:0  - 0:30   program
-0:0  - 0:30     item
-0:0  - 0:30       action: action
-0:0  - 0:1          "{"
-0:2  - 0:28         body: unterminated_statement_list
-0:2  - 0:28           unterminated_statement
-0:2  - 0:28             statement: terminatable_statement
-0:2  - 0:28               simple_statement
-0:2  - 0:28                 expr
-0:2  - 0:28                   non_unary_expr
-0:2  - 0:24                     left: non_unary_expr
-0:2  - 0:22                       operand: lvalue
-0:2  - 0:3                          "$"
-0:3  - 0:22                         operand: expr
-0:3  - 0:22                           non_unary_expr
-0:3  - 0:22                             non_unary_input_function
-0:3  - 0:10                               get: simple_get
-0:3  - 0:10                                 getline_keyword `getline`
-0:11 - 0:12                               "<"
-0:13 - 0:22                               source: expr
-0:13 - 0:22                                 non_unary_expr
-0:13 - 0:22                                   non_unary_input_function
-0:13 - 0:22                                     get: simple_get
-0:13 - 0:20                                       getline_keyword `getline`
-0:21 - 0:22                                       target: lvalue
-0:21 - 0:22                                         name `x`
-0:22 - 0:24                       operator: decr `--`
-0:25 - 0:26                     "<"
-0:27 - 0:28                     right: expr
-0:27 - 0:28                       non_unary_expr
-0:27 - 0:28                         lvalue
-0:27 - 0:28                           name `y`
-0:29 - 0:30         "}"
-
 ==================
-getline targets and updates keep their owners in { $getline < $getline < getline x++++ < y }
-:cst
+reject update after a committed getline target: { $getline < $getline < getline x++++ < y }
+:error
 ==================
 { $getline < $getline < getline x++++ < y }
 ------------------
 
-0:0  - 0:43   program
-0:0  - 0:43     item
-0:0  - 0:43       action: action
-0:0  - 0:1          "{"
-0:2  - 0:41         body: unterminated_statement_list
-0:2  - 0:41           unterminated_statement
-0:2  - 0:41             statement: terminatable_statement
-0:2  - 0:41               simple_statement
-0:2  - 0:41                 expr
-0:2  - 0:41                   non_unary_expr
-0:2  - 0:37                     left: non_unary_expr
-0:2  - 0:35                       operand: lvalue
-0:2  - 0:3                          "$"
-0:3  - 0:35                         operand: expr
-0:3  - 0:35                           non_unary_expr
-0:3  - 0:35                             non_unary_input_function
-0:3  - 0:10                               get: simple_get
-0:3  - 0:10                                 getline_keyword `getline`
-0:11 - 0:12                               "<"
-0:13 - 0:35                               source: expr
-0:13 - 0:35                                 non_unary_expr
-0:13 - 0:33                                   operand: lvalue
-0:13 - 0:14                                     "$"
-0:14 - 0:33                                     operand: expr
-0:14 - 0:33                                       non_unary_expr
-0:14 - 0:33                                         non_unary_input_function
-0:14 - 0:21                                           get: simple_get
-0:14 - 0:21                                             getline_keyword `getline`
-0:22 - 0:23                                           "<"
-0:24 - 0:33                                           source: expr
-0:24 - 0:33                                             non_unary_expr
-0:24 - 0:33                                               non_unary_input_function
-0:24 - 0:33                                                 get: simple_get
-0:24 - 0:31                                                   getline_keyword `getline`
-0:32 - 0:33                                                   target: lvalue
-0:32 - 0:33                                                     name `x`
-0:33 - 0:35                                   operator: incr `++`
-0:35 - 0:37                       operator: incr `++`
-0:38 - 0:39                     "<"
-0:40 - 0:41                     right: expr
-0:40 - 0:41                       non_unary_expr
-0:40 - 0:41                         lvalue
-0:40 - 0:41                           name `y`
-0:42 - 0:43         "}"
-
 ==================
-getline targets and updates keep their owners in { getline $getline < getline x++ < y }
-:cst
+reject update after a committed getline target: { getline $getline < getline x++ < y }
+:error
 ==================
 { getline $getline < getline x++ < y }
 ------------------
 
-0:0  - 0:38   program
-0:0  - 0:38     item
-0:0  - 0:38       action: action
-0:0  - 0:1          "{"
-0:2  - 0:36         body: unterminated_statement_list
-0:2  - 0:36           unterminated_statement
-0:2  - 0:36             statement: terminatable_statement
-0:2  - 0:36               simple_statement
-0:2  - 0:36                 expr
-0:2  - 0:36                   non_unary_expr
-0:2  - 0:32                     left: non_unary_expr
-0:2  - 0:28                       left: non_unary_expr
-0:2  - 0:28                         non_unary_input_function
-0:2  - 0:28                           get: simple_get
-0:2  - 0:9                              getline_keyword `getline`
-0:10 - 0:28                             target: lvalue
-0:10 - 0:11                               "$"
-0:11 - 0:28                               operand: expr
-0:11 - 0:28                                 non_unary_expr
-0:11 - 0:28                                   non_unary_input_function
-0:11 - 0:18                                     get: simple_get
-0:11 - 0:18                                       getline_keyword `getline`
-0:19 - 0:20                                     "<"
-0:21 - 0:28                                     source: expr
-0:21 - 0:28                                       non_unary_expr
-0:21 - 0:28                                         non_unary_input_function
-0:21 - 0:28                                           get: simple_get
-0:21 - 0:28                                             getline_keyword `getline`
-0:29 - 0:32                       right: non_unary_expr
-0:29 - 0:30                         operand: lvalue
-0:29 - 0:30                           name `x`
-0:30 - 0:32                         operator: incr `++`
-0:33 - 0:34                     "<"
-0:35 - 0:36                     right: expr
-0:35 - 0:36                       non_unary_expr
-0:35 - 0:36                         lvalue
-0:35 - 0:36                           name `y`
-0:37 - 0:38         "}"
-
 ==================
-getline targets and updates keep their owners in { $getline < f(getline x++)++ < y }
-:cst
+reject update after a committed getline target: { $getline < f(getline x++)++ < y }
+:error
 ==================
 { $getline < f(getline x++)++ < y }
 ------------------
-
-0:0  - 0:35   program
-0:0  - 0:35     item
-0:0  - 0:35       action: action
-0:0  - 0:1          "{"
-0:2  - 0:33         body: unterminated_statement_list
-0:2  - 0:33           unterminated_statement
-0:2  - 0:33             statement: terminatable_statement
-0:2  - 0:33               simple_statement
-0:2  - 0:33                 expr
-0:2  - 0:33                   non_unary_expr
-0:2  - 0:29                     left: non_unary_expr
-0:2  - 0:27                       operand: lvalue
-0:2  - 0:3                          "$"
-0:3  - 0:27                         operand: expr
-0:3  - 0:27                           non_unary_expr
-0:3  - 0:27                             non_unary_input_function
-0:3  - 0:10                               get: simple_get
-0:3  - 0:10                                 getline_keyword `getline`
-0:11 - 0:12                               "<"
-0:13 - 0:27                               source: expr
-0:13 - 0:27                                 non_unary_expr
-0:13 - 0:14                                   func_name `f`
-0:14 - 0:15                                   "("
-0:15 - 0:26                                   expr_list
-0:15 - 0:26                                     expr
-0:15 - 0:26                                       non_unary_expr
-0:15 - 0:22                                         left: non_unary_expr
-0:15 - 0:22                                           non_unary_input_function
-0:15 - 0:22                                             get: simple_get
-0:15 - 0:22                                               getline_keyword `getline`
-0:23 - 0:26                                         right: non_unary_expr
-0:23 - 0:24                                           operand: lvalue
-0:23 - 0:24                                             name `x`
-0:24 - 0:26                                           operator: incr `++`
-0:26 - 0:27                                   ")"
-0:27 - 0:29                       operator: incr `++`
-0:30 - 0:31                     "<"
-0:32 - 0:33                     right: expr
-0:32 - 0:33                       non_unary_expr
-0:32 - 0:33                         lvalue
-0:32 - 0:33                           name `y`
-0:34 - 0:35         "}"
 
 ==================
 a getline source cannot end early to accept chained comparisons
@@ -5641,3 +4333,57 @@ reject $getline < y++++++
 { $getline < y++++++ }
 
 ------------------
+
+==================
+a pipe stays in the alternative of an unparenthesized conditional
+==================
+{ c ? a : command | getline x }
+
+------------------
+
+(program (item_list item: (item action: (action body: (unterminated_statement_list (unterminated_statement statement: (terminatable_statement (simple_statement (expr (non_unary_expr condition: (non_unary_expr (lvalue (name))) consequence: (expr (non_unary_expr (lvalue (name)))) alternative: (expr (non_unary_expr (non_unary_input_function source: (non_unary_expr (lvalue (name))) get: (simple_get (getline_keyword) target: (lvalue (name)))))))))))))) terminator: (terminator (newline))))
+
+==================
+a pipe stays in the right operand of logical or
+==================
+{ 1 || command | getline x }
+
+------------------
+
+(program (item_list item: (item action: (action body: (unterminated_statement_list (unterminated_statement statement: (terminatable_statement (simple_statement (expr (non_unary_expr left: (non_unary_expr (number)) operator: (or) right: (expr (non_unary_expr (non_unary_input_function source: (non_unary_expr (lvalue (name))) get: (simple_get (getline_keyword) target: (lvalue (name)))))))))))))) terminator: (terminator (newline))))
+
+==================
+a pipe stays in the right operand of logical and
+==================
+{ 0 && command | getline x }
+
+------------------
+
+(program (item_list item: (item action: (action body: (unterminated_statement_list (unterminated_statement statement: (terminatable_statement (simple_statement (expr (non_unary_expr left: (non_unary_expr (number)) operator: (and) right: (expr (non_unary_expr (non_unary_input_function source: (non_unary_expr (lvalue (name))) get: (simple_get (getline_keyword) target: (lvalue (name)))))))))))))) terminator: (terminator (newline))))
+
+==================
+a pipe binds within the right operand of a comparison
+==================
+{ a == command | getline x }
+
+------------------
+
+(program (item_list item: (item action: (action body: (unterminated_statement_list (unterminated_statement statement: (terminatable_statement (simple_statement (expr (non_unary_expr left: (non_unary_expr (lvalue (name))) operator: (eq) right: (expr (non_unary_expr (non_unary_input_function source: (non_unary_expr (lvalue (name))) get: (simple_get (getline_keyword) target: (lvalue (name)))))))))))))) terminator: (terminator (newline))))
+
+==================
+a pipe source includes concatenation
+==================
+{ a b | getline x }
+
+------------------
+
+(program (item_list item: (item action: (action body: (unterminated_statement_list (unterminated_statement statement: (terminatable_statement (simple_statement (expr (non_unary_expr (non_unary_input_function source: (non_unary_expr left: (non_unary_expr (lvalue (name))) right: (non_unary_expr (lvalue (name)))) get: (simple_get (getline_keyword) target: (lvalue (name)))))))))))) terminator: (terminator (newline))))
+
+==================
+parentheses let a complete conditional supply a pipe
+==================
+{ (c ? a : b) | getline x }
+
+------------------
+
+(program (item_list item: (item action: (action body: (unterminated_statement_list (unterminated_statement statement: (terminatable_statement (simple_statement (expr (non_unary_expr (non_unary_input_function source: (non_unary_expr (expr (non_unary_expr condition: (non_unary_expr (lvalue (name))) consequence: (expr (non_unary_expr (lvalue (name)))) alternative: (expr (non_unary_expr (lvalue (name))))))) get: (simple_get (getline_keyword) target: (lvalue (name)))))))))))) terminator: (terminator (newline))))

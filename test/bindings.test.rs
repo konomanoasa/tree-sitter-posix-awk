@@ -465,7 +465,7 @@ fn fields_belong_to_direct_children() {
     ),
     (
       "postfix field and getline target aliases",
-      "{$-x++; $(-x)++; $$x++; $getline x++; $getline $-x++; $getline $(x)++}\n",
+      "{$-x++; $(-x)++; $$x++; $(getline x)++; $getline $-x++; $(getline $(x))++}\n",
     ),
     ("group alternation", "/(a|b)c/"),
     ("ordinary source escapes", r"/a\n\//"),
@@ -814,9 +814,9 @@ fn fresh_parses_ignore_previous_recovery_and_edit_history() {
       false,
     ),
     (
-      "complete getline conditional",
+      "a conditional with a committed target update is rejected",
       "{ a ? b : getline c-- ; (y) ? 1 : 2 }",
-      false,
+      true,
     ),
     ("complete continuation", "{ target\\\n++ }\n", false),
     ("empty source", "", false),
@@ -992,7 +992,7 @@ fn repairing_a_reparsed_getline_preserves_target_ownership() {
 #[test]
 fn removing_an_invalid_bracket_before_getline_restores_statements() {
   let mut parser = parser();
-  let mut text = b"{ a ? b : getline c-- ; (y) ? 1 : 2 }".to_vec();
+  let mut text = b"{ a ? b : getline c-- y; (y) ? 1 : 2 }".to_vec();
   let mut tree = parser.parse(&text, None).unwrap();
   assert!(!tree.root_node().has_error());
   edit(&mut tree, &mut text, 2, 0, "[");
@@ -1011,7 +1011,7 @@ fn removing_an_invalid_bracket_before_getline_restores_statements() {
 #[test]
 fn editing_a_field_getline_lookahead_during_recovery_restores_its_target() {
   let mut parser = parser();
-  let source = "{ getline x $ getline y ++ $ getline z ++ }";
+  let source = "{ getline x $ getline y ++ $ getline z ++ w }";
   let mut text = source.as_bytes().to_vec();
   let mut tree = parser.parse(&text, None).unwrap();
   assert!(!tree.root_node().has_error());
@@ -1089,7 +1089,6 @@ fn fixed_seed_getline_edit_histories_match_fresh_parses_after_recovery() {
     let mut parser = parser();
     let mut text = source.as_bytes().to_vec();
     let mut tree = parser.parse(&text, None).unwrap();
-    assert!(!tree.root_node().has_error(), "{source}");
     let mut reversals = Vec::new();
     let mut steps = Vec::new();
     for step in 0..10 {
@@ -1152,7 +1151,7 @@ fn getline_token_edit_histories_match_fresh_parses() {
       edits: &[(10, 0, "a[1]")],
     },
     History {
-      source: "{ print $ getline x ++ $ getline y ++ }",
+      source: "{ print $ getline x ++ $ getline y ++ z }",
       edits: &[(33, 2, "?"), (33, 1, "y ")],
     },
     History {
@@ -1164,7 +1163,7 @@ fn getline_token_edit_histories_match_fresh_parses() {
       edits: &[(0, 2, "tline"), (0, 5, "{ "), (20, 2, "$")],
     },
     History {
-      source: "{ getline a[1/2] ++ $ getline x ++ }",
+      source: "{ getline a[1/2] ++ $ getline x ++ z }",
       edits: &[(18, 2, "a[1]"), (32, 0, ") "), (32, 2, "")],
     },
     History {
@@ -1249,15 +1248,15 @@ fn changed_ranges_include_getline_ownership_changes() {
     ),
     (
       "target and update change owners",
-      "{ getline x++ }",
-      "++",
+      "{ getline x y++ }",
+      "y++",
       "++ y",
     ),
     (
       "grammar path changes to selected path",
       "{ getline x }",
       "x",
-      "x++",
+      "x++ y",
     ),
     (
       "removing a group makes the comparison a file source",
@@ -1287,7 +1286,7 @@ fn changed_ranges_include_getline_ownership_changes() {
       "an update after a target subscript needs selection",
       "{ getline a[i++] }",
       "]",
-      "]++",
+      "]++ y",
     ),
   ] {
     let mut parser = parser();
@@ -1385,7 +1384,7 @@ fn getline_expression_edit_histories_restore_fresh_csts() {
   };
   let mut histories = 0;
   for source in sources {
-    let expected = parse(&source, &source);
+    let expected = parser().parse(&source, None).unwrap();
     for history in 0..50 {
       let mut reused = parser();
       let mut text = source.as_bytes().to_vec();

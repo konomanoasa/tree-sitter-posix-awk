@@ -29,6 +29,123 @@ const randomOutputShift = 32n;
 const randomMultiplier = 6364136223846793005n;
 const randomIncrement = 1n;
 
+for (const { name, before, after, byte, removed, inserted, status } of [
+  {
+    name: "lowering the upper bound invalidates an interval",
+    before: "/a{1,2}/",
+    after: "/a{1,0}/",
+    byte: 5,
+    removed: 1,
+    inserted: "0",
+    status: 1,
+  },
+  {
+    name: "raising the upper bound repairs an interval",
+    before: "/a{2,1}/",
+    after: "/a{2,3}/",
+    byte: 5,
+    removed: 1,
+    inserted: "3",
+    status: 0,
+  },
+  {
+    name: "removing a maximum repairs reversed bounds",
+    before: "/a{2,1}/",
+    after: "/a{2,}/",
+    byte: 5,
+    removed: 1,
+    inserted: "",
+    status: 0,
+  },
+  {
+    name: "leading zeroes preserve an upper bound",
+    before: "/a{1,2}/",
+    after: "/a{1,002}/",
+    byte: 5,
+    removed: 0,
+    inserted: "00",
+    status: 0,
+  },
+  {
+    name: "changing the lower bound rechecks a reused maximum",
+    before: "/a{1,2}/",
+    after: "/a{3,2}/",
+    byte: 3,
+    removed: 1,
+    inserted: "3",
+    status: 1,
+  },
+  {
+    name: "raising a count above 255 invalidates the interval",
+    before: "/a{255}/",
+    after: "/a{256}/",
+    byte: 5,
+    removed: 1,
+    inserted: "6",
+    status: 1,
+  },
+  {
+    name: "lowering a count to 255 repairs the interval",
+    before: "/a{256}/",
+    after: "/a{255}/",
+    byte: 5,
+    removed: 1,
+    inserted: "5",
+    status: 0,
+  },
+  {
+    name: "replacing a letter with a digit turns a brace into an interval",
+    before: "/a{x}/",
+    after: "/a{2}/",
+    byte: 3,
+    removed: 1,
+    inserted: "2",
+    status: 0,
+  },
+  {
+    name: "removing an interval minimum makes its brace literal",
+    before: "/a{1,2}/",
+    after: "/a{,2}/",
+    byte: 3,
+    removed: 1,
+    inserted: "",
+    status: 0,
+  },
+  {
+    name: "adding blank after a brace makes the former count literal",
+    before: "/a{2}/",
+    after: "/a{ 2}/",
+    byte: 3,
+    removed: 0,
+    inserted: " ",
+    status: 0,
+  },
+  {
+    name: "an invalid interval becomes literal after removing its first digit",
+    before: "/(a{2x})/",
+    after: "/(a{x})/",
+    byte: 4,
+    removed: 1,
+    inserted: "",
+    status: 0,
+  },
+]) {
+  determinismTest(
+    name,
+    before,
+    after,
+    [{ byte, deleteBytes: removed, insert: inserted }],
+    undefined,
+    status,
+  );
+}
+
+editHistoryTest(
+  "reversed interval bounds disappear after undoing a lower-bound edit",
+  "/a{0001,02}/",
+  [{ byte: 6, deleteBytes: 1, insert: "3" }],
+);
+
 editHistoryTest(
   "a closed item stays terminated after an edit history that broke its action",
   lines(
@@ -350,7 +467,7 @@ for (const { name, ending, replacement } of [
   ]);
 }
 
-for (const { name, before, after } of [
+for (const { name, before, after, beforeStatus, afterStatus } of [
   {
     name: "parent file source survives grouping its nested source",
     before: "{ getline $getline < z + $y-- < 1 < 2 }",
@@ -362,22 +479,29 @@ for (const { name, before, after } of [
     after: "{ getline $getline < a[z] + $y-- < 1 < 2 }",
   },
   {
-    name: "outer field preserves an inner getline target",
+    name: "adding an outer field cannot rescue a committed target update",
+    beforeStatus: 1,
+    afterStatus: 1,
     before: "{ getline < getline x++ }",
     after: "{ $getline < getline x++ }",
   },
   {
-    name: "two enclosing fields accept separate postfix updates",
+    name: "nested fields cannot take updates following a committed target",
+    beforeStatus: 1,
+    afterStatus: 1,
     before: "{ $getline < getline x++ }",
     after: "{ $getline < $getline < getline x++++ }",
   },
   {
-    name: "grouped getline owns its decisions independently of outer updates",
+    name: "grouping an invalid target update keeps the syntax error",
+    beforeStatus: 1,
+    afterStatus: 1,
     before: "{ $getline < getline x++ }",
     after: "{ $getline < (getline x++)++ }",
   },
   {
-    name: "call arguments suspend and restore pending field updates",
+    name: "a target update inside a call is rejected after editing",
+    afterStatus: 1,
     before: "{ $getline < f()++ }",
     after: "{ $getline < f(getline x++)++ }",
   },
@@ -387,9 +511,9 @@ for (const { name, before, after } of [
     after: "{ $getline $!getline $!getline < 1 ++ }",
   },
 ]) {
-  for (const [initial, final] of [
-    [before, after],
-    [after, before],
+  for (const { initial, final, status } of [
+    { initial: before, final: after, status: afterStatus ?? 0 },
+    { initial: after, final: before, status: beforeStatus ?? 0 },
   ]) {
     let start = 0;
     while (initial[start] === final[start]) start++;
@@ -399,13 +523,20 @@ for (const { name, before, after } of [
       initial.at(-suffix - 1) === final.at(-suffix - 1)
     )
       suffix++;
-    determinismTest(`${name}: ${initial} to ${final}`, initial, final, [
-      {
-        byte: start,
-        deleteBytes: initial.length - start - suffix,
-        insert: final.slice(start, final.length - suffix),
-      },
-    ]);
+    determinismTest(
+      `${name}: ${initial} to ${final}`,
+      initial,
+      final,
+      [
+        {
+          byte: start,
+          deleteBytes: initial.length - start - suffix,
+          insert: final.slice(start, final.length - suffix),
+        },
+      ],
+      undefined,
+      status,
+    );
   }
 }
 
@@ -608,7 +739,7 @@ for (const { name, initial, final, edits } of [
     ],
   },
   {
-    name: "inserting an empty group supplies a missing alternation branch",
+    name: "inserting a group replaces an empty alternation branch",
     initial: "/(a|)/",
     final: "/(a|())/",
     edits: [
@@ -617,6 +748,15 @@ for (const { name, initial, final, edits } of [
         deleteBytes: 0,
         insert: "()",
       },
+    ],
+  },
+  {
+    name: "removing both ERE branches preserves the alternation operator",
+    initial: "/a|b/",
+    final: "/|/",
+    edits: [
+      { byte: 3, deleteBytes: 1, insert: "" },
+      { byte: 1, deleteBytes: 1, insert: "" },
     ],
   },
   {

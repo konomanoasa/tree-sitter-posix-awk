@@ -201,30 +201,42 @@ for (const { label, initial, final, before, inserted } of [
   });
 }
 
-for (const { name, initial, final, edits, update } of [
+for (const { name, initial, final, edits, update, status } of [
   {
-    name: "a getline target becomes a concatenated postfix increment",
+    name: "a postfix increment invalidates a committed getline name target",
+    status: 1,
     initial: "getline x",
     final: "getline x++",
     edits: [{ byte: 17, deleteBytes: 0, insert: "++" }],
     update: "incr",
   },
   {
-    name: "a getline array target becomes a concatenated postfix decrement",
+    name: "a postfix decrement invalidates a committed getline array target",
+    status: 1,
     initial: "getline a[1]",
     final: "getline a[1]--",
     edits: [{ byte: 20, deleteBytes: 0, insert: "--" }],
     update: "decr",
   },
   {
-    name: "a getline field target becomes a concatenated postfix increment",
+    name: "a postfix increment invalidates a committed getline field target",
+    status: 1,
     initial: "getline $i",
     final: "getline $i++",
     edits: [{ byte: 18, deleteBytes: 0, insert: "++" }],
     update: "incr",
   },
   {
-    name: "a piped getline target becomes a concatenated postfix decrement",
+    name: "a postfix increment invalidates a committed numbered field target",
+    status: 1,
+    initial: "getline $1",
+    final: "getline $1++",
+    edits: [{ byte: 18, deleteBytes: 0, insert: "++" }],
+    update: "incr",
+  },
+  {
+    name: "a postfix decrement invalidates a committed piped getline target",
+    status: 1,
     initial: "command | getline x",
     final: "command | getline x--",
     edits: [{ byte: 27, deleteBytes: 0, insert: "--" }],
@@ -237,9 +249,11 @@ for (const { name, initial, final, edits, update } of [
     lines(`BEGIN { ${final} }`),
     edits,
     (tree) => {
+      if (status === 1) return;
       contains(tree, `operator: ${update}`);
       excludes(tree, "target:");
     },
+    status ?? 0,
   );
 }
 
@@ -250,6 +264,17 @@ determinismTest(
   [{ byte: 17, deleteBytes: 2, insert: "" }],
   (tree) => contains(tree, "target: lvalue"),
 );
+
+for (const target of ["$1", "$x"]) {
+  const source = lines(`BEGIN { getline ${target}++ }`);
+  determinismTest(
+    `removing an update restores the getline ${target} target`,
+    source,
+    lines(`BEGIN { getline ${target} }`),
+    [{ byte: source.indexOf("++"), deleteBytes: 2, insert: "" }],
+    (tree) => contains(tree, "target: lvalue"),
+  );
+}
 
 for (const { name, initial, final, edits, number } of [
   {
@@ -1312,104 +1337,130 @@ for (const { operator, replacementByte } of [
   { operator: "||", replacementByte: 48 },
 ]) {
   determinismTest(
-    `replacing an update extends the ${operator} operand following a getline source`,
+    `an inserted update invalidates the getline target before ${operator}`,
     `{ getline $getline < x ~ y | getline z ${operator} "f" ++ }\n`,
     `{ getline $getline < x ~ y | getline z++ ${operator} "f" getline }\n`,
     [
       { byte: 38, deleteBytes: 0, insert: "++" },
       { byte: replacementByte, deleteBytes: 2, insert: "getline" },
     ],
-    (tree) => {
-      assert.match(tree, /^0:21 +- +0:22 +source: expr$/m);
-      assert.equal(matchingLineCount(tree, /target: lvalue$/), 1);
-    },
+    undefined,
+    1,
   );
 }
 
-const validExpressions = [
-  "-getline x++",
-  "a + getline x++",
-  "a getline x++",
-  "q = $-getline x++",
-  "a ^ getline x++",
-  "getline $-getline x++",
-  "++$getline x--",
-  "print $-getline x++ tline y-- z",
-  "x getline y++ | getline",
-  "print $getline x++",
-  "print $-getline a[1]-- ++y z",
-  "getline $-x++",
-  "getline (x)",
-  '$getline < "f" ++',
-  '$getline < "f" --',
-  '$getline < ("f") ++',
-  "$getline < -1 ++",
-  "$getline < f() ++",
-  "$getline < /f/ ++",
-  "$getline < ++y ++",
-  '$getline x < "f" ++',
-  '$getline $-x < "f" ++',
-  'print $getline < "f" ++',
-  'printf $getline $-x < "f" --',
-  '$getline < "f" ++ | getline',
-  '$getline < "f" ++y',
-  "$getline < y++",
-  "$getline < y++++",
-  "$getline < y + 1 ++",
-  '$getline < (x = "f") ++',
-  '$getline < (a < "f") ++',
-  "$getline < getline x++",
-  "$getline < (a < getline x++) < y",
-  "$getline < (a < getline x--) < y",
-  "$getline < $getline < getline x++++",
-  "$getline < $getline < $getline < getline x++++++",
-  "getline $getline < (a < getline x++) < y",
-  "print ($getline < (a < getline x++) < y)",
-  "f($getline < (a < getline x++) < y)",
-  "x[$getline < (a < getline x++) < y]",
-  "$getline < f(getline x++)++ < y",
-  '$getline $getline < "f" ++',
-  'getline $getline $-x < "f" ++',
-  'getline line < dir "/" name',
-  "getline < file > 0",
-  "getline x++ $getline y++",
-  "getline a[i/2]++ y",
-  "getline a[i++ / 2]++",
-  'getline $getline < "f"',
-  'getline $getline < "f" ++',
-  "getline $getline < x++",
-  "getline $getline < x++++",
-  "getline $getline < (x | getline) ++",
-  "getline $getline < (a ? x : (y))++",
-  "getline $getline < 1e++",
-  "getline $getline < a && # source\n x++",
-  "getline $getline < (1 &&\\\n\n1)++",
-  "getline $getline < (1 ||\\\n# source\n1)--",
-  "getline $getline < (1 && # first\n\\\n# second\n1)++",
-  "getline x++ $getline $getline < 1 ++",
-  "getline $getline < getline $getline < x++++",
-  "getline $getline < (($getline < 1 in a) 1)++",
-  'getline $getline < (($getline < x in a) < "f") ++',
-  "getline $getline < (x < (y < z | getline)) ++",
-  "getline $getline < (x ~ (y ~ 1 | getline)) ++",
-  'getline $getline < (x ~ y | getline z ~ "f") ++',
-  "getline $getline $-x < (x | getline) ++",
-  "$getline $-getline < 1 ++",
-  "$getline $!getline < x -- ++",
-  "$getline $--$getline < 1 ++",
-  "getline $getline $-getline < 1 ++",
-  "getline $getline $!getline < x -- ++",
-  "getline $getline $--$getline < 1 ++",
-  "$getline < ((x) in a) -- x ++",
-  "getline $getline < ((x) in a) -- x ++",
+const expressionCases = [
+  { expression: "-getline x++", expectedStatus: 1 },
+  { expression: "a + getline x++", expectedStatus: 1 },
+  { expression: "a getline x++", expectedStatus: 1 },
+  { expression: "q = $-getline x++", expectedStatus: 1 },
+  { expression: "a ^ getline x++", expectedStatus: 1 },
+  { expression: "getline $-getline x++", expectedStatus: 1 },
+  { expression: "++$getline x--", expectedStatus: 1 },
+  { expression: "print $-getline x++ tline y-- z", expectedStatus: 0 },
+  { expression: "x getline y++ | getline", expectedStatus: 1 },
+  { expression: "print $getline x++", expectedStatus: 1 },
+  { expression: "print $-getline a[1]-- ++y z", expectedStatus: 1 },
+  { expression: "getline $-x++", expectedStatus: 0 },
+  { expression: "getline (x)", expectedStatus: 0 },
+  { expression: '$getline < "f" ++', expectedStatus: 0 },
+  { expression: '$getline < "f" --', expectedStatus: 0 },
+  { expression: '$getline < ("f") ++', expectedStatus: 0 },
+  { expression: "$getline < -1 ++", expectedStatus: 0 },
+  { expression: "$getline < f() ++", expectedStatus: 0 },
+  { expression: "$getline < /f/ ++", expectedStatus: 0 },
+  { expression: "$getline < ++y ++", expectedStatus: 0 },
+  { expression: '$getline x < "f" ++', expectedStatus: 0 },
+  { expression: '$getline $-x < "f" ++', expectedStatus: 0 },
+  { expression: 'print $getline < "f" ++', expectedStatus: 0 },
+  { expression: 'printf $getline $-x < "f" --', expectedStatus: 0 },
+  { expression: '$getline < "f" ++ | getline', expectedStatus: 0 },
+  { expression: '$getline < "f" ++y', expectedStatus: 0 },
+  { expression: "$getline < y++", expectedStatus: 0 },
+  { expression: "$getline < y++++", expectedStatus: 0 },
+  { expression: "$getline < y + 1 ++", expectedStatus: 0 },
+  { expression: '$getline < (x = "f") ++', expectedStatus: 0 },
+  { expression: '$getline < (a < "f") ++', expectedStatus: 0 },
+  { expression: "$getline < getline x++", expectedStatus: 1 },
+  { expression: "$getline < (a < getline x++) < y", expectedStatus: 1 },
+  { expression: "$getline < (a < getline x--) < y", expectedStatus: 1 },
+  { expression: "$getline < $getline < getline x++++", expectedStatus: 1 },
+  {
+    expression: "$getline < $getline < $getline < getline x++++++",
+    expectedStatus: 1,
+  },
+  { expression: "getline $getline < (a < getline x++) < y", expectedStatus: 1 },
+  { expression: "print ($getline < (a < getline x++) < y)", expectedStatus: 1 },
+  { expression: "f($getline < (a < getline x++) < y)", expectedStatus: 1 },
+  { expression: "x[$getline < (a < getline x++) < y]", expectedStatus: 1 },
+  { expression: "$getline < f(getline x++)++ < y", expectedStatus: 1 },
+  { expression: '$getline $getline < "f" ++', expectedStatus: 0 },
+  { expression: 'getline $getline $-x < "f" ++', expectedStatus: 0 },
+  { expression: 'getline line < dir "/" name', expectedStatus: 0 },
+  { expression: "getline < file > 0", expectedStatus: 0 },
+  { expression: "getline x++ $getline y++", expectedStatus: 1 },
+  { expression: "getline a[i/2]++ y", expectedStatus: 0 },
+  { expression: "getline a[i++ / 2]++", expectedStatus: 1 },
+  { expression: 'getline $getline < "f"', expectedStatus: 0 },
+  { expression: 'getline $getline < "f" ++', expectedStatus: 0 },
+  { expression: "getline $getline < x++", expectedStatus: 0 },
+  { expression: "getline $getline < x++++", expectedStatus: 0 },
+  { expression: "getline $getline < (x | getline) ++", expectedStatus: 0 },
+  { expression: "getline $getline < (a ? x : (y))++", expectedStatus: 0 },
+  { expression: "getline $getline < 1e++", expectedStatus: 0 },
+  { expression: "getline $getline < a && # source\n x++", expectedStatus: 0 },
+  { expression: "getline $getline < (1 &&\\\n\n1)++", expectedStatus: 0 },
+  {
+    expression: "getline $getline < (1 ||\\\n# source\n1)--",
+    expectedStatus: 0,
+  },
+  {
+    expression: "getline $getline < (1 && # first\n\\\n# second\n1)++",
+    expectedStatus: 0,
+  },
+  { expression: "getline x++ $getline $getline < 1 ++", expectedStatus: 0 },
+  {
+    expression: "getline $getline < getline $getline < x++++",
+    expectedStatus: 0,
+  },
+  {
+    expression: "getline $getline < (($getline < 1 in a) 1)++",
+    expectedStatus: 0,
+  },
+  {
+    expression: 'getline $getline < (($getline < x in a) < "f") ++',
+    expectedStatus: 0,
+  },
+  {
+    expression: "getline $getline < (x < (y < z | getline)) ++",
+    expectedStatus: 0,
+  },
+  {
+    expression: "getline $getline < (x ~ (y ~ 1 | getline)) ++",
+    expectedStatus: 0,
+  },
+  {
+    expression: 'getline $getline < (x ~ y | getline z ~ "f") ++',
+    expectedStatus: 1,
+  },
+  { expression: "getline $getline $-x < (x | getline) ++", expectedStatus: 0 },
+  { expression: "$getline $-getline < 1 ++", expectedStatus: 0 },
+  { expression: "$getline $!getline < x -- ++", expectedStatus: 0 },
+  { expression: "$getline $--$getline < 1 ++", expectedStatus: 0 },
+  { expression: "getline $getline $-getline < 1 ++", expectedStatus: 0 },
+  { expression: "getline $getline $!getline < x -- ++", expectedStatus: 0 },
+  { expression: "getline $getline $--$getline < 1 ++", expectedStatus: 0 },
+  { expression: "$getline < ((x) in a) -- x ++", expectedStatus: 0 },
+  { expression: "getline $getline < ((x) in a) -- x ++", expectedStatus: 0 },
 ];
 
-for (const expression of validExpressions) {
-  test(`posix_awk: each single-byte repair restores ${expression}`, () => {
+for (const { expression, expectedStatus } of expressionCases) {
+  test(`posix_awk: each byte restoration preserves status ${expectedStatus} for ${expression}`, () => {
     const source = `{ ${expression} }\n`;
     const fresh = parse(source);
-    assertStatus(expression, fresh, 0);
-    clean(fresh.tree);
+    assertStatus(expression, fresh, expectedStatus);
+    if (expectedStatus === 0) clean(fresh.tree);
+    else dirty(fresh.tree);
     for (let byte = 0; byte < source.length; byte += 1) {
       const initial = source.slice(0, byte) + source.slice(byte + 1);
       assertDeterministicEdit(
@@ -1417,21 +1468,40 @@ for (const expression of validExpressions) {
         initial,
         source,
         [{ byte, deleteBytes: 0, insert: source[byte] }],
+        expectedStatus,
       );
     }
   });
 }
 
-for (const [label, before, after] of [
-  ["a target update", "{ getline x }", "{ getline x++ }"],
-  ["a field update", "{ $getline x }", "{ $getline x++ }"],
-  ["a nested source", "{ $(getline $(x)) }", "{ $(getline $(x) < y) }"],
-  ["an update inside a target", "{ getline $(x) }", "{ getline $(x++) }"],
-  [
-    "a pipe inside a print condition",
-    "{ print a ? (b) : c }",
-    "{ print a ? (b | getline) : c }",
-  ],
+for (const { label, before, after, status } of [
+  {
+    label: "a target update",
+    before: "{ getline x }",
+    after: "{ getline x++ }",
+    status: 1,
+  },
+  {
+    label: "a field update",
+    before: "{ $getline x }",
+    after: "{ $getline x++ }",
+    status: 1,
+  },
+  {
+    label: "a nested source",
+    before: "{ $(getline $(x)) }",
+    after: "{ $(getline $(x) < y) }",
+  },
+  {
+    label: "an update inside a target",
+    before: "{ getline $(x) }",
+    after: "{ getline $(x++) }",
+  },
+  {
+    label: "a pipe inside a print condition",
+    before: "{ print a ? (b) : c }",
+    after: "{ print a ? (b | getline) : c }",
+  },
 ]) {
   let byte = 0;
   while (before[byte] === after[byte]) byte++;
@@ -1442,6 +1512,8 @@ for (const [label, before, after] of [
     before,
     after,
     [edit],
+    undefined,
+    status ?? 0,
   );
   editHistoryTest(
     `expression selection survives undo and redo of ${label}`,
@@ -1455,12 +1527,20 @@ for (const [label, broken] of [
   ["the preceding statement", "{ $a[] ++; $getline x++ }"],
 ]) {
   const repaired = broken.replace("[]", "[1]");
-  determinismTest(`repair ${label} before a getline field`, broken, repaired, [
-    { byte: 5, deleteBytes: 0, insert: "1" },
-  ]);
-  editHistoryTest(`undo and redo the repair in ${label}`, repaired, [
-    { byte: 5, deleteBytes: 1, insert: "" },
-  ]);
+  determinismTest(
+    `repair ${label} before a getline field`,
+    broken,
+    repaired,
+    [{ byte: 5, deleteBytes: 0, insert: "1" }],
+    undefined,
+    1,
+  );
+  editHistoryTest(
+    `undo and redo the repair in ${label}`,
+    repaired,
+    [{ byte: 5, deleteBytes: 1, insert: "" }],
+    1,
+  );
 }
 
 {

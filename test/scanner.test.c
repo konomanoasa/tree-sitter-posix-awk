@@ -14,7 +14,6 @@ enum {
   SERIALIZED_HEADER_BYTES = 63,
   SERIALIZED_OUTLINE_BYTES = 28,
   SERIALIZED_CACHE_COUNT_OFFSET = 45,
-  OUTLINE_KIND_SHIFT = 40,
   BOUNDARY_DIGIT_BITS = 2,
   BOUNDARY_RADIX = 1U << BOUNDARY_DIGIT_BITS,
   BOUNDARY_DIGIT_COUNT = sizeof(uint64_t) * CHAR_BIT / BOUNDARY_DIGIT_BITS,
@@ -985,7 +984,7 @@ recognize_getline(const char *source, size_t *advances, bool compare_shared) {
     size_t index = input.tree_root;
     while (index) {
       BoundaryTree node = input.tree[index - 1];
-      if ((node.outline.descriptor >> OUTLINE_KIND_SHIFT) == RECOGNIZED_GET) {
+      if (descriptor_kind(node.outline.descriptor) == RECOGNIZED_GET) {
         result = node.children[0] ? SELECT_TARGET_GET : SELECT_GET;
         break;
       }
@@ -1049,44 +1048,58 @@ static int test_getline_operand_lookahead(void) {
     {"a source follows the target", "getline x < file", SELECT_TARGET_GET},
     {"an operator follows the target", "getline x + 1", SELECT_TARGET_GET},
     {"a single sign is no update", "getline x - -y", SELECT_TARGET_GET},
-    {"a postfix update takes the name", "getline x++", SELECT_GET},
-    {"a postfix decrement takes the name", "getline x --", SELECT_GET},
-    {"an update before an operator stays postfix",
+    {"target commitment rejects: a postfix update takes the name",
+      "getline x++",
+      GETLINE_WORD},
+    {"target commitment rejects: a postfix decrement takes the name",
+      "getline x --",
+      GETLINE_WORD},
+    {"target commitment rejects: an update before an operator stays postfix",
       "getline x++ + 1",
-      SELECT_GET},
+      GETLINE_WORD},
     {"an update before a name becomes its prefix",
       "getline x++ y",
       SELECT_TARGET_GET},
     {"an operand behind the target is not looked into",
       "getline x a[i",
       SELECT_TARGET_GET},
-    {"alternating updates and names end in a postfix update",
+    {"target commitment rejects: alternating updates and names end in a postfix update",
       "getline x++ y++",
-      SELECT_GET},
+      GETLINE_WORD},
     {"alternating updates and names end in a name",
       "getline x++ y-- z",
       SELECT_TARGET_GET},
-    {"an update cannot prefix a call", "getline x++ f(y)", SELECT_GET},
-    {"two updates cannot both prefix", "getline x++ ++y", SELECT_GET},
+    {"target commitment rejects: an update cannot prefix a call",
+      "getline x++ f(y)",
+      GETLINE_WORD},
+    {"target commitment rejects: two updates cannot both prefix",
+      "getline x++ ++y",
+      GETLINE_WORD},
     {"a subscript belongs to the target", "getline a[i, j]", SELECT_TARGET_GET},
-    {"blanks may precede the subscript", "getline a \t[i]--", SELECT_GET},
-    {"nested groups and strings are skipped",
+    {"target commitment rejects: blanks may precede the subscript",
+      "getline a \t[i]--",
+      GETLINE_WORD},
+    {"target commitment rejects: nested groups and strings are skipped",
       "getline a[b[\"]\"], (c)]++",
-      SELECT_GET},
-    {"a slash behind an operand divides", "getline a[i/2]++", SELECT_GET},
-    {"a slash behind an operator opens an ERE",
+      GETLINE_WORD},
+    {"target commitment rejects: a slash behind an operand divides",
+      "getline a[i/2]++",
+      GETLINE_WORD},
+    {"target commitment rejects: a slash behind an operator opens an ERE",
       "getline a[x ~ /]/]++",
-      SELECT_GET},
-    {"a slash behind an update divides", "getline a[i++ / 2]++", SELECT_GET},
-    {"a continuation inside the subscript is layout",
+      GETLINE_WORD},
+    {"target commitment rejects: a slash behind an update divides",
+      "getline a[i++ / 2]++",
+      GETLINE_WORD},
+    {"target commitment rejects: a continuation inside the subscript is layout",
       "getline a[i,\\\nj]++",
-      SELECT_GET},
-    {"a raw newline behind a comma is layout",
+      GETLINE_WORD},
+    {"target commitment rejects: a raw newline behind a comma is layout",
       "getline a[i,\nj]++",
-      SELECT_GET},
-    {"a comment behind a logical operator is layout",
+      GETLINE_WORD},
+    {"target commitment rejects: a comment behind a logical operator is layout",
       "getline a[i || # c\n\nj]++",
-      SELECT_GET},
+      GETLINE_WORD},
     {"a raw newline behind an operand breaks the subscript",
       "getline a[i\n]++",
       SELECT_GET},
@@ -1096,26 +1109,45 @@ static int test_getline_operand_lookahead(void) {
     {"an unterminated subscript preserves the keyword range",
       "getline a[i",
       SELECT_GET},
-    {"a numbered field is an lvalue", "getline $1++", SELECT_GET},
+    {"a numbered field target cannot become an updated operand",
+      "getline $1++",
+      GETLINE_WORD},
+    {"a named field target cannot become an updated operand",
+      "getline $x++",
+      GETLINE_WORD},
+    {"a continuation preserves the named field target",
+      "getline $x\\\n++",
+      GETLINE_WORD},
+    {"a field target can precede a concatenated prefix update",
+      "getline $x++ y",
+      SELECT_TARGET_GET},
     {"a named field is an lvalue", "getline $ NF", SELECT_TARGET_GET},
     {"nested fields are one lvalue", "getline $$a[1]++", SELECT_GET},
     {"a grouped field is an lvalue", "getline $(i + 1)++ y", SELECT_TARGET_GET},
-    {"a fractional field index is an lvalue", "getline $1.5e3f++", SELECT_GET},
+    {"a fractional field target cannot become an updated operand",
+      "getline $1.5e3f++",
+      GETLINE_WORD},
     {"a name behind a field index is another operand",
       "getline $1e++",
       SELECT_TARGET_GET},
-    {"a string field index is an lvalue", "getline $\"f\"++", SELECT_GET},
-    {"an ERE field index is an lvalue", "getline $/re/++", SELECT_GET},
-    {"a call field index is an lvalue", "getline $f(x)++", SELECT_GET},
+    {"a string field target cannot become an updated operand",
+      "getline $\"f\"++",
+      GETLINE_WORD},
+    {"an ERE field target cannot become an updated operand",
+      "getline $/re/++",
+      GETLINE_WORD},
+    {"a call field target cannot become an updated operand",
+      "getline $f(x)++",
+      GETLINE_WORD},
     {"a built-in field index may omit its arguments",
       "getline $length++ y",
       SELECT_TARGET_GET},
-    {"a built-in field index takes spaced arguments",
+    {"a built-in field target with spaced arguments cannot become an updated operand",
       "getline $length (x)++",
-      SELECT_GET},
-    {"a getline inside the subscript is skipped",
+      GETLINE_WORD},
+    {"target commitment rejects: a getline inside the subscript is skipped",
       "getline a[getline x++]++",
-      SELECT_GET},
+      GETLINE_WORD},
     {"a unary field keeps a following update inside",
       "getline $-x++",
       SELECT_TARGET_GET},
@@ -1128,21 +1160,21 @@ static int test_getline_operand_lookahead(void) {
     {"a getline field takes no target that is no lvalue",
       "getline $getline length++",
       GETLINE_WORD},
-    {"the earlier getline target precedes a nested target",
+    {"target commitment rejects: the earlier getline target precedes a nested target",
       "getline $getline x++",
-      SELECT_TARGET_GET},
+      GETLINE_WORD},
     {"an update before a name follows a getline field",
       "getline $getline x++ y",
       SELECT_TARGET_GET},
-    {"a prefix-updated getline field gives up its target",
+    {"target commitment rejects: a prefix-updated getline field gives up its target",
       "getline x++ $getline y++",
-      SELECT_TARGET_GET},
+      GETLINE_WORD},
     {"a prefix-updated getline field with a target settles the target",
       "getline x++ $getline y a[i",
       SELECT_TARGET_GET},
-    {"a prefix-updated getline field needs an lvalue behind its update",
+    {"target commitment rejects: a prefix-updated getline field needs an lvalue behind its update",
       "getline x++ $getline++",
-      SELECT_GET},
+      GETLINE_WORD},
     {"a redirected getline field remains the target",
       "getline $getline < file",
       SELECT_TARGET_GET},
@@ -1164,9 +1196,9 @@ static int test_getline_operand_lookahead(void) {
     {"a continued logical source preserves its own updated lvalue",
       "getline $getline < 1 &&\\\n# source\nx++",
       SELECT_TARGET_GET},
-    {"an inner source target defers the enclosing target decision",
+    {"target commitment rejects: an inner source target defers the enclosing target decision",
       "getline $getline < a < getline x++ < y",
-      SELECT_TARGET_GET},
+      GETLINE_WORD},
     {"a parenthesized source settles its inner target decision",
       "getline $getline < (getline x++)",
       SELECT_TARGET_GET},
@@ -1218,12 +1250,14 @@ static int test_getline_operand_lookahead(void) {
     {"a compared getline field is an lvalue",
       "getline $getline <= x++",
       SELECT_TARGET_GET},
-    {"a continuation precedes the update", "getline x\\\n++", SELECT_GET},
+    {"target commitment rejects: a continuation precedes the update",
+      "getline x\\\n++",
+      GETLINE_WORD},
     {"a raw newline ends the lookahead", "getline x\n++", SELECT_TARGET_GET},
     {"a comment ends the lookahead", "getline x # c\n++", SELECT_TARGET_GET},
-    {"a stray backslash preserves the keyword range",
+    {"target commitment rejects: a stray backslash preserves the keyword range",
       "getline x \\ ++",
-      SELECT_GET},
+      GETLINE_WORD},
   };
   int failed = 0;
   for (size_t i = 0; i < ARRAY_LENGTH(cases); i++) {
@@ -1413,6 +1447,89 @@ static void test_long_function_name(void) {
   assert(mock.advance_count <= name_bytes + sizeof(suffix) - 1);
   assert(state.mode == LEXICAL_MODE_OUTSIDE);
   free(source);
+}
+
+static int test_ere_brace_classification(void) {
+  const struct {
+    const char *name, *source;
+    enum TokenType token;
+  } cases[] = {
+    {"a count below the limit is an interval", "{254}", ERE_INTERVAL_OPENING},
+    {"the maximum count is an interval", "{255}", ERE_INTERVAL_OPENING},
+    {"a count above the limit is invalid", "{256}", ERROR_SENTINEL},
+    {"an upper bound may reach the limit", "{0,255}", ERE_INTERVAL_OPENING},
+    {"an upper bound cannot exceed the limit", "{1,256}", ERROR_SENTINEL},
+    {"an open upper bound allows the limit", "{255,}", ERE_INTERVAL_OPENING},
+    {"an open upper bound still checks its minimum", "{256,}", ERROR_SENTINEL},
+    {"zero bounds are equal", "{0,0}", ERE_INTERVAL_OPENING},
+    {"leading zeroes do not change bounds",
+      "{000255,0255}",
+      ERE_INTERVAL_OPENING},
+    {"leading zeroes cannot conceal reversed bounds",
+      "{0002,0001}",
+      ERROR_SENTINEL},
+    {"a shorter minimum can have a larger first digit",
+      "{99,100}",
+      ERE_INTERVAL_OPENING},
+    {"a longer minimum cannot have a shorter maximum",
+      "{100,99}",
+      ERROR_SENTINEL},
+    {"large counts fail before machine integer overflow",
+      "{184467440737095516160}",
+      ERROR_SENTINEL},
+    {"a missing minimum leaves a literal brace", "{,2}", ERE_LITERAL_BRACE},
+    {"a name leaves a literal brace", "{name}", ERE_LITERAL_BRACE},
+    {"a blank prevents an interval", "{ 2}", ERE_LITERAL_BRACE},
+    {"an escaped digit is not an interval count", "{\\062}", ERE_LITERAL_BRACE},
+    {"EOF after a brace does not start an interval", "{", ERE_LITERAL_BRACE},
+    {"a closing brace is required for an interval", "{1,2", ERROR_SENTINEL},
+    {"layout cannot split interval bounds", "{1, 2}", ERROR_SENTINEL},
+    {"a raw newline cannot split interval bounds", "{1,\n2}", ERROR_SENTINEL},
+  };
+  const bool valid[TOKEN_TYPE_COUNT] = {
+    [ERE_INTERVAL_OPENING] = true,
+    [ERE_LITERAL_BRACE] = true,
+  };
+  int failed = 0;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++)
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid,
+      LEXICAL_MODE_ERE_BODY,
+      cases[i].token != ERROR_SENTINEL,
+      cases[i].token,
+      0,
+      1,
+      LEXICAL_MODE_ERE_BODY
+    );
+  const bool literal_only[TOKEN_TYPE_COUNT] = {[ERE_LITERAL_BRACE] = true};
+  failed |= expect_scan_result_at(
+    "an interval cannot become literal when its operand is missing",
+    "{2}",
+    literal_only,
+    LEXICAL_MODE_ERE_BODY,
+    false,
+    ERE_LITERAL_BRACE,
+    0,
+    1,
+    LEXICAL_MODE_ERE_BODY
+  );
+  const size_t leading_zeroes = 65536;
+  char *source = malloc(leading_zeroes + sizeof("{255}"));
+  assert(source);
+  source[0] = '{';
+  memset(source + 1, '0', leading_zeroes);
+  memcpy(source + 1 + leading_zeroes, "255}", sizeof("255}"));
+  MockLexer mock = make_mock_lexer(source);
+  ScannerState state = {.mode = LEXICAL_MODE_ERE_BODY};
+  assert(
+    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, valid)
+  );
+  assert(mock.lexer.result_symbol == ERE_INTERVAL_OPENING);
+  assert(mock.token_end == 1 && mock.advance_count == leading_zeroes + 4);
+  free(source);
+  return failed;
 }
 
 static int test_ere_state_transitions(void) {
@@ -2689,6 +2806,7 @@ int main(void) {
   test_getline_resume_budget();
   failed |= test_linear_word_boundary_lookahead();
   test_long_function_name();
+  failed |= test_ere_brace_classification();
   failed |= test_ere_state_transitions();
   failed |= test_collating_payload_classification();
   failed |= test_compound_terminators_do_not_become_content();

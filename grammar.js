@@ -20,6 +20,7 @@ export const EXPRESSION = {
 };
 
 export const FILE_SOURCE_TIER = "additive";
+export const INPUT_PIPE_PRECEDENCE = 13;
 
 export const RESERVED_WORDS = {
   keyword: [
@@ -183,9 +184,12 @@ const ereExpressionRules = (insideGroup) => {
     insideGroup ? alias($[name(rule)], $[rule]) : $[rule];
   return {
     [name("extended_reg_exp")]: ($) =>
-      seq(
+      choice(
         member($, "ere_branch"),
-        repeat(seq(token.immediate("|"), member($, "ere_branch"))),
+        seq(
+          optional(member($, "ere_branch")),
+          repeat1(seq(token.immediate("|"), optional(member($, "ere_branch")))),
+        ),
       ),
 
     [name("ere_branch")]: ($) => repeat1(member($, "ere_expression")),
@@ -217,6 +221,7 @@ const ereExpressionRules = (insideGroup) => {
           ? []
           : [alias(token.immediate(")"), $.ordinary_character)]),
         alias(token.immediate("}"), $.ordinary_character),
+        alias($._ere_literal_brace, $.ordinary_character),
         $.ordinary_character,
         $.quoted_character,
         token.immediate("."),
@@ -783,6 +788,8 @@ const definition = {
     $._continuation_newline,
     $._literal_break,
     $._stray_backslash,
+    $._ere_interval_opening,
+    $._ere_literal_brace,
     $._error_sentinel,
   ],
 
@@ -1073,7 +1080,7 @@ const definition = {
 
     _ere_interval: ($) =>
       seq(
-        token.immediate("{"),
+        alias($._ere_interval_opening, "{"),
         field("minimum", $.duplication_count),
         optional(
           seq(

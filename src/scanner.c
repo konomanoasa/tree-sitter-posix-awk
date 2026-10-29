@@ -81,7 +81,9 @@ enum TokenType {
   CONTINUATION_NEWLINE = 71,
   LITERAL_BREAK = 72,
   STRAY_BACKSLASH = 73,
-  ERROR_SENTINEL = 74,
+  ERE_INTERVAL_OPENING = 74,
+  ERE_LITERAL_BRACE = 75,
+  ERROR_SENTINEL = 76,
   TOKEN_TYPE_COUNT,
 };
 
@@ -582,6 +584,38 @@ static bool scan_ere_compound_token(
   return valid_symbols[delimiter] && emit_mode(state, lexer, mode, delimiter);
 }
 
+enum { ERE_DUP_MAX = 255 };
+
+static bool scan_ere_count(TSLexer *lexer, unsigned *count) {
+  *count = 0;
+  if (!is_ascii_digit(lexer->lookahead)) return false;
+  do {
+    *count = *count * 10 + (unsigned)(lexer->lookahead - '0');
+    if (*count > ERE_DUP_MAX) return false;
+    lexer->advance(lexer, false);
+  } while (is_ascii_digit(lexer->lookahead));
+  return true;
+}
+
+static bool scan_ere_brace(TSLexer *lexer, const bool *valid_symbols) {
+  lexer->advance(lexer, false);
+  lexer->mark_end(lexer);
+  if (!is_ascii_digit(lexer->lookahead))
+    return valid_symbols[ERE_LITERAL_BRACE] && emit(lexer, ERE_LITERAL_BRACE);
+  if (!valid_symbols[ERE_INTERVAL_OPENING]) return false;
+  unsigned minimum, maximum;
+  if (!scan_ere_count(lexer, &minimum)) return false;
+  if (lexer->lookahead == ',') {
+    lexer->advance(lexer, false);
+    if (
+      is_ascii_digit(lexer->lookahead) &&
+      (!scan_ere_count(lexer, &maximum) || maximum < minimum)
+    )
+      return false;
+  }
+  return lexer->lookahead == '}' && emit(lexer, ERE_INTERVAL_OPENING);
+}
+
 static bool scan_ere_context(
   ScannerState *state,
   TSLexer *lexer,
@@ -589,6 +623,11 @@ static bool scan_ere_context(
   bool recovering
 ) {
   if (!recovering) {
+    if (
+      lexer->lookahead == '{' &&
+      (valid_symbols[ERE_INTERVAL_OPENING] || valid_symbols[ERE_LITERAL_BRACE])
+    )
+      return scan_ere_brace(lexer, valid_symbols);
     if (
       (state->mode == LEXICAL_MODE_ERE_COLLATING ||
         state->mode == LEXICAL_MODE_ERE_EQUIVALENCE) &&
@@ -934,6 +973,7 @@ enum ExpressionPrecedence {
   EXPR_POSTFIX = 23,
   EXPR_FIELD = 24,
   EXPR_FILE_SOURCE = EXPR_ADDITIVE,
+  EXPR_INPUT_PIPE = 13,
 };
 
 static int expression_right_precedence(int precedence) {
@@ -1031,6 +1071,7 @@ enum {
   SIGNATURE_UNARY = 1,
   SIGNATURE_POSTFIX = 2,
   SIGNATURE_LVALUE = 4,
+  SIGNATURE_TARGET_END = 1 << 17,
 };
 
 static uint32_t boundary_signature(
@@ -1052,7 +1093,7 @@ static int signature_ceiling(uint32_t signature) {
 }
 
 static int signature_kind(uint32_t signature) {
-  return (int)(signature >> 8);
+  return (int)((signature & ~SIGNATURE_TARGET_END) >> 8);
 }
 
 static uint64_t make_descriptor(uint32_t signature, uint32_t length) {
@@ -1071,7 +1112,7 @@ static int descriptor_kind(uint64_t descriptor) {
   return signature_kind(descriptor_signature(descriptor));
 }
 
-enum { SAVED_SIGNATURE_BITS = 17 };
+enum { SAVED_SIGNATURE_BITS = 18 };
 static const uint64_t SAVED_SIGNATURE_MASK =
   (UINT64_C(1) << SAVED_SIGNATURE_BITS) - 1;
 static const uint64_t SAVED_HIGH_MASK =
@@ -1113,10 +1154,19 @@ static int recognizer_token(const RecognizerInput *parser, size_t position) {
   return position < parser->length ? parser->tokens[position] : PROBE_END;
 }
 
+static bool fixed_getline_target(const RecognizerInput *input, size_t start) {
+  const int target = recognizer_token(input, start + 1);
+  const int operand =
+    target == '$' ? recognizer_token(input, start + 2) : PROBE_END;
+  return target == PROBE_NAME ||
+    operand == PROBE_NAME ||
+    operand == PROBE_VALUE;
+}
+
 typedef struct {
   size_t start, end;
   int kind, ceiling;
-  bool lvalue, postfix, unary;
+  bool lvalue, postfix, unary, target_end;
   uint64_t children[2];
   size_t child_indices[2];
 } RecognizedValue;
@@ -1168,12 +1218,13 @@ typedef struct {
 
 static uint32_t value_signature(RecognizedValue value) {
   return boundary_signature(
-    value.kind,
-    value.ceiling,
-    value.lvalue,
-    value.postfix,
-    value.unary
-  );
+           value.kind,
+           value.ceiling,
+           value.lvalue,
+           value.postfix,
+           value.unary
+         ) |
+    (value.target_end ? SIGNATURE_TARGET_END : 0u);
 }
 
 static size_t recognizer_context_hash(RecognizerContext value) {
@@ -1383,6 +1434,11 @@ static RecognizedValue recognizer_node(
     .start = start,
     .end = end,
     .ceiling = EXPR_FIELD,
+    .target_end = kind != RECOGNIZED_POSTFIX &&
+      ((kind == RECOGNIZED_GET &&
+         right.end &&
+         fixed_getline_target(parser->input, start)) ||
+        (right.end ? right.target_end : left.target_end)),
   };
 }
 
@@ -1400,8 +1456,8 @@ static Continuation continuation(
   const int token = recognizer_token(input, end);
   const int ceiling = signature_ceiling(left);
   const bool lvalue = left & SIGNATURE_LVALUE;
-  const bool pipe = token == '|' && minimum <= EXPR_ASSIGNMENT;
-  const int precedence = pipe ? EXPR_ASSIGNMENT : probe_precedence(token);
+  const bool pipe = token == '|';
+  const int precedence = pipe ? EXPR_INPUT_PIPE : probe_precedence(token);
   return (Continuation){
     .token = token,
     .precedence = precedence,
@@ -1409,6 +1465,7 @@ static Continuation continuation(
     .postfix = token == PROBE_UPDATE &&
       lvalue &&
       (left & SIGNATURE_POSTFIX) &&
+      !(left & SIGNATURE_TARGET_END) &&
       minimum <= EXPR_POSTFIX &&
       EXPR_POSTFIX <= ceiling,
     .eligible = precedence > 0 &&
@@ -1477,6 +1534,7 @@ static void recognizer_step(Recognizer *parser) {
         const int next = recognizer_token(parser->input, frame->start + 1);
         if (next == PROBE_NAME || next == '$') {
           parser->alternatives[frame->start] =
+            !fixed_getline_target(parser->input, frame->start) &&
             parser->choices[frame->start] == 0;
           if (!parser->choices[frame->start]) {
             frame->stage = RECOGNIZER_TARGET;
@@ -1714,6 +1772,15 @@ static SharedNode shared_node(
     .children = {left ? left : right, left ? right : 0},
     .decision = UINT32_MAX,
   };
+  const uint32_t last = right ? right : left;
+  if (
+    kind != RECOGNIZED_POSTFIX &&
+    ((kind == RECOGNIZED_GET &&
+       right &&
+       fixed_getline_target(parser->input, start)) ||
+      (last && (shared_shape(parser->nodes[last - 1]) & SIGNATURE_TARGET_END)))
+  )
+    node.descriptor |= (uint64_t)SIGNATURE_TARGET_END << 32;
   if (kind == RECOGNIZED_GET) {
     node.decision = start;
     node.rank = right ? 1 : 2;
@@ -1884,23 +1951,24 @@ static void shared_get(
   uint32_t start,
   bool redirected
 ) {
-  shared_add(
-    parser,
-    result,
-    shared_node(
+  if (!fixed_getline_target(parser->input, start))
+    shared_add(
       parser,
-      RECOGNIZED_GET,
-      start,
-      start + 1,
-      0,
-      0,
-      EXPR_FIELD,
-      false,
-      true,
-      false
-    ),
-    0
-  );
+      result,
+      shared_node(
+        parser,
+        RECOGNIZED_GET,
+        start,
+        start + 1,
+        0,
+        0,
+        EXPR_FIELD,
+        false,
+        true,
+        false
+      ),
+      0
+    );
   SharedSet *targets = shared_expr(parser, start + 1, RECOGNIZED_LVALUE);
   for (size_t i = 0; i < targets->length && !parser->failed; i++) {
     uint32_t target = targets->items[i];

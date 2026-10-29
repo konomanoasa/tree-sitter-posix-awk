@@ -913,7 +913,7 @@ a pipe after a getline field source redirects print output
 
 BEGIN {
   print $getline < "f" | "cmd"
-  print $getline < getline x++ | "cmd"
+  print $getline < (getline x)++ | "cmd"
 }
 
 ------------------
@@ -972,11 +972,13 @@ BEGIN {
                                     (getline_keyword))
                                   (expr
                                     (non_unary_expr
-                                      (non_unary_input_function
-                                        (simple_get
-                                          (getline_keyword)
-                                          (lvalue
-                                            (name))))))))))
+                                      (expr
+                                        (non_unary_expr
+                                          (non_unary_input_function
+                                            (simple_get
+                                              (getline_keyword)
+                                              (lvalue
+                                                (name))))))))))))
                           (incr)))))
                   (output_redirection
                     (expr
@@ -1185,7 +1187,7 @@ output redirections keep the postfix field update ownership
 {
   print $1++ >> "out"
   print $i-- | "sort"
-  print $getline x++ > y = 1
+  print $1++ > y = 1
 }
 
 ------------------
@@ -1253,11 +1255,7 @@ output redirections keep the postfix field update ownership
                           (lvalue
                             (expr
                               (non_unary_expr
-                                (non_unary_input_function
-                                  (simple_get
-                                    (getline_keyword)
-                                    (lvalue
-                                      (name)))))))
+                                (number))))
                           (incr)))))
                   (output_redirection
                     (expr

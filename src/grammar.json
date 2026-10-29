@@ -1790,30 +1790,55 @@
       ]
     },
     "extended_reg_exp": {
-      "type": "SEQ",
+      "type": "CHOICE",
       "members": [
         {
           "type": "SYMBOL",
           "name": "ere_branch"
         },
         {
-          "type": "REPEAT",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "IMMEDIATE_TOKEN",
-                "content": {
-                  "type": "STRING",
-                  "value": "|"
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "ere_branch"
+                },
+                {
+                  "type": "BLANK"
                 }
-              },
-              {
-                "type": "SYMBOL",
-                "name": "ere_branch"
+              ]
+            },
+            {
+              "type": "REPEAT1",
+              "content": {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "IMMEDIATE_TOKEN",
+                    "content": {
+                      "type": "STRING",
+                      "value": "|"
+                    }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "ere_branch"
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  }
+                ]
               }
-            ]
-          }
+            }
+          ]
         }
       ]
     },
@@ -1941,6 +1966,15 @@
           "value": "ordinary_character"
         },
         {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_ere_literal_brace"
+          },
+          "named": true,
+          "value": "ordinary_character"
+        },
+        {
           "type": "SYMBOL",
           "name": "ordinary_character"
         },
@@ -1980,7 +2014,7 @@
       ]
     },
     "group_extended_reg_exp": {
-      "type": "SEQ",
+      "type": "CHOICE",
       "members": [
         {
           "type": "ALIAS",
@@ -1992,28 +2026,58 @@
           "value": "ere_branch"
         },
         {
-          "type": "REPEAT",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "IMMEDIATE_TOKEN",
-                "content": {
-                  "type": "STRING",
-                  "value": "|"
-                }
-              },
-              {
-                "type": "ALIAS",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "group_ere_branch"
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "ALIAS",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "group_ere_branch"
+                  },
+                  "named": true,
+                  "value": "ere_branch"
                 },
-                "named": true,
-                "value": "ere_branch"
+                {
+                  "type": "BLANK"
+                }
+              ]
+            },
+            {
+              "type": "REPEAT1",
+              "content": {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "IMMEDIATE_TOKEN",
+                    "content": {
+                      "type": "STRING",
+                      "value": "|"
+                    }
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "ALIAS",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "group_ere_branch"
+                        },
+                        "named": true,
+                        "value": "ere_branch"
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  }
+                ]
               }
-            ]
-          }
+            }
+          ]
         }
       ]
     },
@@ -2134,6 +2198,15 @@
               "type": "STRING",
               "value": "}"
             }
+          },
+          "named": true,
+          "value": "ordinary_character"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_ere_literal_brace"
           },
           "named": true,
           "value": "ordinary_character"
@@ -2270,11 +2343,13 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "IMMEDIATE_TOKEN",
+          "type": "ALIAS",
           "content": {
-            "type": "STRING",
-            "value": "{"
-          }
+            "type": "SYMBOL",
+            "name": "_ere_interval_opening"
+          },
+          "named": false,
+          "value": "{"
         },
         {
           "type": "FIELD",
@@ -10796,6 +10871,14 @@
     {
       "type": "SYMBOL",
       "name": "_stray_backslash"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ere_interval_opening"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ere_literal_brace"
     },
     {
       "type": "SYMBOL",

@@ -28,10 +28,10 @@ npm test
 - [POSIX.1-2024 AWK](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/awk.html)
 - [POSIX.1-2024 extended regular expressions](https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/basedefs/V1_chap09.html#tag_09_04)
 
-## Used By
-
-[awk-ts-mode](https://github.com/konomanoasa/awk-ts-mode)
-
 ## License
 
 [MIT](LICENSE)
+
+## Used By
+
+[awk-ts-mode](https://github.com/konomanoasa/awk-ts-mode)

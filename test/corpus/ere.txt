@@ -1465,6 +1465,38 @@ an ERE repetition count remains one leaf
 0:7 - 0:8           `\n`
 
 ==================
+interval bounds retain leading zeroes and separate fields
+:cst
+==================
+/a{0001,02}/
+
+------------------
+
+0:0  - 1:0    program
+0:0  - 1:0      item_list
+0:0  - 0:12       item: item
+0:0  - 0:12         pattern: normal_pattern
+0:0  - 0:12           expr
+0:0  - 0:12             non_unary_expr
+0:0  - 0:12               ere
+0:0  - 0:1                  "/"
+0:1  - 0:11                 expression: extended_reg_exp
+0:1  - 0:11                   ere_branch
+0:1  - 0:11                     ere_expression
+0:1  - 0:2                        one_char_or_coll_elem_ere
+0:1  - 0:2                          ordinary_character `a`
+0:2  - 0:11                       ere_dupl_symbol
+0:2  - 0:3                          "{"
+0:3  - 0:7                          minimum: duplication_count `0001`
+0:7  - 0:8                          ","
+0:8  - 0:10                         maximum: duplication_count `02`
+0:10 - 0:11                         "}"
+0:11 - 0:12                 "/"
+0:12 - 1:0        terminator: terminator
+0:12 - 1:0          newline
+0:12 - 0:13           `\n`
+
+==================
 empty groups retain delimiters within alternation and repetition
 :cst
 ==================
@@ -2293,20 +2325,22 @@ ERE escape rejects NUL
 ------------------
 
 ==================
-an ERE alternation requires a nonempty left branch
-:error
+a leading empty ERE branch has no branch node
 ==================
 /|a/
 
 ------------------
 
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character)))))))))) (terminator (newline))))
+
 ==================
-an ERE alternation requires a nonempty right branch
-:error
+a trailing empty ERE branch has no branch node
 ==================
 /a|/
 
 ------------------
+
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character)))))))))) (terminator (newline))))
 
 ==================
 an empty ERE group cannot span a physical newline
@@ -2318,44 +2352,49 @@ BEGIN { print /(\
 ------------------
 
 ==================
-an ERE group alternation requires a nonempty left branch
-:error
+a leading empty group branch has no branch node
 ==================
 /(|a)/
 
 ------------------
 
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (extended_reg_exp (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character))))))))))))) (terminator (newline))))
+
 ==================
-an ERE group alternation requires a nonempty right branch
-:error
+a trailing empty group branch has no branch node
 ==================
 /(a|)/
 
 ------------------
 
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (extended_reg_exp (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character))))))))))))) (terminator (newline))))
+
 ==================
-an ERE group cannot contain only an alternation operator
-:error
+an alternation-only group retains its expression without branches
 ==================
 /(|)/
 
 ------------------
 
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (extended_reg_exp))))))))) (terminator (newline))))
+
 ==================
-an ERE alternation requires a nonempty middle branch
-:error
+a middle empty ERE branch has no branch node
 ==================
 /a||b/
 
 ------------------
 
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character)))) (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character)))))))))) (terminator (newline))))
+
 ==================
-an ERE closing parenthesis cannot supply an empty alternation branch
-:error
+an empty group branch preserves the following ordinary closing parenthesis
 ==================
 /(a|)b)/
 
 ------------------
+
+(program (item_list (item (normal_pattern (expr (non_unary_expr (ere (extended_reg_exp (ere_branch (ere_expression (extended_reg_exp (ere_branch (ere_expression (one_char_or_coll_elem_ere (ordinary_character)))))) (ere_expression (one_char_or_coll_elem_ere (ordinary_character))) (ere_expression (one_char_or_coll_elem_ere (ordinary_character)))))))))) (terminator (newline))))
 
 ==================
 a continued closing parenthesis cannot supply a nested ERE branch
@@ -2383,18 +2422,43 @@ BEGIN {
   print /[[:alpha#:]]/
   print /a{2#}/
   print /[[:#:]]/
-  print /a{#}/
 }
 
 ------------------
 
 ==================
-a blank after an ERE interval opening cannot expose a backslash as a continuation
-:error
+a literal brace permits following blank and octal escape content
 ==================
 /a{ \1}/
 
 ------------------
+
+(program
+  (item_list
+    (item
+      (normal_pattern
+        (expr
+          (non_unary_expr
+            (ere
+              (extended_reg_exp
+                (ere_branch
+                  (ere_expression
+                    (one_char_or_coll_elem_ere
+                      (ordinary_character)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere
+                      (ordinary_character)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere
+                      (ordinary_character)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere
+                      (escape_sequence)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere
+                      (ordinary_character))))))))))
+    (terminator
+      (newline))))
 
 ==================
 a blank after an ERE interval count cannot expose a backslash as a continuation
@@ -2527,4 +2591,178 @@ an ERE interval count ending at a raw newline is rejected
 BEGIN { print /a{1,
 }
 
+------------------
+
+==================
+an alternation-only ERE retains its operator without empty branches
+:cst
+==================
+/|/
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:3       item: item
+0:0 - 0:3         pattern: normal_pattern
+0:0 - 0:3           expr
+0:0 - 0:3             non_unary_expr
+0:0 - 0:3               ere
+0:0 - 0:1                 "/"
+0:1 - 0:2                 expression: extended_reg_exp
+0:1 - 0:2                   "|"
+0:2 - 0:3                 "/"
+0:3 - 1:0       terminator: terminator
+0:3 - 1:0         newline
+0:3 - 0:4           `\n`
+
+==================
+an interval rejects a lower bound above its maximum
+:error
+==================
+/a{2,1}/
+------------------
+
+==================
+leading zeroes cannot hide reversed interval bounds
+:error
+==================
+/a{0002,0001}/
+------------------
+
+==================
+an interval rejects a shorter maximum despite its larger first digit
+:error
+==================
+/a{100,99}/
+------------------
+
+==================
+an interval rejects a count larger than a machine integer
+:error
+==================
+/a{184467440737095516161,184467440737095516160}/
+------------------
+
+==================
+a group interval rejects reversed bounds
+:error
+==================
+/(ab){2,1}/
+------------------
+
+==================
+a following repetition modifier cannot repair reversed bounds
+:error
+==================
+/a{2,1}?/
+------------------
+
+==================
+interval count boundaries preserve minimum and maximum fields
+==================
+/a{254}b{255}c{0,255}d{255,}/
+
+------------------
+
+(program
+  (item_list
+    item: (item
+      pattern: (normal_pattern
+        (expr
+          (non_unary_expr
+            (ere
+              expression: (extended_reg_exp
+                (ere_branch
+                  (ere_expression
+                    (one_char_or_coll_elem_ere (ordinary_character))
+                    (ere_dupl_symbol minimum: (duplication_count)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere (ordinary_character))
+                    (ere_dupl_symbol minimum: (duplication_count)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere (ordinary_character))
+                    (ere_dupl_symbol
+                      minimum: (duplication_count)
+                      maximum: (duplication_count)))
+                  (ere_expression
+                    (one_char_or_coll_elem_ere (ordinary_character))
+                    (ere_dupl_symbol minimum: (duplication_count))))))))))
+    terminator: (terminator (newline))))
+
+==================
+a missing interval minimum leaves each literal character in place
+:cst
+==================
+/{,2}/
+
+------------------
+
+0:0 - 1:0   program
+0:0 - 1:0     item_list
+0:0 - 0:6       item: item
+0:0 - 0:6         pattern: normal_pattern
+0:0 - 0:6           expr
+0:0 - 0:6             non_unary_expr
+0:0 - 0:6               ere
+0:0 - 0:1                 "/"
+0:1 - 0:5                 expression: extended_reg_exp
+0:1 - 0:5                   ere_branch
+0:1 - 0:2                     ere_expression
+0:1 - 0:2                       one_char_or_coll_elem_ere
+0:1 - 0:2                         ordinary_character `{`
+0:2 - 0:3                     ere_expression
+0:2 - 0:3                       one_char_or_coll_elem_ere
+0:2 - 0:3                         ordinary_character `,`
+0:3 - 0:4                     ere_expression
+0:3 - 0:4                       one_char_or_coll_elem_ere
+0:3 - 0:4                         ordinary_character `2`
+0:4 - 0:5                     ere_expression
+0:4 - 0:5                       one_char_or_coll_elem_ere
+0:4 - 0:5                         ordinary_character `}`
+0:5 - 0:6                 "/"
+0:6 - 1:0       terminator: terminator
+0:6 - 1:0         newline
+0:6 - 0:7           `\n`
+
+==================
+an exact interval count cannot exceed 255
+:error
+==================
+/a{256}/
+------------------
+
+==================
+an interval maximum cannot exceed 255
+:error
+==================
+/a{1,256}/
+------------------
+
+==================
+an open interval maximum does not remove the minimum limit
+:error
+==================
+/a{256,}/
+------------------
+
+==================
+leading zeroes cannot hide a count above the limit
+:error
+==================
+/a{000256}/
+------------------
+
+==================
+a digit commits an incomplete interval instead of a literal brace
+:error
+==================
+/a{1x}/
+------------------
+
+==================
+an interval cannot be a literal brace when its operand is missing
+:error
+==================
+/{2}/
 ------------------

@@ -394,6 +394,146 @@ scan_getline_pipe(TSLexer *lexer, const bool *valid_symbols, bool recovering) {
     emit(lexer, GETLINE_PIPE);
 }
 
+enum { ERE_END = -1, ERE_NONCHARACTER = -2 };
+
+typedef struct {
+  int32_t value;
+  bool quoted;
+} EreCharacter;
+
+typedef struct {
+  TSLexer *lexer;
+  EreCharacter unit;
+  bool buffered;
+} EreReader;
+
+static EreCharacter read_ere_unit(TSLexer *lexer) {
+  int32_t value = lexer->lookahead;
+  if (lexer->eof(lexer) || value == 0 || value == '\n' || value == '/')
+    return (EreCharacter){.value = ERE_END};
+  lexer->advance(lexer, false);
+  if (value != '\\') return (EreCharacter){.value = value};
+  value = lexer->lookahead;
+  if (lexer->eof(lexer) || value == 0 || value == '\n')
+    return (EreCharacter){.value = ERE_END};
+  lexer->advance(lexer, false);
+  if (is_octal_digit(value)) {
+    unsigned byte = (unsigned)(value - '0');
+    for (unsigned i = 1; i < 3 && is_octal_digit(lexer->lookahead); i++) {
+      byte = byte * 8 + (unsigned)(lexer->lookahead - '0');
+      lexer->advance(lexer, false);
+    }
+    byte &= UINT8_MAX;
+    return (EreCharacter){.value = (int32_t)byte};
+  }
+  static const char names[] = "abfnrtv/";
+  static const char values[] = "\a\b\f\n\r\t\v/";
+  for (unsigned i = 0; i < sizeof(names) - 1; i++)
+    if (value == names[i]) return (EreCharacter){.value = values[i]};
+  return (EreCharacter){.value = value, .quoted = true};
+}
+
+static EreCharacter peek_ere_character(EreReader *reader) {
+  if (!reader->buffered) {
+    reader->unit = read_ere_unit(reader->lexer);
+    reader->buffered = true;
+  }
+  return reader->unit;
+}
+
+static EreCharacter read_ere_character(EreReader *reader) {
+  EreCharacter character = peek_ere_character(reader);
+  reader->buffered = false;
+  return character;
+}
+
+static EreCharacter read_ere_member(EreReader *reader) {
+  EreCharacter character = read_ere_character(reader);
+  if (character.value == '\\' && !character.quoted) {
+    EreCharacter next = peek_ere_character(reader);
+    if (next.quoted) {
+      // A decoded backslash quotes the retained backslash of the next escape.
+      reader->unit.quoted = false;
+    } else character = read_ere_character(reader);
+    character.quoted = true;
+  }
+  return character;
+}
+
+static EreCharacter read_ere_form(EreReader *reader, int32_t marker) {
+  EreCharacter element = {.value = ERE_NONCHARACTER};
+  unsigned count = 0;
+  EreCharacter character = read_ere_character(reader);
+  while (character.value >= 0) {
+    EreCharacter next = read_ere_character(reader);
+    if (
+      character.value == marker &&
+      !character.quoted &&
+      next.value == ']' &&
+      !next.quoted
+    )
+      return count == 1 && marker == '.'
+        ? element
+        : (EreCharacter){.value = ERE_NONCHARACTER};
+    if (count == 0) element = character;
+    if (count < 2) count += character.quoted ? 2 : 1;
+    character = next;
+  }
+  return character;
+}
+
+static bool check_ere_bracket(EreReader *reader) {
+  EreCharacter previous = {.value = ERE_NONCHARACTER};
+  EreCharacter character = read_ere_member(reader);
+  bool pending = false, range_end = false, first = true, after_class = false;
+  if (character.value == '^' && !character.quoted)
+    character = read_ere_member(reader);
+  while (character.value >= 0) {
+    EreCharacter next = {.value = ERE_END};
+    bool have_next = false, class = false;
+    if (!character.quoted) {
+      if (character.value == ']' && !first) return true;
+      if (character.value == '[') {
+        next = read_ere_member(reader);
+        have_next = true;
+        if (!next.quoted && character_in(next.value, ".=:")) {
+          class = next.value != '.';
+          character = read_ere_form(reader, next.value);
+          have_next = false;
+        }
+      } else if (character.value == '-' && !first && !pending && !after_class) {
+        next = read_ere_member(reader);
+        if (next.value == ']' && !next.quoted) return true;
+        if (range_end) return false;
+        pending = true;
+        character = next;
+        continue;
+      }
+    }
+    if (pending && character.value >= 0 && previous.value > character.value)
+      return false;
+    range_end = pending;
+    pending = false;
+    previous = character;
+    after_class = class;
+    first = false;
+    character = have_next ? next : read_ere_member(reader);
+  }
+  return true;
+}
+
+static bool check_ere_ranges(TSLexer *lexer) {
+  EreReader reader = {.lexer = lexer};
+  for (;;) {
+    EreCharacter character = read_ere_member(&reader);
+    if (character.value < 0) return true;
+    if (
+      character.value == '[' && !character.quoted && !check_ere_bracket(&reader)
+    )
+      return false;
+  }
+}
+
 static bool scan_slash_start(
   ScannerState *state,
   TSLexer *lexer,
@@ -404,8 +544,10 @@ static bool scan_slash_start(
   if (valid_symbols[DIVISION_SLASH]) {
     return lexer->lookahead != '=' && emit(lexer, DIVISION_SLASH);
   }
-  return valid_symbols[ERE_OPENING_SLASH] &&
-    emit_mode(state, lexer, LEXICAL_MODE_ERE_BODY, ERE_OPENING_SLASH);
+  if (!valid_symbols[ERE_OPENING_SLASH]) return false;
+  const enum TokenType token =
+    check_ere_ranges(lexer) ? ERE_OPENING_SLASH : ERROR_SENTINEL;
+  return emit_mode(state, lexer, LEXICAL_MODE_ERE_BODY, token);
 }
 
 static bool scan_escape(const ScannerState *state, TSLexer *lexer) {
@@ -588,7 +730,6 @@ enum { ERE_DUP_MAX = 255 };
 
 static bool scan_ere_count(TSLexer *lexer, unsigned *count) {
   *count = 0;
-  if (!is_ascii_digit(lexer->lookahead)) return false;
   do {
     *count = *count * 10 + (unsigned)(lexer->lookahead - '0');
     if (*count > ERE_DUP_MAX) return false;
@@ -1163,6 +1304,18 @@ static bool fixed_getline_target(const RecognizerInput *input, size_t start) {
     operand == PROBE_VALUE;
 }
 
+static bool ends_at_fixed_target(
+  const RecognizerInput *input,
+  int kind,
+  size_t start,
+  bool target,
+  bool last
+) {
+  return kind != RECOGNIZED_POSTFIX &&
+    ((kind == RECOGNIZED_GET && target && fixed_getline_target(input, start)) ||
+      last);
+}
+
 typedef struct {
   size_t start, end;
   int kind, ceiling;
@@ -1434,11 +1587,13 @@ static RecognizedValue recognizer_node(
     .start = start,
     .end = end,
     .ceiling = EXPR_FIELD,
-    .target_end = kind != RECOGNIZED_POSTFIX &&
-      ((kind == RECOGNIZED_GET &&
-         right.end &&
-         fixed_getline_target(parser->input, start)) ||
-        (right.end ? right.target_end : left.target_end)),
+    .target_end = ends_at_fixed_target(
+      parser->input,
+      kind,
+      start,
+      right.end,
+      right.end ? right.target_end : left.target_end
+    ),
   };
 }
 
@@ -1468,10 +1623,9 @@ static Continuation continuation(
       !(left & SIGNATURE_TARGET_END) &&
       minimum <= EXPR_POSTFIX &&
       EXPR_POSTFIX <= ceiling,
-    .eligible = precedence > 0 &&
-      minimum <= precedence &&
+    .eligible = minimum <= precedence &&
       precedence <= ceiling &&
-      (pipe || precedence != EXPR_ASSIGNMENT || lvalue),
+      (precedence != EXPR_ASSIGNMENT || lvalue),
   };
 }
 
@@ -1774,11 +1928,13 @@ static SharedNode shared_node(
   };
   const uint32_t last = right ? right : left;
   if (
-    kind != RECOGNIZED_POSTFIX &&
-    ((kind == RECOGNIZED_GET &&
-       right &&
-       fixed_getline_target(parser->input, start)) ||
-      (last && (shared_shape(parser->nodes[last - 1]) & SIGNATURE_TARGET_END)))
+    ends_at_fixed_target(
+      parser->input,
+      kind,
+      start,
+      right,
+      last && (shared_shape(parser->nodes[last - 1]) & SIGNATURE_TARGET_END)
+    )
   )
     node.descriptor |= (uint64_t)SIGNATURE_TARGET_END << 32;
   if (kind == RECOGNIZED_GET) {

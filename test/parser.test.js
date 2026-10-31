@@ -33,6 +33,112 @@ function freshTest(name, source, assertions) {
   });
 }
 
+for (const { name, valid, invalid } of [
+  { name: "ASCII endpoints", valid: "[a-z]", invalid: "[z-a]" },
+  { name: "Unicode endpoints", valid: "[é-ê]", invalid: "[ê-é]" },
+  {
+    name: "octal endpoints",
+    valid: String.raw`[\141-\172]`,
+    invalid: String.raw`[\172-\141]`,
+  },
+  {
+    name: "successive octal bytes remain independent",
+    valid: String.raw`[\303\252-\303\251]`,
+    invalid: String.raw`[\303\377-\303\251]`,
+  },
+  {
+    name: "mixed raw code point and octal byte endpoints",
+    valid: String.raw`[é-\377]`,
+    invalid: String.raw`[ê-\200]`,
+  },
+  {
+    name: "ascending and descending high bytes",
+    valid: String.raw`[\200-\377]`,
+    invalid: String.raw`[\377-\200]`,
+  },
+  {
+    name: "ASCII and high byte endpoints",
+    valid: String.raw`[a-\303]`,
+    invalid: String.raw`[\303-a]`,
+  },
+  {
+    name: "named escapes",
+    valid: String.raw`[\t-\n]`,
+    invalid: String.raw`[\n-\t]`,
+  },
+  {
+    name: "octal wraparound",
+    valid: String.raw`[\400-a]`,
+    invalid: String.raw`[a-\400]`,
+  },
+  {
+    name: "quoted versus decoded hyphens",
+    valid: String.raw`[z\-a]`,
+    invalid: String.raw`[z\055a]`,
+  },
+  {
+    name: "decoded bracket delimiters",
+    valid: String.raw`\133a-z\135`,
+    invalid: String.raw`\133z-a\135`,
+  },
+  {
+    name: "a decoded closing bracket",
+    valid: String.raw`[a\135z-a]`,
+    invalid: String.raw`[a\134\135z-a]`,
+  },
+  {
+    name: "a decoded backslash quotes a decoded hyphen",
+    valid: String.raw`[z\134\055a]`,
+    invalid: String.raw`[z\055a]`,
+  },
+  {
+    name: "a decoded backslash quotes a retained backslash",
+    valid: String.raw`[a\134\-z]`,
+    invalid: String.raw`[a\134\-!]`,
+  },
+  {
+    name: "collating symbol endpoints",
+    valid: "[[.é.]-[.ê.]]",
+    invalid: "[[.ê.]-[.é.]]",
+  },
+  {
+    name: "escaped collating symbol endpoints",
+    valid: String.raw`[[.\141.]-[.\172.]]`,
+    invalid: String.raw`[[.\172.]-[.\141.]]`,
+  },
+  {
+    name: "a range after a multi-character collating symbol",
+    valid: "[[.ab.]a-z]",
+    invalid: "[[.ab.]z-a]",
+  },
+  {
+    name: "a range after a character class",
+    valid: "[[:alpha:]a-z]",
+    invalid: "[[:alpha:]z-a]",
+  },
+  {
+    name: "a range after an equivalence class",
+    valid: "[[=a=]a-z]",
+    invalid: "[[=a=]z-a]",
+  },
+]) {
+  test(`posix_awk: range validation and repair handle ${name}`, () => {
+    const source = `BEGIN { x = /${valid}/; y = "after" }\nBEGIN { print "next" }\n`;
+    const rejected = source.replace(`/${valid}/`, `/${invalid}/`);
+    const byte = Buffer.byteLength(source.slice(0, source.indexOf("/") + 1));
+    assertDeterministicEdit(
+      name,
+      source,
+      rejected,
+      [{ byte, deleteBytes: Buffer.byteLength(valid), insert: invalid }],
+      1,
+    );
+    assertDeterministicEdit(`${name} repair`, rejected, source, [
+      { byte, deleteBytes: Buffer.byteLength(invalid), insert: valid },
+    ]);
+  });
+}
+
 freshTest(
   "a long continuation gap preserves a for-in header",
   `{ for (k in array ${"\\\n".repeat(longContinuationCount)}); }`,

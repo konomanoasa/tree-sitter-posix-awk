@@ -374,9 +374,9 @@ BEGIN { print /[+-]?[a]/ }
       (newline))))
 
 ==================
-a leading closer remains a list literal before a range
+initial closers and hyphens can start ordered ranges
 ==================
-BEGIN { print /[]-a][]--]/ }
+BEGIN { print /[]-a][---]/ }
 
 ------------------
 
@@ -838,7 +838,7 @@ BEGIN { print /\#[\#][[.#.]][[=#=]]/ }
 range expressions end at a hyphen anywhere in the list
 ==================
 
-BEGIN { print /[%--@][a---][^--@]/ }
+BEGIN { print /[%--@][%---][^--@]/ }
 
 ------------------
 
@@ -2766,3 +2766,82 @@ an interval cannot be a literal brace when its operand is missing
 ==================
 /{2}/
 ------------------
+
+==================
+a range from a leading closer to a hyphen is reversed
+:error
+==================
+/[]--]/
+
+------------------
+
+==================
+a range from a letter to a hyphen is reversed
+:error
+==================
+/[a---]/
+
+------------------
+
+==================
+a reversed octal range is rejected
+:error
+==================
+/[\172-\141]/
+
+------------------
+
+==================
+a reversed Unicode range is rejected
+:error
+==================
+/[ê-é]/
+
+------------------
+
+==================
+escaped hyphens cannot hide shared range endpoints
+:error
+==================
+/[a\055m\055z]/
+
+------------------
+
+==================
+octal byte sequences keep independent source elements around a range
+==================
+/[\303\252-\303\251]/
+------------------
+(program
+  (item
+    pattern: (normal_pattern
+      (expr
+        (non_unary_expr
+          (ere
+            expression: (extended_reg_exp
+              (ere_branch
+                (ere_expression
+                  (one_char_or_coll_elem_ere
+                    (bracket_expression
+                      (matching_list
+                        (bracket_list
+                          (follow_list
+                            (expression_term
+                              (single_expression
+                                (end_range
+                                  (collating_element
+                                    (escape_sequence)))))
+                            (expression_term
+                              (range_expression
+                                (start_range
+                                  (end_range
+                                    (collating_element
+                                      (escape_sequence))))
+                                (end_range
+                                  (collating_element
+                                    (escape_sequence)))))
+                            (expression_term
+                              (single_expression
+                                (end_range
+                                  (collating_element
+                                    (escape_sequence)))))))))))))))))))

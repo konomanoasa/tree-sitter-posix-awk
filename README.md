@@ -7,8 +7,6 @@
 [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammar for
 POSIX.1-2024 AWK.
 
-For GNU awk, see [tree-sitter-awk](https://github.com/konomanoasa/tree-sitter-awk).
-
 ## Installation
 
 ```sh
@@ -31,7 +29,3 @@ npm test
 ## License
 
 [MIT](LICENSE)
-
-## Used By
-
-[awk-ts-mode](https://github.com/konomanoasa/awk-ts-mode)

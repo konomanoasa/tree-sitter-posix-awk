@@ -50,6 +50,30 @@ const cstOutput = [
   "",
 ].join("\n");
 
+test("posix_awk: C locale parsing conditions are independent of the process locale", () => {
+  const previous = process.env.LC_ALL;
+  const sources = [
+    String.raw`/[a-\377][\200-\377]/`,
+    String.raw`/[\303\252-\303\251]/`,
+    "/[é-ê][[.é.]]/",
+  ];
+  const trees = () =>
+    sources.map((source) => {
+      const result = parse(source);
+      assert.equal(result.status, 0, result.output);
+      return result.tree;
+    });
+  try {
+    process.env.LC_ALL = "C";
+    const expected = trees();
+    process.env.LC_ALL = "C.UTF-8";
+    assert.deepEqual(trees(), expected);
+  } finally {
+    if (previous === undefined) delete process.env.LC_ALL;
+    else process.env.LC_ALL = previous;
+  }
+});
+
 test("posix_awk: CST helpers preserve byte ranges and exclude CLI diagnostics", () => {
   const sourcePath = "/source.awk";
   const output = `${cstOutput}Edit: 0 0 \n${sourcePath}  Parse: 1 ms\n`;

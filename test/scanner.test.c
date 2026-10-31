@@ -1532,6 +1532,77 @@ static int test_ere_brace_classification(void) {
   return failed;
 }
 
+static int test_ere_range_lookahead(void) {
+  static const struct {
+    const char *name, *source;
+    enum TokenType token;
+  } cases[] = {
+    {"ordered range keeps the opening slash", "/[a-z]/", ERE_OPENING_SLASH},
+    {"reversed range enters literal recovery", "/[z-a]/", ERROR_SENTINEL},
+    {"ascending high bytes keep the opening slash",
+      "/[\\200-\\377]/",
+      ERE_OPENING_SLASH},
+    {"descending high bytes enter literal recovery",
+      "/[\\377-\\200]/",
+      ERROR_SENTINEL},
+    {"successive octal bytes remain independent",
+      "/[\\303\\252-\\303\\251]/",
+      ERE_OPENING_SLASH},
+    {"octal hyphen participates in range validation",
+      "/[z\\055a]/",
+      ERROR_SENTINEL},
+    {"octal brackets participate in range validation",
+      "/\\133z-a\\135/",
+      ERROR_SENTINEL},
+    {"raw slash stops the range lookahead", "/ok/ [z-a]", ERE_OPENING_SLASH},
+    {"raw newline stops the range lookahead", "/ok\n[z-a]/", ERE_OPENING_SLASH},
+    {"escaped newline stops the range lookahead",
+      "/ok\\\n[z-a]/",
+      ERE_OPENING_SLASH},
+    {"incomplete escaped bytes stop at EOF", "/[\\360\\200", ERE_OPENING_SLASH},
+  };
+  int failed = 0;
+  bool valid[TOKEN_TYPE_COUNT] = {false};
+  valid[ERE_OPENING_SLASH] = true;
+  for (size_t i = 0; i < ARRAY_LENGTH(cases); i++)
+    failed |= expect_scan_result_at(
+      cases[i].name,
+      cases[i].source,
+      valid,
+      LEXICAL_MODE_OUTSIDE,
+      true,
+      cases[i].token,
+      0,
+      1,
+      LEXICAL_MODE_ERE_BODY
+    );
+  static const char nul_source[] = "/ok\0[z-a]/";
+  MockLexer mock = make_mock_lexer_bytes(nul_source, sizeof(nul_source) - 1);
+  ScannerState state = {0};
+  assert(
+    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, valid)
+  );
+  assert(mock.lexer.result_symbol == ERE_OPENING_SLASH);
+  assert(
+    mock.token_end == 1 && mock.offset == 3 && !mock.lexer.eof(&mock.lexer)
+  );
+  const size_t members = 65536;
+  char *source = malloc(members + sizeof("/[]/"));
+  assert(source);
+  memcpy(source, "/[", 2);
+  memset(source + 2, 'a', members);
+  memcpy(source + 2 + members, "]/", 3);
+  mock = make_mock_lexer(source);
+  state = (ScannerState){0};
+  assert(
+    tree_sitter_posix_awk_external_scanner_scan(&state, &mock.lexer, valid)
+  );
+  assert(mock.lexer.result_symbol == ERE_OPENING_SLASH);
+  assert(mock.token_end == 1 && mock.advance_count == members + 3);
+  free(source);
+  return failed;
+}
+
 static int test_ere_state_transitions(void) {
   int failed = 0;
   bool valid_symbols[TOKEN_TYPE_COUNT] = {false};
@@ -2798,6 +2869,7 @@ int main(void) {
   failed |= test_literal_classification();
   failed |= test_blank_skip_token_ranges();
   failed |= test_slash_dispatch();
+  failed |= test_ere_range_lookahead();
   failed |= test_getline_pipe_lookahead();
   failed |= test_word_boundary_lookahead();
   failed |= test_getline_operand_lookahead();

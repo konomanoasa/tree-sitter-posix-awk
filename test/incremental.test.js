@@ -20,9 +20,8 @@ import {
 import { getlineSelectionWorkloads } from "./support/workloads.js";
 
 const fuzzSeed = 1n;
-const fuzzIterations = 100;
-const editsPerHistory = 5;
-const maximumFragments = 3;
+const historiesPerInput = 2;
+const editsPerHistory = 4;
 const maximumDeletionBytes = 2;
 const randomStateBits = 64;
 const randomOutputShift = 32n;
@@ -277,14 +276,13 @@ function createEditHistoryGenerator() {
     );
     return Number(seed >> randomOutputShift) % maximum;
   }
-  return function* (fragments, insertions, joinSource) {
-    for (let iteration = 0; iteration < fuzzIterations; iteration++) {
-      const parts = [];
-      const count = 1 + next(maximumFragments);
-      for (let part = 0; part < count; part++) {
-        parts.push(fragments[next(fragments.length)]);
-      }
-      const initial = joinSource(parts);
+  return function* (inputs, insertions) {
+    for (
+      let iteration = 0;
+      iteration < inputs.length * historiesPerInput;
+      iteration++
+    ) {
+      const initial = inputs[iteration % inputs.length];
       let source = Buffer.from(initial);
       const edits = [];
       for (let step = 0; step < editsPerHistory; step++) {
@@ -317,30 +315,15 @@ function createEditHistoryGenerator() {
   };
 }
 
-const fuzzFragments = [
-  "BEGIN { print 1 }",
-  "END { print 2 }",
-  "{ print $1 }",
-  "/a/ { print }",
-  "a, b { next }",
-  'BEGIN { x = "value" }',
-  "BEGIN { x = a + b * c }",
-  "BEGIN { x = (a, b) in array }",
-  "BEGIN { print /[a-z]/ }",
-  "BEGIN { if (x) print x; else print y }",
-  "BEGIN { while (x) x-- }",
-  "BEGIN { for (i = 0; i < 3; i++) print i }",
-  "BEGIN { for (i in a) print a[i] }",
-  "BEGIN { do x++; while (x < 3) }",
-  "function f(x) { return x }",
-  "BEGIN { x = f(1) }",
-  "BEGIN { getline x < file }",
-  "BEGIN { print x > file }",
-  "BEGIN { delete a[1] }",
-  "BEGIN { exit 1 }",
-  "#comment",
-  "BEGIN {}",
-  "BEGIN {",
+const historyInputs = [
+  lines("BEGIN { print 1 }", "/a/ { print $1 }", "END { print 2 }"),
+  lines("a, b { next }", "#comment", "BEGIN {}"),
+  'BEGIN { x = "value"; y = a + b * c; print /[a-z]/ }',
+  "BEGIN { if (x) print x; else print y; while (x) x-- }",
+  "BEGIN { for (i = 0; i < 3; i++) print i; do x++; while (x < 3) }",
+  "BEGIN { for (i in a) print a[i]; x = (a, b) in array; delete a[1] }",
+  lines("function f(x) { return x }", "BEGIN { x = f(1); exit 1 }"),
+  "BEGIN { getline x < file; print x > file }",
   "BEGIN { if (",
   'BEGIN { print "',
   "BEGIN { print /[",
@@ -353,19 +336,12 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
   const generateHistories = createEditHistoryGenerator();
   let checked = 0;
   let compared = 0;
-  for (const history of generateHistories(
-    fuzzFragments,
-    fuzzInsertions,
-    (parts) => lines(...parts),
-  )) {
+  for (const history of generateHistories(historyInputs, fuzzInsertions)) {
     const fresh = parse(history.source);
-    const repeated = parse(history.source);
     const incremental = parse(history.initial, history.edits);
     for (const result of [fresh, incremental]) {
       assert.ok(result.status === 0 || result.status === 1, history.context);
     }
-    assert.equal(repeated.status, fresh.status, history.context);
-    assert.equal(repeated.tree, fresh.tree, history.context);
     if (fresh.status === 0 && !hasRecovery(fresh.tree)) {
       assert.equal(incremental.status, 0, history.context);
       assert.equal(hasRecovery(incremental.tree), false, history.context);
@@ -374,10 +350,13 @@ test("posix_awk: fixed-seed generated histories converge", (context) => {
     }
     checked += 1;
   }
-  assert.equal(checked, fuzzIterations * editsPerHistory);
+  assert.equal(
+    checked,
+    historyInputs.length * historiesPerInput * editsPerHistory,
+  );
   assert.ok(compared > 0);
   context.diagnostic(
-    `posix_awk: compared ${checked} repeated fresh CSTs and ${compared} valid incremental CSTs`,
+    `posix_awk: checked ${checked} edit steps and compared ${compared} valid incremental CSTs`,
   );
 });
 

@@ -71,6 +71,7 @@ function writeSource(source) {
   return path;
 }
 
+// The CLI exposes only the final CST, so intermediate checks replay short history prefixes.
 export function parse(source, edits = []) {
   const path = writeSource(source);
   const arguments_ = [

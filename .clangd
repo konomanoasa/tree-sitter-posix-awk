@@ -1,7 +1,5 @@
 CompileFlags:
   Add:
-    - -std=c17
-    - -xc
     - -Wall
     - -Wextra
     - -Werror
@@ -9,23 +7,23 @@ CompileFlags:
 
 ---
 If:
+  PathMatch: .*\.(c|h)
+CompileFlags:
+  Add:
+    - -std=c17
+    - -xc
+
+---
+If:
   PathMatch: .*\.h
 CompileFlags:
   Add:
     - -xc-header
-    - -Wno-unused-function
 
 ---
 If:
-  PathMatch: test/[^/]*\.c
+  PathMatch: bindings/node/.*\.cc
 CompileFlags:
+  CompilationDatabase: build/Release
   Add:
-    - -Wno-unused-function
-
----
-If:
-  PathMatch: bindings/python/.*\.c
-CompileFlags:
-  CompilationDatabase: None
-  Add:
-    - -I../../src
+    - -std=c++17

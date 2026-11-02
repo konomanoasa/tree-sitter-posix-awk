@@ -7,66 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../src/scanner.c"
-
-enum {
-  SERIALIZATION_GUARD_BYTE = 0x5a,
-  SERIALIZED_HEADER_BYTES = 63,
-  SERIALIZED_OUTLINE_BYTES = 28,
-  SERIALIZED_CACHE_COUNT_OFFSET = 45,
-  BOUNDARY_DIGIT_BITS = 2,
-  BOUNDARY_RADIX = 1U << BOUNDARY_DIGIT_BITS,
-  BOUNDARY_DIGIT_COUNT = sizeof(uint64_t) * CHAR_BIT / BOUNDARY_DIGIT_BITS,
-};
-
-#ifdef TREE_SITTER_REUSE_ALLOCATOR
-static size_t reuse_calloc_calls;
-static size_t reuse_realloc_calls;
-static size_t reuse_free_calls;
-static size_t reuse_live_allocations;
-static bool reuse_fail_next_calloc;
-static bool reuse_fail_next_realloc;
-
-static void *reuse_calloc(size_t count, size_t size) {
-  reuse_calloc_calls += 1;
-  if (reuse_fail_next_calloc) {
-    reuse_fail_next_calloc = false;
-    return NULL;
-  }
-  void *result = calloc(count, size);
-  if (result != NULL) {
-    reuse_live_allocations += 1;
-  }
-  return result;
-}
-
-static void reuse_free(void *allocation) {
-  reuse_free_calls += 1;
-  if (allocation != NULL) {
-    assert(reuse_live_allocations > 0);
-    reuse_live_allocations -= 1;
-  }
-  free(allocation);
-}
-
-static void *reuse_realloc(void *allocation, size_t size) {
-  reuse_realloc_calls += 1;
-  if (reuse_fail_next_realloc) {
-    reuse_fail_next_realloc = false;
-    return NULL;
-  }
-  const bool allocated = allocation != NULL;
-  void *result = realloc(allocation, size);
-  if (result != NULL && !allocated) {
-    reuse_live_allocations += 1;
-  }
-  return result;
-}
-
-void *(*ts_current_calloc)(size_t, size_t) = reuse_calloc;
-void *(*ts_current_realloc)(void *, size_t) = reuse_realloc;
-void (*ts_current_free)(void *) = reuse_free;
-#endif
+#include "../src/tree_sitter/parser.h"
 
 typedef struct {
   TSLexer lexer;
@@ -139,6 +80,67 @@ static void resume_mock_lexer(MockLexer *mock) {
   mock->lexer.lookahead =
     mock->offset < mock->length ? (unsigned char)mock->source[mock->offset] : 0;
 }
+
+#include "../src/scanner.c"
+
+enum {
+  SERIALIZATION_GUARD_BYTE = 0x5a,
+  SERIALIZED_HEADER_BYTES = 63,
+  SERIALIZED_OUTLINE_BYTES = 28,
+  SERIALIZED_CACHE_COUNT_OFFSET = 45,
+  BOUNDARY_DIGIT_BITS = 2,
+  BOUNDARY_RADIX = 1U << BOUNDARY_DIGIT_BITS,
+  BOUNDARY_DIGIT_COUNT = sizeof(uint64_t) * CHAR_BIT / BOUNDARY_DIGIT_BITS,
+};
+
+#ifdef TREE_SITTER_REUSE_ALLOCATOR
+static size_t reuse_calloc_calls;
+static size_t reuse_realloc_calls;
+static size_t reuse_free_calls;
+static size_t reuse_live_allocations;
+static bool reuse_fail_next_calloc;
+static bool reuse_fail_next_realloc;
+
+static void *reuse_calloc(size_t count, size_t size) {
+  reuse_calloc_calls += 1;
+  if (reuse_fail_next_calloc) {
+    reuse_fail_next_calloc = false;
+    return NULL;
+  }
+  void *result = calloc(count, size);
+  if (result != NULL) {
+    reuse_live_allocations += 1;
+  }
+  return result;
+}
+
+static void reuse_free(void *allocation) {
+  reuse_free_calls += 1;
+  if (allocation != NULL) {
+    assert(reuse_live_allocations > 0);
+    reuse_live_allocations -= 1;
+  }
+  free(allocation);
+}
+
+static void *reuse_realloc(void *allocation, size_t size) {
+  reuse_realloc_calls += 1;
+  if (reuse_fail_next_realloc) {
+    reuse_fail_next_realloc = false;
+    return NULL;
+  }
+  const bool allocated = allocation != NULL;
+  void *result = realloc(allocation, size);
+  if (result != NULL && !allocated) {
+    reuse_live_allocations += 1;
+  }
+  return result;
+}
+
+void *(*ts_current_calloc)(size_t, size_t) = reuse_calloc;
+void *(*ts_current_realloc)(void *, size_t) = reuse_realloc;
+void (*ts_current_free)(void *) = reuse_free;
+#endif
 
 static unsigned serialize_state(ScannerState *state, char *buffer) {
   char guarded[TREE_SITTER_SERIALIZATION_BUFFER_SIZE + 2];

@@ -1,6 +1,6 @@
 [project]
 name = "konomanoasa-tree-sitter-posix-awk"
-version = "0.23.0"
+version = "0.23.1"
 description = "Tree-sitter grammar for POSIX awk."
 readme = "README.md"
 license = "MIT"

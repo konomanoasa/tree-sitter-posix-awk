@@ -66049,8 +66049,8 @@ TS_PUBLIC const TSLanguage *tree_sitter_posix_awk(void) {
     .max_reserved_word_set_size = 19,
     .metadata = {
       .major_version = 0,
-      .minor_version = 23,
-      .patch_version = 1,
+      .minor_version = 24,
+      .patch_version = 0,
     },
   };
   return &language;

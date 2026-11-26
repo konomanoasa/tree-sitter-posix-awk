@@ -6,7 +6,5 @@ unsafe extern "C" {
 
 pub const LANGUAGE: LanguageFn =
   unsafe { LanguageFn::from_raw(tree_sitter_posix_awk) };
-
 pub const NODE_TYPES: &str = include_str!("../../src/node-types.json");
-
 pub const HIGHLIGHTS_QUERY: &str = include_str!("../../queries/highlights.scm");
